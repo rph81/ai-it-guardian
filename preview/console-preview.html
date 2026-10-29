@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guardian Console</title>
+<style>
+:root{
+  --accent:#3b82f6;
+  --bg:#eef1f5; --card:#ffffff; --card2:#f6f8fb; --line:#dde3ea; --text:#0f172a; --muted:#64748b;
+  --ok:#16a34a; --busy:#d97706; --bad:#dc2626;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0b0f15; --card:#121821; --card2:#18202b; --line:#253041; --text:#e6ebf2; --muted:#8b98ab;
+  --ok:#4ade80; --busy:#fbbf24; --bad:#f87171;}}
+:root[data-theme="dark"]{
+  --bg:#0b0f15; --card:#121821; --card2:#18202b; --line:#253041; --text:#e6ebf2; --muted:#8b98ab;
+  --ok:#4ade80; --busy:#fbbf24; --bad:#f87171;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif}
+.wrap{max-width:1280px;margin:0 auto;padding:20px 16px 40px}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;font-weight:650;font-size:15px}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px color-mix(in srgb,var(--ok) 22%,transparent)}
+.dot.busy{background:var(--busy);box-shadow:0 0 0 4px color-mix(in srgb,var(--busy) 22%,transparent)}
+.meta{color:var(--muted);font-size:13px}
+.btn{border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:999px;padding:7px 14px;font:inherit;font-size:13px;cursor:pointer}
+.btn:hover{background:var(--card2)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.danger{color:var(--bad)}
+.btn.sm{padding:3px 10px;font-size:12px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.grid{display:grid;grid-template-columns:340px 1fr;gap:16px}
+@media (max-width:900px){.grid{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px}
+.stack>*+*{margin-top:16px}
+h2{font-size:13px;margin:0 0 12px;font-weight:650;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.run{background:var(--card2);border:1px solid transparent;border-radius:14px;padding:12px;cursor:pointer}
+.run+.run{margin-top:8px}
+.run.on{border-color:var(--accent)}
+.run .top{display:flex;justify-content:space-between;align-items:baseline}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.score{font-weight:700;font-size:18px}
+.score small{font-size:12px;color:var(--muted);font-weight:500}
+.sevs{display:flex;gap:10px;font-size:12px;color:var(--muted);margin-top:4px}
+.sevs b{font-weight:650}
+.c-high{color:#ea580c}.c-medium{color:#d97706}.c-low{color:#0891b2}
+label{display:block;font-size:12px;color:var(--muted);margin:0 0 4px}
+select,input{width:100%;border:1px solid var(--line);background:var(--card2);color:var(--text);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px}
+.f2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ok{color:var(--ok);font-size:12px}
+.note{font-size:12px;color:var(--muted);margin:8px 0 0}
+.tabs{display:flex;gap:6px;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:12px;flex-wrap:wrap}
+.tab{border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:999px;padding:6px 12px;font-size:12.5px;cursor:pointer}
+.tab.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.frame{height:640px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--card2);display:flex;align-items:center;justify-content:center;color:var(--muted)}
+.console{height:640px;overflow:auto;background:#0b0f15;color:#cbd5e1;border-radius:12px;padding:14px;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap}
+.console .t{color:#64748b}.console .a{color:#93c5fd}.console .h{color:#fb923c}.console .m{color:#fbbf24}
+.job{display:flex;align-items:center;gap:10px;background:color-mix(in srgb,var(--busy) 12%,var(--card));border:1px solid color-mix(in srgb,var(--busy) 40%,var(--line));border-radius:12px;padding:10px 12px;margin-bottom:12px;font-size:13px}
+.job .grow{flex:1}
+.prog{height:6px;border-radius:6px;background:var(--line);overflow:hidden;margin-top:6px}
+.prog i{display:block;height:100%;width:42%;background:var(--busy)}
+.hidden{display:none}
+.banner{background:var(--accent);color:#fff;font-size:12.5px;text-align:center;padding:6px}
+</style>
+</head>
+<body>
+<div class="banner">Design preview with sample data. Buttons switch views but don't run anything.</div>
+<div class="wrap">
+  <header>
+    <div class="brand"><span class="dot busy" id="dot"></span>AI IT Guardian <span class="meta">· console · 192.168.1.0/24</span></div>
+    <div class="row">
+      <button class="btn" disabled>Scan only <span class="meta">~7 min · free</span></button>
+      <button class="btn primary" disabled>Scan + AI assessment <span style="opacity:.75">~30 min</span></button>
+      <button class="btn sm" id="theme">Theme</button>
+      <button class="btn sm">Sign out</button>
+    </div>
+  </header>
+
+  <div class="grid">
+    <div class="stack">
+      <div class="card">
+        <h2>Runs</h2>
+        <div class="run on">
+          <div class="top"><span class="mono">2026-10-29 09:12</span><span class="meta">running</span></div>
+          <div class="sevs">Scan + AI · started 09:12</div>
+        </div>
+        <div class="run">
+          <div class="top"><span class="mono">2026-10-26 23:41</span><span class="score">66 <small>C</small></span></div>
+          <div class="sevs"><span>32 devices</span><span><b class="c-high">2</b> high</span><span><b class="c-medium">6</b> med</span><span><b class="c-low">8</b> low</span></div>
+          <div class="row" style="margin-top:8px"><button class="btn sm">Report</button><button class="btn sm">Re-run AI</button><button class="btn sm">Rebuild report</button></div>
+        </div>
+        <div class="run">
+          <div class="top"><span class="mono">2026-10-26 21:05</span><span class="meta">scan only</span></div>
+          <div class="sevs"><span>32 devices</span><span>no AI analysis yet</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Settings</h2>
+        <div class="f2">
+          <div><label>Model</label><select><option>Opus 5.5 (default)</option><option>Fable 5.1 (stronger, ~2.5× cost)</option></select></div>
+          <div><label>Effort</label><select><option>low</option><option selected>medium</option><option>high</option></select></div>
+        </div>
+        <div style="margin-top:10px"><label>Anthropic API key <span class="ok">✓ set</span></label><input type="password" placeholder="Paste to replace, blank keeps the current key"></div>
+        <div style="margin-top:10px"><label>NVD API key <span class="meta">(optional)</span></label><input type="password" placeholder="Paste to set"></div>
+        <div class="row" style="margin-top:12px"><button class="btn primary sm">Save</button></div>
+        <p class="note">Keys are write-only: the console never shows or returns them.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="job">
+        <span class="dot busy"></span>
+        <div class="grow"><b>Scan + AI assessment running</b> · step 3 of 4, AI agents · 14 min elapsed
+          <div class="prog"><i></i></div></div>
+        <button class="btn sm danger">Stop</button>
+      </div>
+      <div class="tabs">
+        <div class="row"><button class="tab" data-t="report">Report</button><button class="tab on" data-t="console">Live log</button></div>
+        <span class="meta mono">run 2026-10-29 09:12</span>
+      </div>
+      <div class="frame hidden" id="p-report">The selected run's report opens here (the same page you already know).</div>
+      <div class="console" id="p-console"><span class="t">09:12:03</span> collector  sweeping 192.168.1.0/24 (arp-scan)
+<span class="t">09:12:11</span> collector  32 hosts up
+<span class="t">09:14:40</span> collector  TCP top-1000 + admin ports done
+<span class="t">09:18:52</span> collector  UDP, SSDP, mDNS, banners done
+<span class="t">09:19:07</span> collector  WAN: InternetDB + UPnP mappings
+<span class="t">09:19:10</span> <span class="a">discovery</span>  identifying 32 assets
+<span class="t">09:22:31</span> <span class="a">discovery</span>  27 identified, 5 unknown
+<span class="t">09:22:33</span> <span class="a">orchestrator</span>  routing assets to 5 specialists
+<span class="t">09:24:02</span> <span class="a">wan</span>  <span class="h">F001 [high]</span> 192.168.1.254: UPnP is on (8 automatic forwards)
+<span class="t">09:25:17</span> <span class="a">firmware</span>  <span class="h">F002 [high]</span> 192.168.1.73: range extender firmware from 2015
+<span class="t">09:25:58</span> <span class="a">network</span>  <span class="m">F003 [medium]</span> site: everything shares one flat network
+<span class="t">09:26:40</span> <span class="a">web</span>  checking TLS on 9 admin pages…</div>
+    </div>
+  </div>
+</div>
+<script>
+document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===b));
+  document.getElementById('p-report').classList.toggle('hidden',b.dataset.t!=='report');
+  document.getElementById('p-console').classList.toggle('hidden',b.dataset.t!=='console');
+});
+document.getElementById('theme').onclick=()=>{
+  const r=document.documentElement, d=r.dataset.theme==='dark'||(!r.dataset.theme&&matchMedia('(prefers-color-scheme: dark)').matches);
+  r.dataset.theme=d?'light':'dark';
+};
+</script>
+</body>
+</html>

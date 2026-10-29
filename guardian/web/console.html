@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guardian Console</title>
+<link rel="stylesheet" href="/console.css">
+<script src="/console.js" defer></script>
+</head>
+<body>
+<div id="signin" class="signin hidden">
+  <form class="card" id="signin-form">
+    <div class="brand"><span class="dot"></span>AI IT Guardian</div>
+    <label for="code">Access code</label>
+    <input id="code" type="password" autocomplete="current-password" required>
+    <p class="note">Find it in the container: <span class="mono">cat /opt/ai-guardian/console/access-code</span></p>
+    <p class="err" id="signin-err"></p>
+    <button class="btn primary" type="submit">Sign in</button>
+  </form>
+</div>
+
+<div class="wrap hidden" id="app">
+  <header>
+    <div class="brand"><span class="dot" id="dot"></span>AI IT Guardian <span class="meta">· console</span></div>
+    <div class="row">
+      <button class="btn" id="go-collect">Scan only <span class="meta">~7 min · free</span></button>
+      <button class="btn primary" id="go-full">Scan + AI assessment <span class="dim">~30 min</span></button>
+      <button class="btn sm" id="theme">Theme</button>
+      <button class="btn sm hidden" id="signout">Sign out</button>
+    </div>
+  </header>
+
+  <div class="grid">
+    <div class="stack">
+      <div class="card">
+        <div class="cardhead"><h2>Runs</h2><button class="btn sm" id="refresh">Refresh</button></div>
+        <div id="runs"></div>
+      </div>
+
+      <form class="card" id="settings">
+        <h2>Settings</h2>
+        <div class="f2">
+          <div><label for="model">Model</label><select id="model"></select></div>
+          <div><label for="effort">Effort</label><select id="effort"></select></div>
+        </div>
+        <div class="field"><label for="akey">Anthropic API key <span id="akey-state"></span></label>
+          <input id="akey" type="password" autocomplete="off" placeholder="Paste to set or replace"></div>
+        <div class="field"><label for="nkey">NVD API key <span id="nkey-state"></span></label>
+          <input id="nkey" type="password" autocomplete="off" placeholder="Optional; speeds up CVE lookups"></div>
+        <div class="row field"><button class="btn primary sm" type="submit">Save</button><span class="note" id="settings-msg"></span></div>
+        <p class="note">Keys are write-only: the console never shows or returns them.</p>
+      </form>
+    </div>
+
+    <div class="card main">
+      <div class="job hidden" id="job">
+        <span class="dot" id="job-dot"></span>
+        <div class="grow"><b id="job-title"></b> <span id="job-detail" class="meta"></span>
+          <div class="prog"><i id="job-bar"></i></div></div>
+        <button class="btn sm danger hidden" id="stop">Stop</button>
+      </div>
+      <div class="tabs">
+        <div class="row"><button class="tab on" data-t="report">Report</button><button class="tab" data-t="log">Live log</button></div>
+        <span class="row"><span class="meta mono" id="current"></span><a class="btn sm hidden" id="newtab" target="_blank" rel="noopener">Open in new tab</a></span>
+      </div>
+      <div class="panel" id="p-report"><iframe id="frame" sandbox="allow-scripts" title="Report"></iframe>
+        <div class="empty" id="frame-empty">Choose a run with a report on the left.</div></div>
+      <div class="panel console hidden" id="p-log"></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

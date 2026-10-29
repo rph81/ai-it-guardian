@@ -18,7 +18,8 @@ web requests without credentials, and public vulnerability lookups (NVD, CISA KE
 ## One-time setup: API key (for the AI step)
 
 1. Create a key at **console.anthropic.com → Settings → API Keys** (needs billing set up).
-2. In the Proxmox web UI, open **lab → Shell** and run (the key is not shown while you type):
+2. Paste it in the web console under **Settings**, or in the Proxmox web UI open **lab → Shell** and run
+   (the key is not shown while you type):
 
    ```bash
    read -rsp "API key: " K && pct exec 303 -- sed -i "s|^ANTHROPIC_API_KEY=.*|ANTHROPIC_API_KEY=$K|" /opt/ai-guardian/.env && unset K && echo " saved"
@@ -29,7 +30,23 @@ Optional settings in `/opt/ai-guardian/.env`:
 - `GUARDIAN_EFFORT` — `low`, `medium` (default), `high`
 - `NVD_API_KEY` — free key from nvd.nist.gov; makes vulnerability lookups much faster
 
-## Running it
+## Web console
+
+Open **https://192.168.1.92:8443** in a browser. The certificate is self-signed, so the browser warns once:
+choose *Advanced → Proceed*.
+
+From the console you can:
+- start a **Scan only** or **Scan + AI assessment** run, follow its live log, and **Stop** it
+- open any run's report, re-run the AI on an existing scan, or rebuild a report
+- set the model, effort and API keys (keys are write-only: the console never shows them)
+
+It runs as the service `ai-guardian-console` and starts with the container.
+`systemctl status ai-guardian-console` shows its state; `journalctl -u ai-guardian-console` its errors.
+
+Sign-in is off: anyone on the LAN can use the console. To require a code, add `GUARDIAN_CONSOLE_AUTH=on`
+to `/opt/ai-guardian/.env`; the code is in `/opt/ai-guardian/console/access-code`.
+
+## Running it from the command line
 
 From **lab → Shell** in the Proxmox web UI:
 

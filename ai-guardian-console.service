@@ -1,0 +1,14 @@
+[Unit]
+Description=AI IT Guardian web console
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/ai-guardian
+ExecStart=/opt/ai-guardian/venv/bin/python /opt/ai-guardian/console.py
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
