@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
 """AI IT Guardian - web console.
 
-Starts and stops runs of run.py, follows their log live, and shows the reports.
-Serves HTTPS on port 8443 (GUARDIAN_CONSOLE_PORT). Sign-in is off unless .env has
-GUARDIAN_CONSOLE_AUTH=on; it then uses the access code in console/access-code, created on
-first start. Read it with:  cat /opt/ai-guardian/console/access-code
+Starts and stops runs of run.py, follows their log live, shows the reports, and manages connectors,
+users and the encrypted vault. Serves HTTPS on port 8443 (GUARDIAN_CONSOLE_PORT) at the hostname set
+in GUARDIAN_HOSTNAME (passkeys need a real hostname with a trusted certificate).
+
+People sign in with Google or Microsoft (or a passkey alone) and confirm with a passkey. Admins and
+operators unlock the vault with their passkey; viewers only read reports. On first start, the setup
+code in console/setup-code creates the first admin:  cat /opt/ai-guardian/console/setup-code
 """
 import asyncio
 import collections
+import csv
+import ctypes
 import hmac
+import io
 import json
 import os
 import re
@@ -22,25 +28,28 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 
+from guardian import auth
 from guardian import connectors as conn
+from guardian.vault import ROLES, VAULT_ROLES, Vault, VaultLocked
 
 BASE = Path(__file__).resolve().parent
 RUNS = BASE / "runs"
 ENV = BASE / ".env"
 WEB = BASE / "guardian" / "web"
 STATE = BASE / "console"
-CODE_FILE = STATE / "access-code"
+SETUP_FILE = STATE / "setup-code"
 CERT, KEY = STATE / "cert.pem", STATE / "key.pem"
 PYTHON = str(BASE / "venv" / "bin" / "python") if (BASE / "venv" / "bin" / "python").exists() else sys.executable
 
 RUN_ID = re.compile(r"^\d{8}-\d{6}$")
 API_KEY = re.compile(r"^[A-Za-z0-9_\-]{20,200}$")
+EMAIL = re.compile(r"^[^@\s<>]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,}$")
 MODELS = {"claude-opus-5-5": "Opus 5.5 (default)", "claude-fable-5-1": "Fable 5.1 (stronger, ~2.5x cost)"}
 EFFORTS = ("low", "medium", "high")
-SESSION_HOURS = 12
+SESSION_HOURS, IDENTIFIED_MINUTES = 8, 10
 MAX_FAILS, FAIL_WINDOW = 5, 900
 
 MODES = {
@@ -54,48 +63,61 @@ MODES = {
 STEP_OF_AGENT = {"collector": "Scanning the network", "discovery": "Identifying devices", "report": "Writing the report"}
 
 
-# -- first-start setup: access code and TLS certificate ------------------------
+def harden_process():
+    """No core dumps and no ptrace from other non-root processes: vault keys stay out of dumps."""
+    try:
+        import resource
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+        ctypes.CDLL(None).prctl(4, 0, 0, 0, 0)        # PR_SET_DUMPABLE = 4
+    except (OSError, ValueError, AttributeError):
+        pass
+
+
+# -- state on disk ----------------------------------------------------------------------------
 def ensure_state():
     STATE.mkdir(mode=0o700, exist_ok=True)
-    if not CODE_FILE.exists():
-        CODE_FILE.write_text(secrets.token_urlsafe(18) + "\n")
-        CODE_FILE.chmod(0o600)
     if not (CERT.exists() and KEY.exists()):
-        subprocess.run(
-            ["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
-             "-nodes", "-days", "825", "-subj", "/CN=ai-guardian console",
-             "-keyout", str(KEY), "-out", str(CERT)],
-            check=True, capture_output=True)
+        subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
+                        "-nodes", "-days", "825", "-subj", "/CN=ai-guardian console",
+                        "-keyout", str(KEY), "-out", str(CERT)], check=True, capture_output=True)
         KEY.chmod(0o600)
 
 
-def access_code():
-    if not CODE_FILE.exists():
-        ensure_state()
-    return CODE_FILE.read_text().strip()
+STATE.mkdir(mode=0o700, exist_ok=True)
+vault = Vault(STATE / "guardian.db")
+store = conn.Store(vault, STATE)
 
 
-# -- sessions and sign-in throttling -------------------------------------------
-sessions = {}                                 # session id -> expiry time
-fails = collections.defaultdict(list)          # client ip -> failure times
+def setup_done():
+    return bool(vault.credentials())
 
 
-def auth_on():
-    return read_env().get("GUARDIAN_CONSOLE_AUTH", "off").lower() in ("on", "1", "true", "yes")
+def setup_code():
+    """One-time code that creates the first admin. Exists until someone has registered a passkey."""
+    if setup_done():
+        if SETUP_FILE.exists():
+            SETUP_FILE.unlink()
+        return None
+    if not SETUP_FILE.exists():
+        SETUP_FILE.write_text(f"{secrets.token_hex(3)}-{secrets.token_hex(3)}-{secrets.token_hex(3)}\n")
+        SETUP_FILE.chmod(0o600)
+    return SETUP_FILE.read_text().strip()
 
 
-def valid_session(request):
-    if not auth_on():
-        return True
-    sid = request.cookies.get("gsid")
-    exp = sessions.get(sid) if sid else None
-    if exp and exp > time.time():
-        return True
-    sessions.pop(sid, None)
-    return False
+def site():
+    host = os.environ.get("GUARDIAN_HOSTNAME") or vault.get("hostname") or "guardian.hadife.com"
+    port = int(os.environ.get("GUARDIAN_CONSOLE_PORT", "8443"))
+    base = os.environ.get("GUARDIAN_PUBLIC_URL") or f"https://{host}" + ("" if port == 443 else f":{port}")
+    return host, base, [base, f"https://{host}"]
 
 
-# -- .env handling ---------------------------------------------------------------
+def providers():
+    """Configured sign-in providers. Client secrets are needed before anyone signs in, so they can't live in the vault."""
+    cfg = vault.get("oidc", {})
+    return {k: v for k, v in cfg.items() if k in auth.PROVIDERS and v.get("client_id") and v.get("client_secret")}
+
+
+# -- .env (non-secret settings only) ------------------------------------------------------------
 def read_env():
     out = {}
     if ENV.exists():
@@ -122,19 +144,149 @@ def write_env(updates):
     os.replace(tmp, ENV)
 
 
+def api_keys():
+    """API keys are vault records; an empty dict while the vault is locked."""
+    if not vault.unlocked:
+        return {}
+    return next((r for r in vault.load_records("settings") if r.get("kind") == "api-keys"), {})
+
+
 def public_config():
+    env, keys = read_env(), vault.get("api_keys_set", {})
+    return {"model": env.get("GUARDIAN_MODEL") or "claude-opus-5-5", "effort": env.get("GUARDIAN_EFFORT") or "medium",
+            "anthropic_key_set": bool(keys.get("anthropic")), "nvd_key_set": bool(keys.get("nvd")),
+            "models": MODELS, "efforts": EFFORTS}
+
+
+def migrate_legacy():
+    """Move secrets that older versions kept on disk into the vault (needs the vault unlocked)."""
+    moved = []
     env = read_env()
-    return {
-        "model": env.get("GUARDIAN_MODEL") or "claude-opus-5-5",
-        "effort": env.get("GUARDIAN_EFFORT") or "medium",
-        "anthropic_key_set": bool(env.get("ANTHROPIC_API_KEY")),
-        "nvd_key_set": bool(env.get("NVD_API_KEY")),
-        "models": MODELS,
-        "efforts": EFFORTS,
-    }
+    if env.get("ANTHROPIC_API_KEY") or env.get("NVD_API_KEY"):
+        rec = api_keys() or {"kind": "api-keys"}
+        rec.update({k: v for k, v in (("anthropic", env.get("ANTHROPIC_API_KEY")), ("nvd", env.get("NVD_API_KEY"))) if v})
+        vault.save_record("api-keys", "settings", rec)
+        vault.put("api_keys_set", {"anthropic": bool(rec.get("anthropic")), "nvd": bool(rec.get("nvd"))})
+        write_env({"ANTHROPIC_API_KEY": "", "NVD_API_KEY": ""})
+        moved.append("API keys")
+    old_json, old_key = STATE / "connectors.json", STATE / "secret.key"
+    if old_json.exists():
+        data = json.loads(old_json.read_text())
+        f = None
+        if old_key.exists():
+            from cryptography.fernet import Fernet
+            f = Fernet(old_key.read_bytes())
+        for c in data.get("connectors", []):
+            c["secrets"] = {k: f.decrypt(v.encode()).decode() for k, v in c.get("secrets", {}).items()} if f else {}
+            store.save_connector(c)
+        vault.put("dismissed", data.get("dismissed", []))
+        vault.put("inventory", data.get("inventory", {}))
+        vault.put("inventory_runs", data.get("inventory_runs", []))
+        moved.append(f"{len(data.get('connectors', []))} connectors")
+        for p in (old_json, old_key):
+            if p.exists():
+                p.write_bytes(os.urandom(p.stat().st_size))
+                p.unlink()
+    old_ssh = STATE / "ssh" / "id_ed25519"
+    if old_ssh.exists():
+        vault.save_record("ssh-key", "secret", {"private": old_ssh.read_text()})
+        vault.put("ssh_public_key", (STATE / "ssh" / "id_ed25519.pub").read_text().strip())
+        old_ssh.write_bytes(os.urandom(old_ssh.stat().st_size))
+        old_ssh.unlink()
+        (STATE / "ssh" / "id_ed25519.pub").unlink(missing_ok=True)
+        moved.append("SSH key")
+    for p in (STATE / "access-code",):
+        p.unlink(missing_ok=True)
+    if moved:
+        vault.audit("system", "migrated", "Moved into the vault: " + ", ".join(moved))
 
 
-# -- the one job that can run at a time ------------------------------------------
+# -- sessions -----------------------------------------------------------------------------------
+sessions = {}                                   # sid -> {"uid", "stage": identified|active, ...}
+oidc_pending = {}                               # state -> pending sign-in
+fails = collections.defaultdict(list)
+
+
+def new_session(uid, stage, **extra):
+    sid = secrets.token_urlsafe(32)
+    sessions[sid] = {"uid": uid, "stage": stage, "created": time.time(), "last": time.time(), **extra}
+    return sid
+
+
+def end_session(sid):
+    s = sessions.pop(sid, None)
+    if s:
+        vault.release(sid)
+        _forget_private(s)
+
+
+def _forget_private(s):
+    priv = s.pop("priv", None)
+    if priv:
+        for i in range(len(priv[0])):
+            priv[0][i] = 0
+
+
+def current(request, stage="active"):
+    sid = request.cookies.get("gsid")
+    s = sessions.get(sid) if sid else None
+    if not s:
+        return None, None
+    limit = SESSION_HOURS * 3600 if s["stage"] == "active" else IDENTIFIED_MINUTES * 60
+    if time.time() - s["created"] > limit:
+        end_session(sid)
+        return None, None
+    if stage == "active" and s["stage"] != "active":
+        return None, None
+    s["last"] = time.time()
+    vault.touch(sid)
+    return sid, s
+
+
+def require(request, role="viewer", unlocked=False):
+    sid, s = current(request)
+    if not s:
+        raise HTTPException(401, "Sign in first")
+    user = vault.user(s["uid"])
+    if not user or user["status"] != "active":
+        end_session(sid)
+        raise HTTPException(401, "Sign in first")
+    if ROLES.index(user["role"]) < ROLES.index(role):
+        raise HTTPException(403, "Your role doesn't allow this")
+    if unlocked and not (vault.unlocked and sid in vault.holders):
+        raise HTTPException(423, "Unlock the vault with your passkey first")
+    return sid, s, user
+
+
+def set_cookie(resp, sid):
+    resp.set_cookie("gsid", sid, max_age=SESSION_HOURS * 3600, httponly=True, secure=True, samesite="strict")
+    return resp
+
+
+def throttle(request):
+    ip = request.client.host if request.client else "?"
+    now = time.time()
+    fails[ip] = [t for t in fails[ip] if now - t < FAIL_WINDOW]
+    if len(fails[ip]) >= MAX_FAILS:
+        raise HTTPException(429, "Too many attempts. Try again in 15 minutes.")
+    return ip
+
+
+def failed(ip):
+    fails[ip].append(time.time())
+
+
+async def autolock_loop():
+    while True:
+        await asyncio.sleep(30)
+        cfg = vault.get("autolock", {"idle": 30, "max": 8})
+        for sid in [k for k in vault.holders if k not in sessions]:
+            vault.release(sid)
+        if vault.expire(cfg["idle"] * 60, cfg["max"] * 3600):
+            vault.audit("system", "vault-locked", "Locked automatically (idle or time limit)")
+
+
+# -- the one job that can run at a time --------------------------------------------------------
 class Job:
     def __init__(self):
         self.proc = None
@@ -145,6 +297,7 @@ class Job:
         self.exit_code = None
         self.stopped = False
         self.step = None
+        self.by = None
         self.lines = collections.deque(maxlen=3000)
         self.seq = 0                           # number of lines ever written, for incremental reads
 
@@ -165,30 +318,22 @@ class Job:
 
     def status(self, since=0):
         steps = MODES[self.mode]["steps"] if self.mode else []
-        return {
-            "running": self.running,
-            "mode": self.mode,
-            "label": MODES[self.mode]["label"] if self.mode else None,
-            "run_id": self.run_id,
-            "started": self.started,
-            "ended": self.ended,
-            "exit_code": self.exit_code,
-            "stopped": self.stopped,
-            "steps": steps,
-            "step": steps.index(self.step) + 1 if self.step in steps else (1 if steps else 0),
-            "seq": self.seq,
-            "lines": [{"n": n, "t": t, "text": s} for n, t, s in self.lines if n > since],
-        }
+        return {"running": self.running, "mode": self.mode, "label": MODES[self.mode]["label"] if self.mode else None,
+                "run_id": self.run_id, "started": self.started, "ended": self.ended, "exit_code": self.exit_code,
+                "stopped": self.stopped, "by": self.by, "steps": steps,
+                "step": steps.index(self.step) + 1 if self.step in steps else (1 if steps else 0),
+                "seq": self.seq, "lines": [{"n": n, "t": t, "text": s} for n, t, s in self.lines if n > since]}
 
 
 job = Job()
 
 
-async def run_job(cmd):
+async def run_job(cmd, extra_env):
     try:
         job.proc = await asyncio.create_subprocess_exec(
             *cmd, cwd=str(BASE), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-            env={**os.environ, "PYTHONUNBUFFERED": "1"}, start_new_session=True)
+            env={**os.environ, "PYTHONUNBUFFERED": "1", **extra_env}, start_new_session=True)
+        extra_env.clear()
         async for raw in job.proc.stdout:
             job.add(raw.decode("utf-8", "replace").rstrip("\n"))
         job.exit_code = await job.proc.wait()
@@ -199,7 +344,7 @@ async def run_job(cmd):
     job.add("[console] stopped by user" if job.stopped else f"[console] finished, exit code {job.exit_code}")
 
 
-# -- run listing -------------------------------------------------------------------
+# -- run listing --------------------------------------------------------------------------------
 def run_summary(d):
     info = {"id": d.name, "has_graph": (d / "graph.json").exists(), "has_report": (d / "report.html").exists(),
             "devices": None, "score": None, "grade": None, "counts": {}, "analysed": False}
@@ -227,21 +372,40 @@ def run_dir(run_id):
     return d
 
 
-# -- app ---------------------------------------------------------------------------------
+def latest_scan():
+    if not RUNS.exists():
+        return None, None
+    done = sorted(d for d in RUNS.iterdir() if RUN_ID.match(d.name) and (d / "graph.json").exists())
+    if not done:
+        return None, None
+    try:
+        return done[-1].name, json.loads((done[-1] / "graph.json").read_text())
+    except (OSError, ValueError):
+        return None, None
+
+
+# -- app ------------------------------------------------------------------------------------------
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
 PAGE_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
             "frame-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 REPORT_CSP = ("sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; "
               "style-src 'unsafe-inline'; img-src data:")
-OPEN_PATHS = {"/", "/console.css", "/console.js", "/settings", "/settings.js", "/api/login", "/api/session"}
+STATIC = {"/console.css": ("console.css", "text/css"), "/console.js": ("console.js", "text/javascript"),
+          "/settings.js": ("settings.js", "text/javascript"), "/signin.js": ("signin.js", "text/javascript"),
+          "/passkey.js": ("passkey.js", "text/javascript")}
+PAGES = {"/": "console.html", "/settings": "settings.html", "/signin": "signin.html"}
+
+
+@app.on_event("startup")
+async def _startup():
+    harden_process()
+    setup_code()
+    asyncio.create_task(autolock_loop())
 
 
 @app.middleware("http")
 async def guard(request: Request, call_next):
-    path = request.url.path
-    if path not in OPEN_PATHS and not valid_session(request):
-        return JSONResponse({"detail": "Sign in first"}, status_code=401)
     if request.method == "POST":
         # Cross-site requests can't set this header without a CORS preflight, which is never allowed.
         if request.headers.get("x-guardian") != "1":
@@ -254,6 +418,7 @@ async def guard(request: Request, call_next):
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["Referrer-Policy"] = "no-referrer"
     resp.headers["Strict-Transport-Security"] = "max-age=31536000"
+    resp.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     if resp.headers.get("X-Frame-Options") == "":
         del resp.headers["X-Frame-Options"]
     else:
@@ -262,79 +427,411 @@ async def guard(request: Request, call_next):
     return resp
 
 
+def _page(name):
+    return FileResponse(WEB / name, media_type="text/html")
+
+
 @app.get("/")
-def page():
-    return FileResponse(WEB / "console.html", media_type="text/html")
+def page_console(request: Request):
+    if not current(request)[1]:
+        return Response(status_code=303, headers={"Location": "/signin"})
+    return _page("console.html")
 
 
-@app.get("/console.css")
-def css():
-    return FileResponse(WEB / "console.css", media_type="text/css")
+@app.get("/settings")
+def page_settings(request: Request):
+    if not current(request)[1]:
+        return Response(status_code=303, headers={"Location": "/signin"})
+    return _page("settings.html")
 
 
-@app.get("/console.js")
-def js():
-    return FileResponse(WEB / "console.js", media_type="text/javascript")
+@app.get("/signin")
+def page_signin():
+    return _page("signin.html")
 
 
-class Login(BaseModel):
+def _static(file, media_type):
+    def serve():
+        return FileResponse(WEB / file, media_type=media_type)
+    return serve
+
+
+for _path, (_file, _type) in STATIC.items():
+    app.add_api_route(_path, _static(_file, _type), methods=["GET"])
+
+
+# -- sign-in: state ----------------------------------------------------------------------------
+@app.get("/api/auth/state")
+def auth_state(request: Request):
+    sid, s = current(request, stage="any")
+    user = vault.user(s["uid"]) if s else None
+    host, base, _ = site()
+    return {
+        "setup": not setup_done(),
+        "providers": {k: auth.PROVIDERS[k]["label"] for k in providers()},
+        "stage": s["stage"] if s else None,
+        "user": {"name": user["name"], "email": user["email"], "role": user["role"]} if user else None,
+        "passkeys": len(vault.credentials(user["id"])) if user else 0,
+        "can_unlock": bool(user and user["role"] in VAULT_ROLES and vault.has_slot(user["id"])),
+        "vault_ready": vault.initialized,
+        "unlocked": bool(sid and sid in vault.holders),
+        "invite": bool(request.cookies.get("ginv")),
+        "hostname": host,
+        "wrong_host": request.headers.get("host", "").split(":")[0] != host,
+        "base": base,
+    }
+
+
+class SetupBody(BaseModel):
     code: str
+    name: str
+    email: str
 
 
-@app.post("/api/login")
-def login(body: Login, request: Request):
-    ip = request.client.host if request.client else "?"
-    now = time.time()
-    fails[ip] = [t for t in fails[ip] if now - t < FAIL_WINDOW]
-    if len(fails[ip]) >= MAX_FAILS:
-        raise HTTPException(429, "Too many attempts. Try again in 15 minutes.")
-    if not hmac.compare_digest(body.code.strip().encode(), access_code().encode()):
-        fails[ip].append(now)
+@app.post("/api/setup/start")
+def setup_start(body: SetupBody, request: Request):
+    ip = throttle(request)
+    code = setup_code()
+    if not code:
+        raise HTTPException(409, "Guardian is already set up")
+    if not hmac.compare_digest(body.code.strip().lower().encode(), code.encode()):
+        failed(ip)
         time.sleep(1)
-        raise HTTPException(401, "Wrong access code")
-    fails.pop(ip, None)
-    sid = secrets.token_urlsafe(32)
-    sessions[sid] = now + SESSION_HOURS * 3600
-    resp = JSONResponse({"ok": True})
-    resp.set_cookie("gsid", sid, max_age=SESSION_HOURS * 3600, httponly=True, secure=True, samesite="strict")
+        raise HTTPException(401, "Wrong setup code")
+    if not EMAIL.match(body.email.strip()) or not body.name.strip() or len(body.name) > 80:
+        raise HTTPException(400, "Enter your name and e-mail address")
+    for u in vault.users():                                 # an abandoned earlier attempt
+        vault.delete_user(u["id"])
+    uid = vault.create_user(body.email.strip(), body.name.strip(), "admin")
+    vault.audit(body.email.strip().lower(), "setup", "Created the first admin with the setup code")
+    return set_cookie(JSONResponse({"ok": True}), new_session(uid, "identified", setup=True))
+
+
+# -- sign-in: Google / Microsoft ---------------------------------------------------------------
+@app.get("/auth/{provider}/start")
+def oidc_start(provider: str, request: Request, link: int = 0):
+    cfg = providers().get(provider)
+    if not cfg:
+        raise HTTPException(404, "This sign-in method isn't set up")
+    _, base, _ = site()
+    url, pending = auth.authorize_url(provider, cfg["client_id"], f"{base}/auth/callback/{provider}")
+    if link:
+        sid, s = current(request)
+        if not s:
+            raise HTTPException(401, "Sign in first")
+        pending["link_uid"] = s["uid"]
+    pending["invite"] = request.cookies.get("ginv")
+    for k in [k for k, v in oidc_pending.items() if time.time() - v["created"] > 600]:
+        oidc_pending.pop(k, None)
+    oidc_pending[pending["state"]] = pending
+    resp = Response(status_code=303, headers={"Location": url})
+    resp.set_cookie("gstate", pending["state"], max_age=600, httponly=True, secure=True, samesite="lax")
     return resp
 
 
-@app.get("/api/session")
-def session(request: Request):
-    return {"signed_in": valid_session(request), "auth": auth_on()}
+def _bounce(path):
+    """Leave the provider's redirect through a same-site page, so the Strict session cookie is sent afterwards."""
+    return HTMLResponse(f'<!doctype html><meta http-equiv="refresh" content="0;url={path}">'
+                        f'<p>Continuing… <a href="{path}">continue</a></p>',
+                        headers={"Content-Security-Policy": "default-src 'none'"})
 
 
-@app.post("/api/logout")
-def logout(request: Request):
-    sessions.pop(request.cookies.get("gsid"), None)
+@app.get("/auth/callback/{provider}")
+def oidc_callback(provider: str, request: Request, state: str = "", code: str = "", error: str = ""):
+    pending = oidc_pending.pop(state, None)
+    if error or not pending or pending["provider"] != provider or request.cookies.get("gstate") != state:
+        return _bounce("/signin?error=" + ("cancelled" if error else "expired"))
+    cfg = providers().get(provider)
+    _, base, _ = site()
+    try:
+        ident = auth.exchange_code(provider, cfg["client_id"], cfg["client_secret"], f"{base}/auth/callback/{provider}", code, pending)
+    except Exception as e:                                      # noqa: BLE001 - reported to the user, never details
+        vault.audit("unknown", "signin-failed", f"{provider}: {str(e)[:120]}")
+        return _bounce("/signin?error=provider")
+    users = [u for u in vault.users() if u["provider"] == provider and u["subject"] == ident["subject"]]
+    user = vault.user(users[0]["id"]) if users else None
+    if pending.get("link_uid"):
+        target = vault.user(pending["link_uid"])
+        if user and user["id"] != target["id"]:
+            return _bounce("/settings?error=linked-elsewhere#users")
+        vault.update_user(target["id"], provider=provider, subject=ident["subject"])
+        vault.audit(target["email"], "account-linked", f"Linked {auth.PROVIDERS[provider]['label']} account {ident['email']}")
+        return _bounce("/settings#users")
+    if not user and pending.get("invite"):
+        inv = vault.invite(pending["invite"])
+        if inv and inv["email"] == ident["email"]:
+            existing = vault.user(email=ident["email"])
+            if existing and existing["subject"]:
+                return _bounce("/signin?error=exists")
+            uid = existing["id"] if existing else vault.create_user(ident["email"], ident["name"], inv["role"], provider, ident["subject"])
+            vault.update_user(uid, provider=provider, subject=ident["subject"], role=inv["role"], name=ident["name"])
+            vault.use_invite(pending["invite"])
+            vault.audit(ident["email"], "invite-accepted", f"Joined as {inv['role']} with {auth.PROVIDERS[provider]['label']}")
+            user = vault.user(uid)
+        elif inv:
+            vault.audit(ident["email"], "signin-refused", "Invite is for a different e-mail address")
+            return _bounce("/signin?error=wrong-account")
+    if not user or user["status"] != "active":
+        vault.audit(ident["email"], "signin-refused", f"Not invited ({auth.PROVIDERS[provider]['label']})")
+        return _bounce("/signin?error=not-invited")
+    resp = _bounce("/signin?step=passkey")
+    resp.delete_cookie("ginv")
+    resp.delete_cookie("gstate")
+    return set_cookie(resp, new_session(user["id"], "identified", provider=provider))
+
+
+@app.get("/invite/{token}")
+def invite_link(token: str):
+    if not vault.invite(token):
+        return _bounce("/signin?error=invite")
+    resp = _bounce("/signin?invite=1")
+    resp.set_cookie("ginv", token, max_age=1800, httponly=True, secure=True, samesite="lax")
+    return resp
+
+
+@app.post("/api/auth/invite-passkey")
+def invite_passkey_only(request: Request):
+    """Accept an invite without Google/Microsoft (only when neither is configured)."""
+    if providers():
+        raise HTTPException(400, "Sign in with Google or Microsoft to accept the invite")
+    inv = vault.invite(request.cookies.get("ginv") or "")
+    if not inv:
+        raise HTTPException(400, "This invite is no longer valid")
+    existing = vault.user(email=inv["email"])
+    uid = existing["id"] if existing else vault.create_user(inv["email"], inv["email"].split("@")[0], inv["role"])
+    vault.use_invite(request.cookies.get("ginv"))
+    vault.audit(inv["email"], "invite-accepted", f"Joined as {inv['role']} with a passkey")
+    resp = set_cookie(JSONResponse({"ok": True}), new_session(uid, "identified"))
+    resp.delete_cookie("ginv")
+    return resp
+
+
+# -- passkeys -------------------------------------------------------------------------------------
+class PasskeyVerify(BaseModel):
+    credential: dict
+    prf: Optional[str] = None
+    unlock: bool = True
+    name: Optional[str] = None
+
+
+@app.post("/api/auth/register/options")
+def register_options(request: Request):
+    sid, s = current(request, stage="any")
+    if not s:
+        raise HTTPException(401, "Sign in first")
+    if vault.credentials(s["uid"]):
+        fresh = s["stage"] == "active" and ((s.get("priv") and s["priv"][1] > time.time())
+                                             or (s.get("via") == "passkey" and time.time() - s["created"] < 300))
+        if not fresh:
+            raise HTTPException(409, "Confirm with one of your passkeys first, then add the new one")
+    user = vault.user(s["uid"])
+    host, _, _ = site()
+    opts, challenge = auth.registration_options(host, user, vault.credentials(user["id"]))
+    s["reg_challenge"] = challenge
+    return opts
+
+
+@app.post("/api/auth/register/verify")
+def register_verify(body: PasskeyVerify, request: Request):
+    sid, s = current(request, stage="any")
+    if not s or not s.get("reg_challenge"):
+        raise HTTPException(401, "Start again")
+    host, _, origins = site()
+    try:
+        cid, pub, count = auth.verify_registration(body.credential, s.pop("reg_challenge"), host, origins)
+    except Exception as e:                                      # noqa: BLE001
+        raise HTTPException(400, f"The passkey couldn't be registered: {e}")
+    name = (body.name or "Passkey").strip()[:40] or "Passkey"
+    vault.add_credential(s["uid"], cid, name, pub, count)
+    vault.audit(vault.user(s["uid"])["email"], "passkey-added", f'Registered passkey "{name}"')
+    return {"ok": True, "id": cid}
+
+
+@app.post("/api/auth/passkey/options")
+def passkey_options(request: Request):
+    sid, s = current(request, stage="any")
+    host, _, _ = site()
+    creds = vault.credentials(s["uid"]) if s and s["uid"] else []
+    if s and s["uid"] and not creds:
+        raise HTTPException(409, "No passkey yet")
+    salt = vault.get("prf_salt")
+    if not salt:
+        salt = secrets.token_hex(32)
+        vault.put("prf_salt", salt)
+    opts, challenge = auth.authentication_options(host, creds if s and s["uid"] else [], bytes.fromhex(salt))
+    if s:
+        s["auth_challenge"] = challenge
+        return opts
+    else:
+        sid = new_session(None, "anonymous")
+        sessions[sid]["auth_challenge"] = challenge
+        return set_cookie(JSONResponse(opts), sid)
+
+
+@app.post("/api/auth/passkey/verify")
+def passkey_verify(body: PasskeyVerify, request: Request):
+    ip = throttle(request)
+    sid, s = current(request, stage="any")
+    if not s or not s.get("auth_challenge"):
+        raise HTTPException(401, "Start again")
+    cid = body.credential.get("id", "")
+    stored = vault.credential(cid)
+    if not stored or (s["uid"] and stored["user_id"] != s["uid"]):
+        failed(ip)
+        raise HTTPException(401, "This passkey isn't registered here")
+    host, _, origins = site()
+    try:
+        count = auth.verify_authentication(body.credential, s.pop("auth_challenge"), host, origins, stored)
+    except Exception:                                           # noqa: BLE001
+        failed(ip)
+        raise HTTPException(401, "The passkey check failed")
+    vault.touch_credential(cid, count)
+    user = vault.user(stored["user_id"])
+    if user["status"] != "active":
+        raise HTTPException(403, "This account is disabled")
+    prf = auth.b64u_dec(body.prf) if body.prf else None
+    note = None
+    priv = None
+    if prf and len(prf) >= 32:
+        if stored["wrapped_private_key"]:
+            try:
+                priv = vault.private_key(cid, prf)
+            except Exception:                                   # noqa: BLE001
+                note = "This passkey couldn't open your key."
+        elif s.get("priv"):
+            vault.add_wrapped_credential(user["id"], cid, prf, s["priv"][0])
+            priv = bytearray(s["priv"][0])
+        else:
+            try:
+                priv = vault.bind_credential(user["id"], cid, prf)
+            except ValueError as e:
+                note = str(e)
+    elif user["role"] in VAULT_ROLES:
+        note = "This passkey can't unlock the vault (its device doesn't support the PRF feature). Signed in read-only."
+    recovery = None
+    # promote the session
+    old = sessions.pop(sid)
+    _forget_private(old)
+    new = new_session(user["id"], "active", via="passkey")
+    sessions[new]["setup"] = old.get("setup")
+    was_holder = sid in vault.holders
+    vault.update_user(user["id"], last_login=time.time())
+    vault.audit(user["email"], "signed-in", f'Passkey "{stored["name"]}"' + (f" after {old.get('provider')}" if old.get("provider") else ""))
+    if priv is not None:
+        sessions[new]["priv"] = (priv, time.time() + 300)          # lets this session add another passkey for 5 minutes
+        if not vault.initialized and user["role"] == "admin":
+            recovery = vault.initialize(user["id"], priv)
+            vault.holders[new] = time.time()
+            vault.unlocked_by, vault.unlocked_at = user["email"], time.time()
+            vault.audit(user["email"], "vault-created", "Created the vault and the recovery key")
+            migrate_legacy()
+            setup_code()
+        elif old.get("recovery") and was_holder:
+            vault.grant(user["id"], user["email"])               # recovery: seal the vault key for the new passkey
+            vault.holders[new] = time.time()
+            recovery = vault.rotate_recovery()
+            vault.audit(user["email"], "recovery-replaced", "New passkey set up after recovery; a new recovery key was created")
+        elif body.unlock and user["role"] in VAULT_ROLES:
+            if vault.unlock_with_private_key(user["id"], priv, new, user["email"]):
+                vault.audit(user["email"], "vault-unlocked", f'Passkey "{stored["name"]}"')
+                migrate_legacy()
+            else:
+                note = note or "An admin still has to give you access to the vault."
+    if was_holder:
+        vault.holders.pop(sid, None)
+        if not vault.holders:
+            vault.lock_now()
+    if old.get("recovery") and new not in vault.holders:
+        sessions[new]["recovery"] = True
+    resp = JSONResponse({"ok": True, "recovery_key": recovery, "note": note,
+                         "unlocked": new in vault.holders, "role": user["role"]})
+    end = set_cookie(resp, new)
+    return end
+
+
+@app.post("/api/auth/recovery")
+def recovery_signin(request: Request, body: dict):
+    ip = throttle(request)
+    email, key = str(body.get("email", "")).strip().lower(), str(body.get("key", ""))
+    user = vault.user(email=email)
+    if not user or user["role"] != "admin" or user["status"] != "active" or not vault.initialized:
+        failed(ip)
+        time.sleep(1)
+        raise HTTPException(401, "Wrong e-mail address or recovery key")
+    sid = new_session(user["id"], "active", via="recovery")
+    try:
+        vault.unlock_with_recovery(key, sid, user["email"])
+    except Exception:                                           # noqa: BLE001
+        sessions.pop(sid, None)
+        failed(ip)
+        time.sleep(1)
+        vault.audit(email, "recovery-failed", "Wrong recovery key")
+        raise HTTPException(401, "Wrong e-mail address or recovery key")
+    # The person lost their passkeys: their old ones can no longer open anything new, so start them afresh.
+    for c in vault.credentials(user["id"]):
+        vault.delete_credential(c["id"])
+    vault.update_user(user["id"], public_key=None)
+    vault.revoke(user["id"])
+    sessions[sid]["recovery"] = True
+    vault.audit(user["email"], "recovery-used", "Signed in and unlocked with the recovery key; old passkeys removed")
+    return set_cookie(JSONResponse({"ok": True}), sid)
+
+
+@app.post("/api/auth/signout")
+def signout(request: Request):
+    sid = request.cookies.get("gsid")
+    s = sessions.get(sid)
+    if s and s.get("uid"):
+        vault.audit(vault.user(s["uid"])["email"], "signed-out", "")
+    end_session(sid)
     resp = JSONResponse({"ok": True})
     resp.delete_cookie("gsid")
     return resp
 
 
+@app.post("/api/vault/lock")
+def vault_lock(request: Request):
+    sid, s, user = require(request)
+    if sid in vault.holders:
+        vault.lock_now()
+        vault.audit(user["email"], "vault-locked", "Locked by hand")
+    return {"ok": True}
+
+
+@app.get("/api/me")
+def me(request: Request):
+    sid, s, user = require(request)
+    return {"id": user["id"], "name": user["name"], "email": user["email"], "role": user["role"],
+            "provider": user["provider"], "unlocked": sid in vault.holders, "can_unlock": vault.has_slot(user["id"]),
+            "passkeys": [{"id": c["id"], "name": c["name"], "created": c["created"], "last_used": c["last_used"],
+                          "unlock": bool(c["wrapped_private_key"])} for c in vault.credentials(user["id"])],
+            "recovery": bool(s.get("recovery")), "can_add_passkey": bool(s.get("priv") and s["priv"][1] > time.time()),
+            "providers": {k: auth.PROVIDERS[k]["label"] for k in providers()}}
+
+
+# -- console --------------------------------------------------------------------------------------------
 @app.get("/api/overview")
-def overview():
+def overview(request: Request):
+    require(request)
     RUNS.mkdir(exist_ok=True)
     runs = [run_summary(d) for d in sorted(RUNS.iterdir(), reverse=True) if d.is_dir() and RUN_ID.match(d.name)]
-    return {"runs": runs, "config": public_config(),
-            "job": job.status(since=job.seq)}
+    return {"runs": runs, "config": public_config(), "job": job.status(since=job.seq)}
 
 
 @app.get("/api/runs/{run_id}/report")
-def report(run_id: str):
+def report(run_id: str, request: Request):
+    require(request)
     path = run_dir(run_id) / "report.html"
     if not path.exists():
         raise HTTPException(404, "No report for this run")
-    # Served as a sandboxed, unique origin: its scripts can't reach the console API.
     # Chrome gives a CSP-sandboxed page an opaque origin, so frame-ancestors 'self' / SAMEORIGIN would block
     # the console's own frame; X-Frame-Options is dropped for this response only.
-    return FileResponse(path, media_type="text/html",
-                        headers={"Content-Security-Policy": REPORT_CSP, "X-Frame-Options": ""})
+    return FileResponse(path, media_type="text/html", headers={"Content-Security-Policy": REPORT_CSP, "X-Frame-Options": ""})
 
 
 @app.get("/api/runs/{run_id}/graph")
-def graph(run_id: str):
+def graph(run_id: str, request: Request):
+    require(request)
     path = run_dir(run_id) / "graph.json"
     if not path.exists():
         raise HTTPException(404, "No data for this run")
@@ -348,7 +845,8 @@ class Start(BaseModel):
 
 
 @app.post("/api/job/start")
-async def start(body: Start):
+async def start(body: Start, request: Request):
+    sid, s, user = require(request, "operator")
     if job.running:
         raise HTTPException(409, "A run is already in progress")
     if body.mode not in MODES:
@@ -361,18 +859,29 @@ async def start(body: Start):
             raise HTTPException(400, "That run has no scan data")
         cmd.append(str(d))
         target = d.name
-    if body.mode in ("full", "resume") and not read_env().get("ANTHROPIC_API_KEY"):
-        raise HTTPException(400, "Add your Anthropic API key in Settings first")
+    extra = {}
+    if body.mode in ("full", "resume"):
+        if sid not in vault.holders:
+            raise HTTPException(423, "Unlock the vault with your passkey first: the AI step needs the API key")
+        keys = api_keys()
+        if not keys.get("anthropic"):
+            raise HTTPException(400, "Add your Anthropic API key in Settings first")
+        extra["ANTHROPIC_API_KEY"] = keys["anthropic"]           # handed to the run in memory, never written to disk
+        if keys.get("nvd"):
+            extra["NVD_API_KEY"] = keys["nvd"]
+        vault.audit(user["email"], "secret-used", "API keys for an AI assessment")
     job.__init__()
-    job.mode, job.run_id, job.started = body.mode, target, time.time()
+    job.mode, job.run_id, job.started, job.by = body.mode, target, time.time(), user["name"]
     job.step = MODES[body.mode]["steps"][0]
-    job.add(f"[console] {MODES[body.mode]['label']} started")
-    asyncio.create_task(run_job(cmd))
+    job.add(f"[console] {MODES[body.mode]['label']} started by {user['name']}")
+    vault.audit(user["email"], "scan-started", MODES[body.mode]["label"])
+    asyncio.create_task(run_job(cmd, extra))
     return job.status()
 
 
 @app.post("/api/job/stop")
-async def stop():
+async def stop(request: Request):
+    sid, s, user = require(request, "operator")
     if not job.running:
         raise HTTPException(409, "Nothing is running")
     job.stopped = True
@@ -383,11 +892,13 @@ async def stop():
         await asyncio.sleep(0.5)
     if job.running:
         os.killpg(job.proc.pid, signal.SIGKILL)
+    vault.audit(user["email"], "scan-stopped", "")
     return {"ok": True}
 
 
 @app.get("/api/job")
-def job_status(since: int = 0):
+def job_status(request: Request, since: int = 0):
+    require(request)
     return job.status(since=since)
 
 
@@ -399,78 +910,47 @@ class Settings(BaseModel):
 
 
 @app.post("/api/settings")
-def save_settings(body: Settings):
+def save_settings(body: Settings, request: Request):
+    sid, s, user = require(request, "admin")
     if body.model not in MODELS or body.effort not in EFFORTS:
         raise HTTPException(400, "Unknown model or effort")
-    updates = {"GUARDIAN_MODEL": body.model, "GUARDIAN_EFFORT": body.effort}
-    for name, value in (("ANTHROPIC_API_KEY", body.anthropic_key), ("NVD_API_KEY", body.nvd_key)):
-        value = (value or "").strip()
-        if value:
-            if not API_KEY.match(value):
-                raise HTTPException(400, f"{name} doesn't look like a valid key")
-            updates[name] = value
-    write_env(updates)
+    write_env({"GUARDIAN_MODEL": body.model, "GUARDIAN_EFFORT": body.effort})
+    new = {k: (v or "").strip() for k, v in (("anthropic", body.anthropic_key), ("nvd", body.nvd_key)) if (v or "").strip()}
+    if new:
+        if sid not in vault.holders:
+            raise HTTPException(423, "Unlock the vault with your passkey to change API keys")
+        for k, v in new.items():
+            if not API_KEY.match(v):
+                raise HTTPException(400, f"The {k} key doesn't look like a valid key")
+        rec = api_keys() or {"kind": "api-keys"}
+        rec.update(new)
+        vault.save_record("api-keys", "settings", rec)
+        vault.put("api_keys_set", {"anthropic": bool(rec.get("anthropic")), "nvd": bool(rec.get("nvd"))})
+        vault.audit(user["email"], "secret-changed", "API keys: " + ", ".join(new))
     return public_config()
 
 
-# -- settings page: connectors and access --------------------------------------------------
-_store = None
-store_lock = threading.Lock()
-
-
-def get_store():
-    global _store
-    if _store is None:
-        STATE.mkdir(mode=0o700, exist_ok=True)
-        _store = conn.Store(STATE)
-    return _store
-
-
-def latest_scan():
-    if not RUNS.exists():
-        return None, None
-    done = sorted(d for d in RUNS.iterdir() if RUN_ID.match(d.name) and (d / "graph.json").exists())
-    if not done:
-        return None, None
-    try:
-        return done[-1].name, json.loads((done[-1] / "graph.json").read_text())
-    except (OSError, ValueError):
-        return None, None
-
-
-@app.get("/settings")
-def settings_page():
-    return FileResponse(WEB / "settings.html", media_type="text/html")
-
-
-@app.get("/settings.js")
-def settings_js():
-    return FileResponse(WEB / "settings.js", media_type="text/javascript")
-
-
+# -- connectors -----------------------------------------------------------------------------------------
 @app.get("/api/connectors")
-def connectors_overview():
-    s = get_store()
+def connectors_overview(request: Request):
+    sid, s, user = require(request, "operator")
     run_id, g = latest_scan()
-    with store_lock:
-        s.update_inventory(run_id, g)
-        suggestions = conn.suggest(g, s)
-    covered = {h for x in suggestions for h in x["hosts"]} | {h for hs in s.configured_targets().values() for h in hs}
-    return {
-        "catalog": conn.CATALOG,
-        "connectors": [s.public(c) for c in s.data["connectors"]],
-        "suggestions": suggestions,
-        "dismissed": len(s.data["dismissed"]),
-        "scan": run_id,
-        "devices": len((g or {}).get("assets", {})),
-        "uncovered": sum(1 for ip in (g or {}).get("assets", {}) if ip not in covered),
-    }
+    store.update_inventory(run_id, g)
+    unlocked = sid in vault.holders
+    suggestions = conn.suggest(g, store) if unlocked else []
+    covered = {h for x in suggestions for h in x["hosts"]} | {h for hs in store.configured_targets().values() for h in hs}
+    return {"catalog": conn.CATALOG, "locked": not unlocked,
+            "connectors": [store.public(c) for c in store.connectors()] if unlocked else [],
+            "suggestions": suggestions, "dismissed": len(store.dismissed), "scan": run_id,
+            "devices": len((g or {}).get("assets", {})),
+            "uncovered": sum(1 for ip in (g or {}).get("assets", {}) if ip not in covered),
+            "can_edit": user["role"] == "admin"}
 
 
 @app.get("/api/connectors/ssh-key")
-def ssh_key():
-    _, pub = conn.guardian_ssh_key(get_store().dir)
-    return {"public_key": pub}
+def ssh_key(request: Request):
+    require(request, "admin", unlocked=True)
+    return {"public_key": conn.guardian_ssh_key(vault)}
 
 
 class ConnectorBody(BaseModel):
@@ -481,15 +961,14 @@ class ConnectorBody(BaseModel):
 
 
 def merged_fields(body):
-    """Validated fields, with blank secret fields filled from the stored connector."""
     try:
         fields = conn.validate(body.type, body.fields)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    existing = get_store().get(body.id) if body.id else None
+    existing = store.get(body.id) if body.id else None
     if body.id and (not existing or existing["type"] != body.type):
         raise HTTPException(404, "Unknown connector")
-    stored = get_store().fields_with_secrets(existing) if existing else {}
+    stored = store.fields_with_secrets(existing) if existing else {}
     for fd in conn.CATALOG[body.type]["fields"]:
         if fd.get("secret") and not fields.get(fd["name"]):
             fields[fd["name"]] = stored.get(fd["name"], "")
@@ -497,14 +976,18 @@ def merged_fields(body):
 
 
 @app.post("/api/connectors/test")
-def connector_test(body: ConnectorBody):
+def connector_test(body: ConnectorBody, request: Request):
+    sid, s, user = require(request, "operator", unlocked=True)
     fields, existing = merged_fields(body)
-    level, message, details, _ = conn.test(body.type, fields, (existing or {}).get("pin"), get_store().dir)
+    level, message, details, _ = conn.test(body.type, fields, (existing or {}).get("pin"), STATE, vault)
+    if existing:
+        vault.audit(user["email"], "secret-used", f'Tested connector "{existing["name"]}"')
     return {"level": level, "message": message, "details": details}
 
 
 @app.post("/api/connectors")
-def connector_save(body: ConnectorBody):
+def connector_save(body: ConnectorBody, request: Request):
+    sid, s, user = require(request, "admin", unlocked=True)
     name = body.name.strip()
     if not name or len(name) > 60 or re.search(r"[\r\n<>]", name):
         raise HTTPException(400, "Give the connector a short name (up to 60 characters)")
@@ -513,45 +996,42 @@ def connector_save(body: ConnectorBody):
     missing = [fd["label"] for fd in spec["fields"] if fd.get("secret") and not fields.get(fd["name"])]
     if missing:
         raise HTTPException(400, f"{missing[0]} is required")
-    s = get_store()
-    level, message, details, pin = conn.test(body.type, fields, (existing or {}).get("pin"), s.dir)
-    with store_lock:
-        c = existing or {"id": conn.new_id(), "type": body.type, "created": time.time()}
-        c.update(name=name, status=level, message=message, details=details, last_check=time.time(),
-                 fields={k: v for k, v in fields.items() if not any(fd["name"] == k and fd.get("secret") for fd in spec["fields"])},
-                 secrets={fd["name"]: s.encrypt(fields[fd["name"]]) for fd in spec["fields"] if fd.get("secret")})
-        if pin:
-            c["pin"] = pin
-        if not existing:
-            s.data["connectors"].append(c)
-        s.save()
-    return s.public(c)
+    level, message, details, pin = conn.test(body.type, fields, (existing or {}).get("pin"), STATE, vault)
+    secret_names = {fd["name"] for fd in spec["fields"] if fd.get("secret")}
+    c = existing or {"id": conn.new_id(), "type": body.type, "created": time.time()}
+    c.update(name=name, status=level, message=message, details=details, last_check=time.time(),
+             fields={k: v for k, v in fields.items() if k not in secret_names},
+             secrets={k: fields[k] for k in secret_names})
+    if pin:
+        c["pin"] = pin
+    store.save_connector(c)
+    vault.audit(user["email"], "connector-saved" if existing else "connector-added", f'"{name}" ({spec["label"]})')
+    return store.public(c)
 
 
 @app.post("/api/connectors/{cid}/recheck")
-def connector_recheck(cid: str):
-    s = get_store()
-    c = s.get(cid)
+def connector_recheck(cid: str, request: Request):
+    sid, s, user = require(request, "operator", unlocked=True)
+    c = store.get(cid)
     if not c:
         raise HTTPException(404, "Unknown connector")
-    level, message, details, pin = conn.test(c["type"], s.fields_with_secrets(c), c.get("pin"), s.dir)
-    with store_lock:
-        c.update(status=level, message=message, details=details, last_check=time.time())
-        if pin:
-            c["pin"] = pin
-        s.save()
-    return s.public(c)
+    level, message, details, pin = conn.test(c["type"], store.fields_with_secrets(c), c.get("pin"), STATE, vault)
+    c.update(status=level, message=message, details=details, last_check=time.time())
+    if pin:
+        c["pin"] = pin
+    store.save_connector(c)
+    vault.audit(user["email"], "secret-used", f'Re-checked connector "{c["name"]}"')
+    return store.public(c)
 
 
 @app.post("/api/connectors/{cid}/delete")
-def connector_delete(cid: str):
-    s = get_store()
-    with store_lock:
-        before = len(s.data["connectors"])
-        s.data["connectors"] = [c for c in s.data["connectors"] if c["id"] != cid]
-        if len(s.data["connectors"]) == before:
-            raise HTTPException(404, "Unknown connector")
-        s.save()
+def connector_delete(cid: str, request: Request):
+    sid, s, user = require(request, "admin", unlocked=True)
+    c = store.get(cid)
+    if not c:
+        raise HTTPException(404, "Unknown connector")
+    store.delete(cid)
+    vault.audit(user["email"], "connector-removed", f'"{c["name"]}"')
     return {"ok": True}
 
 
@@ -560,51 +1040,257 @@ class SuggestionBody(BaseModel):
 
 
 @app.post("/api/suggestions/dismiss")
-def suggestion_dismiss(body: SuggestionBody):
+def suggestion_dismiss(body: SuggestionBody, request: Request):
+    require(request, "admin")
     if not re.match(r"^[a-z_]+:[A-Za-z0-9:._-]{1,100}$", body.key):
         raise HTTPException(400, "Bad suggestion")
-    s = get_store()
-    with store_lock:
-        if body.key not in s.data["dismissed"]:
-            s.data["dismissed"].append(body.key)
-        s.save()
+    if body.key not in store.dismissed:
+        store.set_dismissed(store.dismissed + [body.key])
     return {"ok": True}
 
 
 @app.post("/api/suggestions/restore")
-def suggestion_restore():
-    s = get_store()
-    with store_lock:
-        s.data["dismissed"] = []
-        s.save()
+def suggestion_restore(request: Request):
+    require(request, "admin")
+    store.set_dismissed([])
     return {"ok": True}
 
 
-@app.get("/api/access")
-def access_get():
-    return {"auth": auth_on()}
+# -- users ---------------------------------------------------------------------------------------------------
+@app.get("/api/users")
+def users_list(request: Request):
+    require(request, "admin")
+    _, base, _ = site()
+    return {"users": [{k: u[k] for k in ("id", "email", "name", "provider", "role", "status", "created", "last_login",
+                                          "passkeys", "passkey_names", "vault")} | {"has_key": bool(vault.user(u["id"])["public_key"])}
+                      for u in vault.users()],
+            "invites": [{"id": i["token_hash"][:16], "email": i["email"], "role": i["role"], "created": i["created"],
+                         "expires": i["expires"]} for i in vault.invites()],
+            "providers": {k: auth.PROVIDERS[k]["label"] for k in providers()}, "base": base}
 
 
-class AccessBody(BaseModel):
-    auth: bool
+class InviteBody(BaseModel):
+    email: str
+    role: str
 
 
-@app.post("/api/access")
-def access_set(body: AccessBody, request: Request):
-    write_env({"GUARDIAN_CONSOLE_AUTH": "on" if body.auth else "off"})
-    if not body.auth:
-        return {"auth": False}
-    # Sign the person who switched it on in, and show the code once so they can use it elsewhere.
-    sid = secrets.token_urlsafe(32)
-    sessions[sid] = time.time() + SESSION_HOURS * 3600
-    resp = JSONResponse({"auth": True, "code": access_code()})
-    resp.set_cookie("gsid", sid, max_age=SESSION_HOURS * 3600, httponly=True, secure=True, samesite="strict")
-    return resp
+@app.post("/api/users/invite")
+def users_invite(body: InviteBody, request: Request):
+    sid, s, user = require(request, "admin")
+    email = body.email.strip().lower()
+    if not EMAIL.match(email) or body.role not in ROLES:
+        raise HTTPException(400, "Enter an e-mail address and a role")
+    existing = vault.user(email=email)
+    if existing and existing["subject"]:
+        raise HTTPException(409, "That person already has access")
+    token = vault.create_invite(email, body.role, user["email"])
+    _, base, _ = site()
+    vault.audit(user["email"], "invited", f"{email} as {body.role}")
+    return {"link": f"{base}/invite/{token}", "email": email, "role": body.role}
+
+
+def _guard_last_admin(uid):
+    u = vault.user(uid)
+    if u and u["role"] == "admin" and vault.has_slot(uid) and vault.admins_with_vault() <= 1:
+        raise HTTPException(400, "This is the last admin who can open the vault")
+
+
+class UserUpdate(BaseModel):
+    role: Optional[str] = None
+    status: Optional[str] = None
+
+
+@app.post("/api/users/{uid}")
+def users_update(uid: str, body: UserUpdate, request: Request):
+    sid, s, me_ = require(request, "admin")
+    target = vault.user(uid)
+    if not target:
+        raise HTTPException(404, "Unknown user")
+    if body.role and body.role not in ROLES or body.status and body.status not in ("active", "disabled"):
+        raise HTTPException(400, "Bad value")
+    if (body.role and body.role != "admin") or body.status == "disabled":
+        _guard_last_admin(uid)
+    if body.role:
+        vault.update_user(uid, role=body.role)
+        if body.role not in VAULT_ROLES:
+            vault.revoke(uid)
+        vault.audit(me_["email"], "role-changed", f"{target['email']}: {target['role']} → {body.role}")
+    if body.status:
+        vault.update_user(uid, status=body.status)
+        if body.status == "disabled":
+            for k, v in list(sessions.items()):
+                if v.get("uid") == uid:
+                    end_session(k)
+        vault.audit(me_["email"], "user-" + body.status, target["email"])
+    return {"ok": True}
+
+
+@app.post("/api/users/{uid}/grant")
+def users_grant(uid: str, request: Request):
+    sid, s, me_ = require(request, "admin", unlocked=True)
+    target = vault.user(uid)
+    if not target or target["role"] not in VAULT_ROLES:
+        raise HTTPException(400, "Only admins and operators can get vault access")
+    try:
+        vault.grant(uid, me_["email"])
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    vault.audit(me_["email"], "vault-granted", target["email"])
+    return {"ok": True}
+
+
+@app.post("/api/users/{uid}/revoke")
+def users_revoke(uid: str, request: Request):
+    sid, s, me_ = require(request, "admin")
+    _guard_last_admin(uid)
+    vault.revoke(uid)
+    vault.audit(me_["email"], "vault-revoked", vault.user(uid)["email"])
+    return {"ok": True}
+
+
+@app.post("/api/users/{uid}/delete")
+def users_delete(uid: str, request: Request):
+    sid, s, me_ = require(request, "admin")
+    if uid == me_["id"]:
+        raise HTTPException(400, "You can't remove yourself")
+    _guard_last_admin(uid)
+    target = vault.user(uid)
+    for k, v in list(sessions.items()):
+        if v.get("uid") == uid:
+            end_session(k)
+    vault.delete_user(uid)
+    vault.audit(me_["email"], "user-removed", target["email"] if target else uid)
+    return {"ok": True}
+
+
+@app.post("/api/invites/{iid}/revoke")
+def invite_revoke(iid: str, request: Request):
+    sid, s, me_ = require(request, "admin")
+    inv = next((i for i in vault.invites() if i["token_hash"].startswith(iid)), None)
+    if not inv:
+        raise HTTPException(404, "Unknown invite")
+    vault.revoke_invite(inv["token_hash"])
+    vault.audit(me_["email"], "invite-revoked", inv["email"])
+    return {"ok": True}
+
+
+@app.post("/api/me/passkeys/{cid}/delete")
+def my_passkey_delete(cid: str, request: Request):
+    sid, s, user = require(request)
+    creds = vault.credentials(user["id"])
+    if not any(c["id"] == cid for c in creds):
+        raise HTTPException(404, "Unknown passkey")
+    if len(creds) <= 1:
+        raise HTTPException(400, "Keep at least one passkey")
+    vault.delete_credential(cid)
+    vault.audit(user["email"], "passkey-removed", "")
+    return {"ok": True}
+
+
+# -- security -------------------------------------------------------------------------------------------
+@app.get("/api/security")
+def security(request: Request):
+    sid, s, user = require(request, "admin")
+    rec = vault.get("recovery") or {}
+    host, base, _ = site()
+    cfg = vault.get("oidc", {})
+    return {"unlocked": vault.unlocked, "unlocked_by": vault.unlocked_by, "unlocked_at": vault.unlocked_at,
+            "holders": len(vault.holders), "autolock": vault.get("autolock", {"idle": 30, "max": 8}),
+            "recovery_created": rec.get("created"), "vault_ready": vault.initialized,
+            "records": vault.record_count("connector"), "hostname": host, "base": base,
+            "oidc": {k: {"client_id": cfg.get(k, {}).get("client_id", ""), "secret_set": bool(cfg.get(k, {}).get("client_secret")),
+                         "redirect": f"{base}/auth/callback/{k}"} for k in auth.PROVIDERS}}
+
+
+class AutolockBody(BaseModel):
+    idle: int
+    max: int
+
+
+@app.post("/api/security/autolock")
+def security_autolock(body: AutolockBody, request: Request):
+    sid, s, user = require(request, "admin")
+    if body.idle not in (5, 15, 30, 60) or body.max not in (1, 4, 8, 12):
+        raise HTTPException(400, "Pick one of the listed values")
+    vault.put("autolock", {"idle": body.idle, "max": body.max})
+    vault.audit(user["email"], "settings-changed", f"Auto-lock: {body.idle} min idle, {body.max} h max")
+    return {"ok": True}
+
+
+@app.post("/api/security/recovery")
+def security_recovery(request: Request):
+    sid, s, user = require(request, "admin", unlocked=True)
+    key = vault.rotate_recovery()
+    vault.audit(user["email"], "recovery-replaced", "A new recovery key was created; the old one stopped working")
+    return {"recovery_key": key}
+
+
+class OidcBody(BaseModel):
+    provider: str
+    client_id: str
+    client_secret: Optional[str] = None
+
+
+@app.post("/api/security/oidc")
+def security_oidc(body: OidcBody, request: Request):
+    sid, s, user = require(request, "admin")
+    if body.provider not in auth.PROVIDERS:
+        raise HTTPException(400, "Unknown provider")
+    cid = body.client_id.strip()
+    if cid and not re.match(r"^[A-Za-z0-9._\-]{8,200}$", cid):
+        raise HTTPException(400, "That doesn't look like a client ID")
+    cfg = vault.get("oidc", {})
+    entry = cfg.get(body.provider, {})
+    entry["client_id"] = cid
+    if (body.client_secret or "").strip():
+        if len(body.client_secret.strip()) > 300 or re.search(r"\s", body.client_secret.strip()):
+            raise HTTPException(400, "That doesn't look like a client secret")
+        entry["client_secret"] = body.client_secret.strip()
+    if not cid:
+        entry = {}
+    cfg[body.provider] = entry
+    vault.put("oidc", cfg)
+    vault.audit(user["email"], "settings-changed", f"{auth.PROVIDERS[body.provider]['label']} sign-in " + ("configured" if cid else "removed"))
+    return {"ok": True}
+
+
+@app.get("/api/audit")
+def audit_list(request: Request, limit: int = 200):
+    require(request, "admin")
+    return {"rows": [{k: r[k] for k in ("id", "ts", "actor", "action", "detail")} for r in vault.audit_rows(min(limit, 2000))]}
+
+
+@app.get("/api/audit/verify")
+def audit_verify(request: Request):
+    require(request, "admin")
+    ok, n, bad = vault.audit_verify()
+    if ok:
+        vault.anchor_audit()
+    return {"ok": ok, "entries": n, "broken_at": bad}
+
+
+@app.get("/api/audit.csv")
+def audit_csv(request: Request):
+    require(request, "admin")
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["time", "who", "action", "detail", "hash"])
+    for r in reversed(vault.audit_rows(100000)):
+        w.writerow([time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r["ts"])), r["actor"], r["action"], r["detail"], r["hash"]])
+    return Response(buf.getvalue(), media_type="text/csv", headers={"Content-Disposition": 'attachment; filename="guardian-audit.csv"'})
 
 
 if __name__ == "__main__":
     import uvicorn
     ensure_state()
+    harden_process()
+    code = setup_code()
+    if code:
+        print(f"First-time setup code: {code}  (also in {SETUP_FILE})", flush=True)
+    host = site()[0]
+    le_cert, le_key = STATE / "acme" / "certificates" / f"{host}.crt", STATE / "acme" / "certificates" / f"{host}.key"
+    cert, key = (le_cert, le_key) if le_cert.exists() and le_key.exists() else (CERT, KEY)
+    print(f"Serving https://{host}:{os.environ.get('GUARDIAN_CONSOLE_PORT', '8443')} with {'Let' + chr(39) + 's Encrypt' if cert == le_cert else 'a self-signed'} certificate", flush=True)
     uvicorn.run(app, host=os.environ.get("GUARDIAN_CONSOLE_HOST", "0.0.0.0"),
                 port=int(os.environ.get("GUARDIAN_CONSOLE_PORT", "8443")),
-                ssl_certfile=str(CERT), ssl_keyfile=str(KEY), server_header=False, log_level="warning")
+                ssl_certfile=str(cert), ssl_keyfile=str(key), server_header=False, log_level="warning")

@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily check of the AI IT Guardian console certificate
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=2h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -5,32 +5,27 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Guardian Console</title>
 <link rel="stylesheet" href="/console.css">
+<script src="/passkey.js" defer></script>
 <script src="/console.js" defer></script>
 </head>
 <body>
-<div id="signin" class="signin hidden">
-  <form class="card" id="signin-form">
-    <div class="brand"><span class="dot"></span>AI IT Guardian</div>
-    <label for="code">Access code</label>
-    <input id="code" type="password" autocomplete="current-password" required>
-    <p class="note">Find it in the container: <span class="mono">cat /opt/ai-guardian/console/access-code</span></p>
-    <p class="err" id="signin-err"></p>
-    <button class="btn primary" type="submit">Sign in</button>
-  </form>
-</div>
-
 <div class="wrap hidden" id="app">
   <header>
     <div class="brand"><span class="dot" id="dot"></span>AI IT Guardian <span class="meta">· console</span></div>
     <div class="row">
-      <button class="btn" id="go-collect">Scan only <span class="meta">~7 min · free</span></button>
-      <button class="btn primary" id="go-full">Scan + AI assessment <span class="dim">~30 min</span></button>
-      <a class="btn sm" href="/settings">Settings <span class="count hidden" id="set-count"></span></a>
+      <button class="btn op-only" id="go-collect">Scan only <span class="meta">~7 min · free</span></button>
+      <button class="btn primary op-only" id="go-full">Scan + AI assessment <span class="dim">~30 min</span></button>
+      <span class="vchip" id="vault-chip"></span>
+      <button class="btn sm hidden" id="unlock">Unlock</button>
+      <button class="btn sm hidden" id="lock">Lock</button>
+      <a class="btn sm op-only" href="/settings">Settings <span class="count hidden" id="set-count"></span></a>
       <button class="btn sm" id="theme">Theme</button>
-      <button class="btn sm hidden" id="signout">Sign out</button>
+      <span class="who"><span class="avatar" id="avatar"></span><span class="meta" id="me"></span></span>
+      <button class="btn sm" id="signout">Sign out</button>
     </div>
   </header>
 
+  <div class="callout warn hidden" id="note"></div>
   <div class="grid">
     <div class="stack">
       <div class="card">

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guardian Sign-in</title>
+<link rel="stylesheet" href="/console.css">
+<script src="/passkey.js" defer></script>
+<script src="/signin.js" defer></script>
+</head>
+<body>
+<div class="signin">
+  <div class="card scard">
+    <div class="brand"><span class="dot lockdot"></span>AI IT Guardian</div>
+    <div class="psteps" id="steps"><span></span><span></span></div>
+
+    <div id="warn" class="callout warn hidden"></div>
+    <p class="err" id="err"></p>
+
+    <!-- first-time setup -->
+    <form id="v-setup" class="hidden">
+      <h1>Set up Guardian</h1>
+      <p class="note">Create the first admin. The setup code is in the container:<br><span class="mono">cat /opt/ai-guardian/console/setup-code</span></p>
+      <label for="s-code">Setup code</label><input id="s-code" class="mono" autocomplete="off" required>
+      <label for="s-name">Your name</label><input id="s-name" autocomplete="name" required>
+      <label for="s-email">Your e-mail (the Google or Microsoft account you'll sign in with)</label><input id="s-email" type="email" autocomplete="email" required>
+      <button class="btn primary big" type="submit">Continue</button>
+    </form>
+
+    <!-- choose how to sign in -->
+    <div id="v-start" class="hidden">
+      <h1 id="start-title">Sign in</h1>
+      <p class="note" id="start-note">Use the account your administrator invited.</p>
+      <div id="providers" class="stackbtn"></div>
+      <div class="or" id="or">or</div>
+      <button class="btn big" id="pk-direct" type="button">Sign in with a passkey</button>
+      <button class="btn big hidden" id="invite-pk" type="button">Accept with a passkey</button>
+      <p class="note center"><a href="#" id="to-recovery">Lost your passkey? Use the recovery key</a></p>
+    </div>
+
+    <!-- confirm with a passkey -->
+    <div id="v-passkey" class="hidden center">
+      <div class="bio" aria-hidden="true"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 11v4"/><path d="M8.5 7.5A5 5 0 0 1 17 11v1.5"/><path d="M7 11v2a5 5 0 0 0 1.5 3.6"/><path d="M12 7a4 4 0 0 0-4 4"/><path d="M16 16.5a5 5 0 0 1-1.2 1.8"/><path d="M5 9.5A8 8 0 0 1 19 9"/><path d="M4.5 13.5a8 8 0 0 0 1.4 3.4"/></svg></div>
+      <h1 id="pk-title"></h1>
+      <p class="note" id="pk-note"></p>
+      <div id="pk-name-box" class="hidden left"><label for="pk-name">Name this passkey</label><input id="pk-name" maxlength="40"></div>
+      <button class="btn primary big" id="pk-go" type="button"></button>
+      <p class="note">Your browser asks for Face ID, Touch ID, Windows Hello or your security key.</p>
+      <div id="pk-readonly-box" class="hidden"><div class="or">or</div>
+        <button class="btn big" id="pk-readonly" type="button">Continue read-only</button>
+        <p class="note">Reports only: no scans or connectors.</p></div>
+    </div>
+
+    <!-- recovery -->
+    <form id="v-recovery" class="hidden">
+      <h1>Use the recovery key</h1>
+      <p class="note">For an admin who lost every passkey. Your old passkeys stop working, you set up a new one, and you get a new recovery key.</p>
+      <label for="r-email">Admin e-mail</label><input id="r-email" type="email" required>
+      <label for="r-key">Recovery key</label><input id="r-key" class="mono" autocomplete="off" required>
+      <button class="btn primary big" type="submit">Unlock</button>
+      <p class="note center"><a href="/signin">Back</a></p>
+    </form>
+
+    <!-- recovery key shown once -->
+    <div id="v-key" class="hidden">
+      <h1>Your recovery key</h1>
+      <p class="note">It opens the vault if every admin passkey is lost. <b>It's shown only now.</b> Print it or store it in a password manager, away from this server.</p>
+      <div class="codebox big" id="key-text"></div>
+      <button class="btn sm" id="key-copy" type="button">Copy</button>
+      <label class="check"><input type="checkbox" id="key-ok"><span>I've stored the recovery key somewhere safe</span></label>
+      <button class="btn primary big" id="key-done" type="button" disabled>Continue to Guardian</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

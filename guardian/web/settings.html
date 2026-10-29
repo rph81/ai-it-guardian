@@ -5,20 +5,25 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Guardian Settings</title>
 <link rel="stylesheet" href="/console.css">
+<script src="/passkey.js" defer></script>
 <script src="/settings.js" defer></script>
 </head>
 <body>
 <div class="wrap">
   <header>
     <div class="brand"><span class="dot"></span>AI IT Guardian <span class="meta">· settings</span></div>
-    <div class="row"><a class="btn" href="/">← Back to console</a><button class="btn sm" id="theme">Theme</button></div>
+    <div class="row"><span class="vchip" id="vault-chip"></span><button class="btn sm hidden" id="unlock">Unlock</button>
+      <a class="btn" href="/">← Back to console</a><button class="btn sm" id="theme">Theme</button>
+      <span class="meta" id="me"></span><button class="btn sm" id="signout">Sign out</button></div>
   </header>
 
   <div class="slayout">
     <nav class="card snav" id="nav">
       <a href="#connectors" data-s="connectors">Connectors <span class="count hidden" id="nav-count"></span></a>
-      <a href="#ai" data-s="ai">AI engine</a>
-      <a href="#access" data-s="access">Access &amp; sign-in</a>
+      <a href="#users" data-s="users" class="admin-only">Users &amp; access</a>
+      <a href="#security" data-s="security" class="admin-only">Security &amp; vault</a>
+      <a href="#account" data-s="account">My account</a>
+      <a href="#ai" data-s="ai" class="admin-only">AI engine</a>
       <a href="#scope" data-s="scope">Scan scope</a>
       <a href="#schedules" data-s="schedules">Schedules &amp; alerts</a>
     </nav>
@@ -30,13 +35,17 @@
           <h1>Connectors</h1>
           <p class="lede">A scan sees devices from the outside. A connector lets Guardian look inside with a <b>read-only</b> account you create, for checks like patch levels, backup status, user accounts and shares. Nothing is ever changed.</p>
         </div>
-        <div class="card">
+        <div class="card vault-locked hidden" id="locked-card">
+          <div class="toggle-row"><div><b>The vault is locked</b><p class="note">Connectors and their passwords are encrypted. Unlock with your passkey to see and use them.</p></div>
+          <button class="btn primary" id="unlock-inline">Unlock with passkey</button></div>
+        </div>
+        <div class="card unlocked-only">
           <div class="sechead"><h2>Suggested from your last scan</h2><span class="note" id="scan-note"></span></div>
           <div id="new-callout"></div>
           <div class="cgrid" id="suggestions"></div>
           <p class="note" id="uncovered"></p>
         </div>
-        <div class="card">
+        <div class="card unlocked-only">
           <div class="sechead"><h2>Your connectors</h2><button class="btn sm" id="add-btn">+ Add connector</button></div>
           <div id="configured"></div>
         </div>
@@ -64,17 +73,66 @@
         </form>
       </section>
 
-      <!-- Access -->
-      <section class="stack hidden" id="s-access">
-        <div><h1>Access &amp; sign-in</h1>
-          <p class="lede">Choose whether the console asks for an access code. With sign-in off, anyone on your network who opens the console can use it.</p></div>
-        <div class="card">
-          <div class="toggle-row">
-            <div><b>Require an access code</b><p class="note" id="access-state"></p></div>
-            <button class="btn" id="access-btn"></button>
+      <!-- Users -->
+      <section class="stack hidden" id="s-users">
+        <div><h1>Users &amp; access</h1>
+          <p class="lede">People sign in with their Google or Microsoft account and confirm with a passkey. Viewers read reports; operators run scans and use connectors; admins manage everything.</p></div>
+        <form class="card" id="invite-form">
+          <h2>Invite someone</h2>
+          <div class="f3">
+            <div><label for="inv-email">E-mail (their Google or Microsoft account)</label><input id="inv-email" type="email" required placeholder="name@company.com"></div>
+            <div><label for="inv-role">Role</label><select id="inv-role"><option value="viewer">Viewer: reports only</option><option value="operator">Operator: run scans</option><option value="admin">Admin: everything</option></select></div>
+            <button class="btn primary" type="submit">Create invite</button>
           </div>
-          <div id="access-code" class="codebox hidden"></div>
-        </div>
+          <div id="inv-out"></div>
+          <p class="note" id="inv-note">The link works once, only for that e-mail address, and expires after 7 days. Send it to them yourself.</p>
+        </form>
+        <div class="card"><div class="sechead"><h2>Users</h2><span class="note" id="users-count"></span></div><div id="users"></div></div>
+        <div class="card"><h2>What each role can do</h2>
+          <div class="tablewrap"><table class="ctab"><thead><tr><th></th><th>Viewer</th><th>Operator</th><th>Admin</th></tr></thead><tbody>
+            <tr><td>Read reports and history</td><td>✓</td><td>✓</td><td>✓</td></tr>
+            <tr><td>Start and stop scans</td><td></td><td>✓</td><td>✓</td></tr>
+            <tr><td>Use connectors (unlocks secrets)</td><td></td><td>✓</td><td>✓</td></tr>
+            <tr><td>Add or edit connectors</td><td></td><td></td><td>✓</td></tr>
+            <tr><td>Manage users and security</td><td></td><td></td><td>✓</td></tr>
+          </tbody></table></div></div>
+      </section>
+
+      <!-- Security -->
+      <section class="stack hidden" id="s-security">
+        <div><h1>Security &amp; vault</h1>
+          <p class="lede">Connector passwords, tokens, keys and API keys are in an encrypted vault. It opens only when an admin or operator confirms with their passkey, and closes when they sign out or go idle.</p></div>
+        <div class="card"><div class="vaultrow" id="vault-status"></div>
+          <div class="row field"><label for="al-idle" style="margin:0">Auto-lock after</label>
+            <select id="al-idle" style="width:auto"><option value="5">5 min</option><option value="15">15 min</option><option value="30">30 min</option><option value="60">1 hour</option></select>
+            <label for="al-max" style="margin:0">and at most</label>
+            <select id="al-max" style="width:auto"><option value="1">1 hour</option><option value="4">4 hours</option><option value="8">8 hours</option><option value="12">12 hours</option></select>
+            <button class="btn sm" id="al-save">Save</button><span class="note" id="al-msg"></span></div></div>
+        <div class="card"><h2>How your secrets are protected</h2>
+          <div class="kh">
+            <div><b>Your passkey</b>Lives on your device (Face ID, Windows Hello, YubiKey) and never leaves it.</div>
+            <div><b>Your personal key</b>Opened only by your passkey. Stored encrypted; useless without it.</div>
+            <div><b>Vault key</b>Sealed separately for each admin and operator. Never written to disk unencrypted.</div>
+            <div><b>Each secret</b>Encrypted on its own (AES-256-GCM) and bound to its record.</div>
+          </div>
+          <p class="note">While the vault is locked, someone with full access to the server, including an AI tool, sees only encrypted data.</p></div>
+        <div class="card"><div class="sechead"><h2>Recovery key</h2><span class="tag" id="rec-state"></span></div>
+          <p class="note">Opens the vault if every admin passkey is lost. Guardian keeps only an encrypted copy of the vault key under it.</p>
+          <button class="btn" id="rec-rotate">Replace recovery key</button><div id="rec-out"></div></div>
+        <div class="card"><h2>Sign-in providers</h2>
+          <p class="note">Register Guardian once with Google and/or Microsoft, then paste the client ID and secret here. The secret is needed before anyone signs in, so it's protected by the server's file permissions rather than the vault.</p>
+          <div id="oidc"></div></div>
+        <div class="card"><div class="sechead"><h2>Audit log</h2><span class="note">Tamper-evident: each entry is chained to the previous one</span></div>
+          <div id="audit"></div>
+          <div class="row field"><button class="btn sm" id="audit-verify">Verify log integrity</button><a class="btn sm" href="/api/audit.csv">Export CSV</a><span class="note" id="audit-msg"></span></div></div>
+      </section>
+
+      <!-- My account -->
+      <section class="stack hidden" id="s-account">
+        <div><h1>My account</h1><p class="lede" id="acct-lede"></p></div>
+        <div class="card"><div class="sechead"><h2>My passkeys</h2><button class="btn sm" id="pk-add">Add a passkey</button></div>
+          <div id="my-passkeys"></div><p class="note">Add a second passkey (another device or a YubiKey) so you're never locked out.</p></div>
+        <div class="card"><h2>Sign-in account</h2><p class="note" id="link-note"></p><div class="row" id="link-btns"></div></div>
       </section>
 
       <section class="stack hidden" id="s-scope">

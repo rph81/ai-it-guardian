@@ -9,7 +9,7 @@ let polling = null;
 async function api(path, body) {
   const opts = body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json", "X-Guardian": "1"}, body: JSON.stringify(body)};
   const r = await fetch(path, opts);
-  if (r.status === 401) { showSignin(); throw new Error("Sign in first"); }
+  if (r.status === 401) { location.replace("/signin"); throw new Error("Sign in first"); }
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.detail || `Request failed (${r.status})`);
   return data;
@@ -27,16 +27,28 @@ function el(tag, attrs = {}, ...kids) {
 const fmtRun = id => `${id.slice(0,4)}-${id.slice(4,6)}-${id.slice(6,8)} ${id.slice(9,11)}:${id.slice(11,13)}`;
 const mins = s => Math.max(0, Math.round(s / 60));
 
-// -- sign-in ------------------------------------------------------------------
-function showSignin() { $("app").classList.add("hidden"); $("signin").classList.remove("hidden"); $("code").focus(); }
-
-$("signin-form").addEventListener("submit", async e => {
-  e.preventDefault();
-  $("signin-err").textContent = "";
-  try { await api("/api/login", {code: $("code").value}); $("code").value = ""; start(); }
-  catch (err) { $("signin-err").textContent = err.message; }
-});
-$("signout").addEventListener("click", async () => { await api("/api/logout", {}); showSignin(); });
+// -- who is signed in, vault state ----------------------------------------------------
+let me = null;
+function renderMe() {
+  $("me").textContent = `${me.name} · ${me.role[0].toUpperCase()}${me.role.slice(1)}`;
+  $("avatar").textContent = me.name.split(/\s+/).map(w => w[0]).slice(0, 2).join("").toUpperCase();
+  const vaultRole = me.role !== "viewer";
+  document.querySelectorAll(".op-only").forEach(e => e.classList.toggle("hidden", !vaultRole));
+  $("vault-chip").className = "vchip " + (me.unlocked ? "open" : "shut");
+  $("vault-chip").textContent = me.unlocked ? "Vault unlocked" : (me.can_unlock ? "Vault locked" : "Read-only");
+  $("vault-chip").classList.toggle("hidden", !vaultRole && !me.unlocked);
+  $("unlock").classList.toggle("hidden", me.unlocked || !me.can_unlock);
+  $("lock").classList.toggle("hidden", !me.unlocked);
+}
+async function refreshMe() { me = await api("/api/me"); renderMe(); }
+async function unlock() {
+  try { const r = await Passkey.authenticate(true); if (r.note) note(r.note); await refreshMe(); return me.unlocked; }
+  catch (e) { alert(Passkey.explain(e)); return false; }
+}
+function note(text) { $("note").textContent = text; $("note").classList.toggle("hidden", !text); }
+$("unlock").addEventListener("click", unlock);
+$("lock").addEventListener("click", async () => { await api("/api/vault/lock", {}); await refreshMe(); });
+$("signout").addEventListener("click", async () => { await api("/api/auth/signout", {}); location.replace("/signin"); });
 
 // -- runs ---------------------------------------------------------------------
 function renderRuns(runs, job) {
@@ -57,10 +69,11 @@ function renderRuns(runs, job) {
     if (r.analysed) for (const s of SEVS) if (r.counts[s]) sevs.append(el("span", {}, el("b", {class: `c-${s}`}, String(r.counts[s])), ` ${s === "medium" ? "med" : s}`));
     if (r.has_graph && !r.analysed) sevs.append(el("span", {}, "no AI analysis yet"));
     const acts = el("div", {class: "row"});
+    const canRun = me && me.role !== "viewer";
     if (r.has_report) acts.append(el("button", {class: "btn sm", onclick: ev => { ev.stopPropagation(); openRun(r.id, true); }}, "Report"));
     if (r.has_graph) {
-      acts.append(el("button", {class: "btn sm", onclick: ev => { ev.stopPropagation(); startJob("resume", r.id); }}, r.analysed ? "Re-run AI" : "Run AI"));
-      if (r.analysed || r.has_report) acts.append(el("button", {class: "btn sm", onclick: ev => { ev.stopPropagation(); startJob("report", r.id); }}, "Rebuild report"));
+      if (canRun) acts.append(el("button", {class: "btn sm", onclick: ev => { ev.stopPropagation(); startJob("resume", r.id); }}, r.analysed ? "Re-run AI" : "Run AI"));
+      if (canRun && (r.analysed || r.has_report)) acts.append(el("button", {class: "btn sm", onclick: ev => { ev.stopPropagation(); startJob("report", r.id); }}, "Rebuild report"));
       acts.append(el("a", {class: "btn sm", href: `/api/runs/${r.id}/graph`, onclick: ev => ev.stopPropagation()}, "Data"));
     }
     box.append(el("div", {class: "run" + (r.id === current ? " on" : ""), onclick: () => openRun(r.id, r.has_report)}, top, sevs, acts));
@@ -86,7 +99,12 @@ function openRun(id, hasReport) {
 async function startJob(mode, runId) {
   try {
     seq = 0; $("p-log").replaceChildren();
-    const s = await api("/api/job/start", {mode, run_id: runId || null});
+    let s;
+    try { s = await api("/api/job/start", {mode, run_id: runId || null}); }
+    catch (e) {
+      if (!/Unlock the vault/.test(e.message) || !confirm(e.message + "\n\nUnlock now?") || !await unlock()) throw e;
+      s = await api("/api/job/start", {mode, run_id: runId || null});
+    }
     showTab("log"); renderJob(s); poll();
   } catch (err) { alert(err.message); }
 }
@@ -169,10 +187,8 @@ $("theme").addEventListener("click", () => {
 });
 
 async function start() {
-  const sess = await api("/api/session");
-  if (!sess.signed_in) return showSignin();
-  $("signout").classList.toggle("hidden", !sess.auth);
-  $("signin").classList.add("hidden"); $("app").classList.remove("hidden");
+  await refreshMe();
+  const n = sessionStorage.getItem("guardian-note"); if (n) { note(n); sessionStorage.removeItem("guardian-note"); }
   const o = await api("/api/overview");
   renderRuns(o.runs, o.job);
   const latest = o.runs.find(r => r.has_report);
@@ -183,6 +199,6 @@ async function start() {
   if (s.running) { showTab("log"); poll(); }
 }
 start();
-fetch("/api/connectors").then(r => r.ok ? r.json() : null).then(d => {
+setTimeout(() => me && me.role !== "viewer" && fetch("/api/connectors").then(r => r.ok ? r.json() : null).then(d => {
   if (d && d.suggestions.length) { $("set-count").textContent = d.suggestions.length; $("set-count").classList.remove("hidden"); }
-}).catch(() => {});
+}).catch(() => {}), 500);

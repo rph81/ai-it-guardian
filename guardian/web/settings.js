@@ -7,7 +7,7 @@ let editing = null;        // {type, id, suggestion}
 async function api(path, body) {
   const opts = body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json", "X-Guardian": "1"}, body: JSON.stringify(body)};
   const r = await fetch(path, opts);
-  if (r.status === 401) { location.href = "/"; throw new Error("Sign in first"); }
+  if (r.status === 401) { location.replace("/signin"); throw new Error("Sign in first"); }
   const out = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(out.detail || `Request failed (${r.status})`);
   return out;
@@ -30,15 +30,23 @@ const icon = spec => el("span", {class: "ico", style: `background:${spec.color}`
 
 // -- sections -----------------------------------------------------------------------
 function showSection() {
-  const s = (location.hash || "#connectors").slice(1);
+  let s = (location.hash || "").slice(1);
+  if (!SECTIONS.includes(s) || (me && !allowed(s))) s = me && me.role === "viewer" ? "account" : "connectors";
   document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("on", a.dataset.s === s));
-  for (const id of ["connectors", "ai", "access", "scope", "schedules"]) $("s-" + id).classList.toggle("hidden", id !== s);
+  for (const id of SECTIONS) $("s-" + id).classList.toggle("hidden", id !== s);
+  if (s === "users") loadUsers();
+  if (s === "security") loadSecurity();
+  if (s === "account") loadAccount();
 }
+const SECTIONS = ["connectors", "users", "security", "account", "ai", "scope", "schedules"];
 window.addEventListener("hashchange", showSection);
 
 // -- connectors -----------------------------------------------------------------------
 async function loadConnectors() {
+  if (me.role === "viewer") return;
   data = await api("/api/connectors");
+  $("locked-card").classList.toggle("hidden", !data.locked);
+  document.querySelectorAll(".unlocked-only").forEach(e => e.classList.toggle("hidden", data.locked));
   renderSuggestions(); renderConfigured(); renderCatalog();
   const n = data.suggestions.length;
   $("nav-count").textContent = n; $("nav-count").classList.toggle("hidden", !n);
@@ -62,8 +70,8 @@ function renderSuggestions() {
       el("div", {class: "note"}, x.why),
       el("div", {class: "gain"}, "Checks: " + spec.checks),
       el("div", {class: "acts"},
-        el("button", {class: "btn primary sm", onclick: () => openDrawer(x.type, null, x)}, "Connect"),
-        el("button", {class: "btn ghost sm", onclick: () => dismiss(x.key)}, "Not now"))));
+        data.can_edit ? el("button", {class: "btn primary sm", onclick: () => openDrawer(x.type, null, x)}, "Connect") : el("span", {class: "note"}, "An admin can connect this"),
+        data.can_edit ? el("button", {class: "btn ghost sm", onclick: () => dismiss(x.key)}, "Not now") : null)));
   }
   const parts = [];
   if (data.uncovered) parts.push(`${data.uncovered} other device${data.uncovered === 1 ? " has" : "s have"} no connector (TVs, phones, appliances, the ISP router). They're still covered by the network scan.`);
@@ -92,7 +100,7 @@ function renderConfigured() {
       el("td", {class: "meta"}, ago(c.last_check)),
       el("td", {}, el("div", {class: "row"},
         el("button", {class: "btn sm", onclick: () => recheck(c.id)}, "Re-check"),
-        el("button", {class: "btn sm", onclick: () => openDrawer(c.type, c)}, "Edit"))));
+        data.can_edit ? el("button", {class: "btn sm", onclick: () => openDrawer(c.type, c)}, "Edit") : null)));
   });
   box.replaceChildren(el("div", {class: "tablewrap"}, el("table", {class: "ctab"},
     el("thead", {}, el("tr", {}, ...["Name", "Type", "Target", "Status", "Last check", ""].map(h => el("th", {}, h)))),
@@ -121,7 +129,7 @@ function renderCatalog() {
         el("div", {class: "ctop"}, icon(spec), el("div", {}, el("b", {}, spec.label), el("span", {class: "meta"}, spec.summary))),
         el("div", {class: "gain"}, spec.checks),
         el("div", {class: "acts"}, planned ? el("span", {class: "tag"}, "Planned")
-          : el("button", {class: "btn sm", onclick: () => openDrawer(type)}, n ? "Add another" : "Add"),
+          : data.can_edit ? el("button", {class: "btn sm", onclick: () => openDrawer(type)}, n ? "Add another" : "Add") : null,
           n ? el("span", {class: "tag ok"}, `${n} set up`) : null));
     })));
   }
@@ -237,21 +245,153 @@ $("ai-form").addEventListener("submit", async e => {
   } catch (err) { $("ai-msg").textContent = err.message; }
 });
 
-// -- access -----------------------------------------------------------------------------
-function renderAccess(on) {
-  $("access-state").textContent = on ? "On: the console asks for the access code." : "Off: anyone on your network can use the console.";
-  $("access-btn").textContent = on ? "Turn off" : "Turn on";
-  $("access-btn").className = on ? "btn" : "btn primary";
-  $("access-btn").onclick = async () => {
-    if (on && !confirm("Turn sign-in off? Anyone on your network will be able to use the console.")) return;
-    try {
-      const r = await api("/api/access", {auth: !on});
-      renderAccess(r.auth);
-      $("access-code").classList.toggle("hidden", !r.code);
-      $("access-code").textContent = r.code ? `Access code: ${r.code}  (shown once; it's also in /opt/ai-guardian/console/access-code)` : "";
-    } catch (e) { alert(e.message); }
-  };
+// -- me, vault --------------------------------------------------------------------------
+let me = null;
+const ADMIN_ONLY = ["users", "security", "ai"];
+const allowed = s => me.role === "admin" || (me.role === "operator" ? !ADMIN_ONLY.includes(s) : s === "account");
+function renderMe() {
+  $("me").textContent = `${me.name} · ${me.role}`;
+  $("vault-chip").className = "vchip " + (me.unlocked ? "open" : "shut");
+  $("vault-chip").textContent = me.unlocked ? "Vault unlocked" : (me.can_unlock ? "Vault locked" : "Read-only");
+  $("unlock").classList.toggle("hidden", me.unlocked || !me.can_unlock);
+  document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("hidden", !allowed(a.dataset.s)));
 }
+async function refreshMe() { me = await api("/api/me"); renderMe(); }
+async function unlock() {
+  try { const r = await Passkey.authenticate(true); if (r.note) alert(r.note); await refreshMe(); await loadConnectors(); showSection(); }
+  catch (e) { alert(Passkey.explain(e)); }
+}
+$("unlock").addEventListener("click", unlock);
+$("unlock-inline").addEventListener("click", unlock);
+$("signout").addEventListener("click", async () => { await api("/api/auth/signout", {}); location.replace("/signin"); });
+const when = t => t ? new Date(t * 1000).toLocaleString([], {dateStyle: "medium", timeStyle: "short"}) : "—";
+const ROLE = {viewer: "Viewer", operator: "Operator", admin: "Admin"};
+
+// -- users ----------------------------------------------------------------------------------
+async function loadUsers() {
+  const d = await api("/api/users");
+  $("users-count").textContent = `${d.users.length} user${d.users.length === 1 ? "" : "s"}` + (d.invites.length ? ` · ${d.invites.length} pending` : "");
+  $("inv-note").textContent = "The link works once, only for that e-mail address, and expires after 7 days. Send it to them yourself."
+    + (Object.keys(d.providers).length ? ` They sign in with ${Object.values(d.providers).join(" or ")}.` : " No Google or Microsoft sign-in is set up yet, so they'll use a passkey only.");
+  const rows = d.users.map(u => {
+    const isMe = u.id === me.id;
+    const role = el("select", {class: "mini", disabled: isMe, onchange: async e => { try { await api(`/api/users/${u.id}`, {role: e.target.value}); } catch (x) { alert(x.message); } loadUsers(); }},
+      ...Object.entries(ROLE).map(([v, t]) => el("option", {value: v, selected: v === u.role}, t)));
+    let access;
+    if (u.role === "viewer") access = el("span", {class: "tag"}, "Not needed");
+    else if (u.vault) access = el("span", {class: "tag ok"}, "Granted");
+    else if (!u.has_key) access = el("span", {class: "tag"}, "Needs a passkey first");
+    else access = el("button", {class: "btn sm primary", onclick: async () => { try { await api(`/api/users/${u.id}/grant`, {}); } catch (x) { alert(x.message); } loadUsers(); }}, "Grant vault access");
+    const acts = el("div", {class: "row"});
+    if (!isMe) {
+      if (u.vault) acts.append(el("button", {class: "btn sm", onclick: async () => { if (confirm(`Remove ${u.name}'s vault access?`)) { try { await api(`/api/users/${u.id}/revoke`, {}); } catch (x) { alert(x.message); } loadUsers(); } }}, "Revoke vault"));
+      acts.append(el("button", {class: "btn sm", onclick: async () => { try { await api(`/api/users/${u.id}`, {status: u.status === "active" ? "disabled" : "active"}); } catch (x) { alert(x.message); } loadUsers(); }}, u.status === "active" ? "Disable" : "Enable"));
+      acts.append(el("button", {class: "btn sm ghost danger", onclick: async () => { if (confirm(`Remove ${u.email}?`)) { try { await api(`/api/users/${u.id}/delete`, {}); } catch (x) { alert(x.message); } loadUsers(); } }}, "Remove"));
+    }
+    return el("tr", {class: u.status === "active" ? "" : "muted"},
+      el("td", {}, el("b", {}, u.name + (isMe ? " (you)" : "")), el("br"), el("span", {class: "meta"}, u.email)),
+      el("td", {}, u.provider ? {google: "Google", microsoft: "Microsoft"}[u.provider] : "Passkey only"),
+      el("td", {}, role),
+      el("td", {}, String(u.passkeys), u.passkey_names ? el("span", {class: "meta"}, ` (${u.passkey_names})`) : null),
+      el("td", {}, access),
+      el("td", {class: "meta"}, u.status === "active" ? when(u.last_login) : "disabled"),
+      el("td", {}, acts));
+  });
+  const inv = d.invites.map(i => el("tr", {},
+    el("td", {}, el("b", {}, i.email), el("br"), el("span", {class: "meta"}, "invited " + when(i.created))),
+    el("td", {class: "meta"}, "—"), el("td", {}, ROLE[i.role]), el("td", {class: "meta"}, "—"),
+    el("td", {}, el("span", {class: "tag new"}, "Invite pending")), el("td", {class: "meta"}, "expires " + when(i.expires)),
+    el("td", {}, el("button", {class: "btn sm ghost danger", onclick: async () => { await api(`/api/invites/${i.id}/revoke`, {}); loadUsers(); }}, "Revoke"))));
+  $("users").replaceChildren(el("div", {class: "tablewrap"}, el("table", {class: "ctab"},
+    el("thead", {}, el("tr", {}, ...["Person", "Signs in with", "Role", "Passkeys", "Vault access", "Last sign-in", ""].map(h => el("th", {}, h)))),
+    el("tbody", {}, ...rows, ...inv))));
+}
+$("invite-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  try {
+    const r = await api("/api/users/invite", {email: $("inv-email").value, role: $("inv-role").value});
+    const box = el("div", {class: "codebox"}, r.link);
+    $("inv-out").replaceChildren(el("p", {class: "note"}, `Invite for ${r.email} (${ROLE[r.role]}). Copy this link and send it to them:`), box,
+      el("button", {class: "btn sm", type: "button", onclick: async ev => { try { await navigator.clipboard.writeText(r.link); ev.target.textContent = "Copied"; } catch (x) { getSelection().selectAllChildren(box); } }}, "Copy link"));
+    $("inv-email").value = ""; loadUsers();
+  } catch (x) { $("inv-out").replaceChildren(el("p", {class: "err"}, x.message)); }
+});
+
+// -- security --------------------------------------------------------------------------------
+async function loadSecurity() {
+  const d = await api("/api/security");
+  $("vault-status").replaceChildren(
+    el("span", {class: "vbig " + (d.unlocked ? "open" : "shut")}, d.unlocked ? "🔓" : "🔒"),
+    el("div", {}, el("b", {}, d.unlocked ? "Vault unlocked" : "Vault locked"), el("div", {class: "note"},
+      d.unlocked ? `By ${d.unlocked_by} at ${when(d.unlocked_at)} · ${d.holders} session${d.holders === 1 ? "" : "s"} · ${d.records} connector${d.records === 1 ? "" : "s"} stored`
+                 : `${d.records} connector${d.records === 1 ? "" : "s"} stored, all encrypted`)));
+  $("al-idle").value = d.autolock.idle; $("al-max").value = d.autolock.max;
+  $("rec-state").textContent = d.recovery_created ? "Created " + when(d.recovery_created) : "Not created yet";
+  $("rec-state").className = "tag" + (d.recovery_created ? " ok" : " warn");
+  $("oidc").replaceChildren(...Object.entries(d.oidc).map(([k, v]) => {
+    const label = k === "google" ? "Google" : "Microsoft";
+    const id = el("input", {class: "mono", value: v.client_id, placeholder: "Client ID"});
+    const secret = el("input", {type: "password", autocomplete: "new-password", placeholder: v.secret_set ? "Saved. Leave blank to keep it" : "Client secret"});
+    const msg = el("span", {class: "note"});
+    return el("div", {class: "provbox"},
+      el("div", {class: "sechead"}, el("b", {}, label), el("span", {class: "tag" + (v.client_id && v.secret_set ? " ok" : "")}, v.client_id && v.secret_set ? "Enabled" : "Not set up")),
+      el("label", {}, "Redirect URI to register with " + label), el("div", {class: "codebox"}, v.redirect),
+      el("div", {class: "f2"}, el("div", {}, el("label", {}, "Client ID"), id), el("div", {}, el("label", {}, "Client secret"), secret)),
+      el("div", {class: "row field"}, el("button", {class: "btn sm primary", type: "button", onclick: async () => {
+        try { await api("/api/security/oidc", {provider: k, client_id: id.value, client_secret: secret.value}); secret.value = ""; msg.textContent = "Saved"; loadSecurity(); }
+        catch (x) { msg.textContent = x.message; } }}, "Save"), msg));
+  }));
+  const a = await api("/api/audit?limit=100");
+  $("audit").replaceChildren(el("div", {class: "tablewrap logbox"}, el("table", {class: "ctab"},
+    el("thead", {}, el("tr", {}, ...["When", "Who", "What", ""].map(h => el("th", {}, h)))),
+    el("tbody", {}, ...a.rows.map(r => el("tr", {}, el("td", {class: "meta nowrap"}, when(r.ts)), el("td", {}, r.actor),
+      el("td", {}, r.action.replace(/-/g, " ")), el("td", {class: "meta"}, r.detail)))))));
+}
+$("al-save").addEventListener("click", async () => {
+  try { await api("/api/security/autolock", {idle: +$("al-idle").value, max: +$("al-max").value}); $("al-msg").textContent = "Saved"; } catch (x) { $("al-msg").textContent = x.message; }
+});
+$("rec-rotate").addEventListener("click", async () => {
+  if (!confirm("Create a new recovery key? The current one stops working immediately.")) return;
+  try {
+    const r = await api("/api/security/recovery", {});
+    $("rec-out").replaceChildren(el("p", {class: "note"}, "Your new recovery key. It's shown only now: store it safely."), el("div", {class: "codebox big"}, r.recovery_key));
+    loadSecurity();
+  } catch (x) { $("rec-out").replaceChildren(el("p", {class: "err"}, x.message)); }
+});
+$("audit-verify").addEventListener("click", async () => {
+  const r = await api("/api/audit/verify");
+  $("audit-msg").textContent = r.ok ? `Intact: ${r.entries} entries checked.` : `Tampering detected at entry ${r.broken_at ?? "(entries were deleted)"}.`;
+  $("audit-msg").className = r.ok ? "note ok" : "err";
+});
+
+// -- my account --------------------------------------------------------------------------------
+async function loadAccount() {
+  await refreshMe();
+  $("acct-lede").textContent = `${me.name} (${me.email}) · ${ROLE[me.role]}`;
+  $("my-passkeys").replaceChildren(el("div", {class: "tablewrap"}, el("table", {class: "ctab"},
+    el("thead", {}, el("tr", {}, ...["Passkey", "Opens the vault", "Added", "Last used", ""].map(h => el("th", {}, h)))),
+    el("tbody", {}, ...me.passkeys.map(p => el("tr", {}, el("td", {}, el("b", {}, p.name)),
+      el("td", {}, p.unlock ? el("span", {class: "tag ok"}, "Yes") : el("span", {class: "tag"}, "No")),
+      el("td", {class: "meta"}, when(p.created)), el("td", {class: "meta"}, when(p.last_used)),
+      el("td", {}, me.passkeys.length > 1 ? el("button", {class: "btn sm ghost danger", onclick: async () => {
+        if (confirm(`Remove passkey "${p.name}"?`)) { try { await api(`/api/me/passkeys/${p.id}/delete`, {}); } catch (x) { alert(x.message); } loadAccount(); } }}, "Remove") : null)))))));
+  const provs = Object.entries(me.providers);
+  $("link-note").textContent = me.provider
+    ? `You sign in with ${{google: "Google", microsoft: "Microsoft"}[me.provider]}, then confirm with a passkey.`
+    : provs.length ? "Your account isn't linked to Google or Microsoft yet: you sign in with a passkey only." : "No Google or Microsoft sign-in is set up: you sign in with a passkey.";
+  $("link-btns").replaceChildren(...(me.provider ? [] : provs.map(([k, l]) => el("a", {class: "btn sm", href: `/auth/${k}/start?link=1`}, `Link ${l} account`))));
+}
+$("pk-add").addEventListener("click", async () => {
+  const name = prompt("Name for the new passkey (e.g. iPhone, YubiKey):", Passkey.deviceName());
+  if (!name) return;
+  try {
+    if (!me.can_add_passkey) { alert("First confirm with one of your current passkeys."); await Passkey.authenticate(me.unlocked); }
+    await Passkey.register(name);
+    alert("Now confirm once with the NEW passkey so it can also open the vault.");
+    await Passkey.authenticate(me.unlocked);
+  } catch (e) { alert(Passkey.explain(e)); }
+  loadAccount();
+});
 
 // -- theme and start-up -----------------------------------------------------------------
 const theme = store.get("guardian-theme");
@@ -263,11 +403,8 @@ $("theme").addEventListener("click", () => {
 });
 
 (async () => {
+  await refreshMe();
   showSection();
-  const s = await api("/api/session");
-  if (!s.signed_in) { location.href = "/"; return; }
-  renderAccess(s.auth);
-  const o = await api("/api/overview");
-  renderConfig(o.config);
+  if (me.role === "admin") renderConfig((await api("/api/overview")).config);
   await loadConnectors();
 })();

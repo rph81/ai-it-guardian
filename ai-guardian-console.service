@@ -5,10 +5,13 @@ Wants=network-online.target
 
 [Service]
 WorkingDirectory=/opt/ai-guardian
+Environment=GUARDIAN_HOSTNAME=guardian.hadife.com
 ExecStart=/opt/ai-guardian/venv/bin/python /opt/ai-guardian/console.py
 Restart=on-failure
 RestartSec=5
 UMask=0077
+LimitCORE=0
+NoNewPrivileges=yes
 
 [Install]
 WantedBy=multi-user.target

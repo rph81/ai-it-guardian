@@ -5,7 +5,6 @@ suggest() reads the latest scan and proposes connectors for what it found.
 Store keeps configured connectors in console/connectors.json with secrets encrypted.
 test() signs in with a connector and confirms the account works and can't change anything.
 """
-import base64
 import hashlib
 import json
 import os
@@ -181,7 +180,7 @@ def suggest(graph, store):
     out = []
 
     def add(key, ctype, title, hosts, why, prefill, macs=()):
-        if key in store.data["dismissed"]:
+        if key in store.dismissed:
             return
         if all(h in configured_hosts.get(ctype, set()) for h in hosts):
             return
@@ -237,53 +236,46 @@ def no_connector_count(graph, suggestions):
 
 # -- storage ------------------------------------------------------------------------------
 class Store:
-    def __init__(self, state_dir):
+    """Connectors are encrypted records in the vault (readable only while it is unlocked).
+    Suggestion bookkeeping (dismissed suggestions, device inventory) is plain metadata."""
+
+    def __init__(self, vault, state_dir):
+        self.v = vault
         self.dir = Path(state_dir)
-        self.path = self.dir / "connectors.json"
-        self.key_path = self.dir / "secret.key"
-        self.data = {"connectors": [], "dismissed": [], "inventory": {}, "inventory_runs": []}
-        if self.path.exists():
-            self.data.update(json.loads(self.path.read_text()))
 
-    def save(self):
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self.data, indent=1))
-        tmp.chmod(0o600)
-        os.replace(tmp, self.path)
+    @property
+    def dismissed(self):
+        return self.v.get("dismissed", [])
 
-    # secrets are encrypted with a key that never leaves the container
-    def _fernet(self):
-        from cryptography.fernet import Fernet
-        if not self.key_path.exists():
-            self.key_path.write_bytes(Fernet.generate_key())
-            self.key_path.chmod(0o600)
-        return Fernet(self.key_path.read_bytes())
+    def set_dismissed(self, items):
+        self.v.put("dismissed", items)
 
-    def encrypt(self, value):
-        return self._fernet().encrypt(value.encode()).decode()
-
-    def decrypt(self, token):
-        return self._fernet().decrypt(token.encode()).decode()
+    def connectors(self):
+        return self.v.load_records("connector") if self.v.unlocked else []
 
     def get(self, cid):
-        return next((c for c in self.data["connectors"] if c["id"] == cid), None)
+        return next((c for c in self.connectors() if c["id"] == cid), None)
+
+    def save_connector(self, c):
+        self.v.save_record(c["id"], "connector", c)
+
+    def delete(self, cid):
+        self.v.delete_record(cid)
 
     def public(self, c):
         """A connector as the browser may see it: secrets replaced by a 'set' flag."""
         spec = CATALOG[c["type"]]
         out = {k: v for k, v in c.items() if k not in ("secrets", "pin")}
-        out["secrets_set"] = {f["name"]: f["name"] in c.get("secrets", {}) for f in spec["fields"] if f.get("secret")}
+        out["secrets_set"] = {f["name"]: bool(c.get("secrets", {}).get(f["name"])) for f in spec["fields"] if f.get("secret")}
         return out
 
-    def fields_with_secrets(self, c):
-        vals = dict(c["fields"])
-        for k, v in c.get("secrets", {}).items():
-            vals[k] = self.decrypt(v)
-        return vals
+    @staticmethod
+    def fields_with_secrets(c):
+        return {**c["fields"], **c.get("secrets", {})}
 
     def configured_targets(self):
         out = {}
-        for c in self.data["connectors"]:
+        for c in self.connectors():
             f = c["fields"]
             hosts = set(filter(None, (f.get("hosts") or "").split())) | {f.get("host"), f.get("domain")}
             if f.get("url"):
@@ -293,19 +285,22 @@ class Store:
 
     # device inventory: remembers every MAC seen, so a device first seen in the latest scan is "new"
     def update_inventory(self, run_id, graph):
-        if not graph or run_id in self.data["inventory_runs"]:
+        runs = self.v.get("inventory_runs", [])
+        if not graph or run_id in runs:
             return
-        first = not self.data["inventory_runs"]
+        inv = self.v.get("inventory", {})
+        first = not runs
         for ip, a in graph.get("assets", {}).items():
             mac = a.get("mac")
-            if mac and mac not in self.data["inventory"]:
-                self.data["inventory"][mac] = {"first_seen": run_id, "ip": ip, "baseline": first}
-        self.data["inventory_runs"].append(run_id)
-        self.save()
+            if mac and mac not in inv:
+                inv[mac] = {"first_seen": run_id, "ip": ip, "baseline": first}
+        self.v.put("inventory", inv)
+        self.v.put("inventory_runs", runs + [run_id])
 
     def new_devices(self, graph):
-        last = self.data["inventory_runs"][-1] if self.data["inventory_runs"] else None
-        return {m for m, v in self.data["inventory"].items() if v["first_seen"] == last and not v.get("baseline")}
+        runs = self.v.get("inventory_runs", [])
+        last = runs[-1] if runs else None
+        return {m for m, v in self.v.get("inventory", {}).items() if v["first_seen"] == last and not v.get("baseline")}
 
 
 # -- connection tests -------------------------------------------------------------------
@@ -442,17 +437,50 @@ def _test_home_assistant(f, pin):
     return _done(level, "Connected" if level == "ok" else "Connected, with a warning", details, pin=pin)
 
 
-def guardian_ssh_key(state_dir):
-    d = Path(state_dir) / "ssh"
-    d.mkdir(mode=0o700, exist_ok=True)
-    key = d / "id_ed25519"
-    if not key.exists():
-        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "ai-guardian", "-f", str(key)], check=True)
-    return key, (d / "id_ed25519.pub").read_text().strip()
+def guardian_ssh_key(vault):
+    """Guardian's own SSH key. The private half is a vault record; only the public half is plain metadata."""
+    pub = vault.get("ssh_public_key")
+    if pub:
+        return pub
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    key = Ed25519PrivateKey.generate()
+    private = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.OpenSSH,
+                                serialization.NoEncryption()).decode()
+    pub = key.public_key().public_bytes(serialization.Encoding.OpenSSH, serialization.PublicFormat.OpenSSH).decode() + " ai-guardian"
+    vault.save_record("ssh-key", "secret", {"private": private})
+    vault.put("ssh_public_key", pub)
+    return pub
 
 
-def _test_linux_ssh(f, state_dir):
-    key, _ = guardian_ssh_key(state_dir)
+class ssh_key_file:
+    """The private key written to a RAM-backed file for the duration of one ssh call, then removed."""
+
+    def __init__(self, vault):
+        self.vault = vault
+
+    def __enter__(self):
+        import tempfile
+        rec = next((r for r in self.vault.load_records("secret") if "private" in r), None)
+        if not rec:
+            raise Result("error", "Guardian's SSH key is missing: open the Linux connector to create it.")
+        tmpdir = "/dev/shm" if os.path.isdir("/dev/shm") else None
+        fd, self.path = tempfile.mkstemp(prefix="guardian-", dir=tmpdir)
+        os.write(fd, rec["private"].encode())
+        os.close(fd)
+        os.chmod(self.path, 0o600)
+        return self.path
+
+    def __exit__(self, *exc):
+        try:
+            with open(self.path, "r+b") as f:
+                f.write(b"\0" * os.path.getsize(self.path))
+        finally:
+            os.unlink(self.path)
+
+
+def _test_linux_ssh(f, state_dir, key):
+    (Path(state_dir) / "ssh").mkdir(mode=0o700, exist_ok=True)
     known = Path(state_dir) / "ssh" / "known_hosts"
     hosts = [h for h in (f.get("hosts") or "").split() if h]
     if not hosts:
@@ -581,14 +609,14 @@ def _test_email(f):
     return _done("warn" if weak else "ok", "Records read" + (": protection is incomplete" if weak else ""), details)
 
 
-def test(ctype, fields, pin=None, state_dir=None):
+def test(ctype, fields, pin=None, state_dir=None, vault=None):
     """Run a connection test. Returns (level, message, details, pin)."""
     tests = {
         "synology": lambda: _test_synology(fields, pin),
         "proxmox_ve": lambda: _test_proxmox(fields, pin, "ve"),
         "proxmox_bs": lambda: _test_proxmox(fields, pin, "pbs"),
         "home_assistant": lambda: _test_home_assistant(fields, pin),
-        "linux_ssh": lambda: _test_linux_ssh(fields, state_dir),
+        "linux_ssh": lambda: _with_ssh_key(vault, lambda key: _test_linux_ssh(fields, state_dir, key)),
         "snmp": lambda: _test_snmp(fields),
         "active_directory": lambda: _test_ad(fields, pin),
         "email_domain": lambda: _test_email(fields),
@@ -604,6 +632,11 @@ def test(ctype, fields, pin=None, state_dir=None):
         return "error", f"Missing field: {e.args[0]}", [], pin
     except (OSError, ssl.SSLError) as e:
         return "error", f"Can't connect: {e}", [], pin
+
+
+def _with_ssh_key(vault, fn):
+    with ssh_key_file(vault) as key:
+        return fn(key)
 
 
 def validate(ctype, fields):

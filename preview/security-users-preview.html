@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guardian Access</title>
+<style>
+:root{
+  --accent:#3b82f6;
+  --bg:#eef1f5; --card:#ffffff; --card2:#f6f8fb; --line:#dde3ea; --text:#0f172a; --muted:#64748b;
+  --ok:#16a34a; --warn:#d97706; --bad:#dc2626; --new:#7c3aed;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0b0f15; --card:#121821; --card2:#18202b; --line:#253041; --text:#e6ebf2; --muted:#8b98ab;
+  --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; --new:#a78bfa;}}
+:root[data-theme="dark"]{
+  --bg:#0b0f15; --card:#121821; --card2:#18202b; --line:#253041; --text:#e6ebf2; --muted:#8b98ab;
+  --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; --new:#a78bfa;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif}
+.banner{background:var(--accent);color:#fff;font-size:12.5px;text-align:center;padding:6px 16px}
+.switcher{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--card)}
+.switcher button{border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:999px;padding:6px 12px;font:inherit;font-size:12.5px;cursor:pointer}
+.switcher button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.wrap{max-width:1180px;margin:0 auto;padding:20px 16px 48px}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;font-weight:650;font-size:15px}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px color-mix(in srgb,var(--ok) 22%,transparent);flex:none}
+.dot.lock{background:var(--muted);box-shadow:0 0 0 4px color-mix(in srgb,var(--muted) 22%,transparent)}
+.meta{color:var(--muted);font-size:13px}
+.btn{border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:999px;padding:7px 14px;font:inherit;font-size:13px;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:8px;justify-content:center}
+.btn:hover{background:var(--card2)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.sm{padding:3px 10px;font-size:12px}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--muted)}
+.btn.danger{color:var(--bad)}
+.btn.big{width:100%;padding:11px 16px;font-size:14px;border-radius:12px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.layout{display:grid;grid-template-columns:220px minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:860px){.layout{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px}
+nav.card{padding:8px}
+nav a{display:flex;justify-content:space-between;align-items:center;padding:9px 12px;border-radius:10px;color:var(--text);text-decoration:none;font-size:13.5px}
+nav a.on{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);font-weight:600}
+@media (max-width:860px){nav.card{display:flex;overflow-x:auto;gap:4px}nav a{flex:none}}
+h1{font-size:20px;margin:0 0 4px}
+h2{font-size:13px;margin:0;font-weight:650;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.lede{color:var(--muted);margin:0 0 4px;max-width:760px}
+.stack>*+*{margin-top:16px}
+.sechead{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;color:var(--muted);font-weight:500;padding:8px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+.tablewrap{overflow-x:auto}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.tag{display:inline-block;font-size:11px;border-radius:999px;padding:1px 8px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.tag.ok{border-color:var(--ok);color:var(--ok)}.tag.warn{border-color:var(--warn);color:var(--warn)}.tag.bad{border-color:var(--bad);color:var(--bad)}.tag.new{border-color:var(--new);color:var(--new)}
+.note{font-size:12.5px;color:var(--muted)}
+label{display:block;font-size:12px;color:var(--muted);margin:12px 0 4px}
+input,select{width:100%;border:1px solid var(--line);background:var(--card2);color:var(--text);border-radius:10px;padding:8px 10px;font:inherit;font-size:13px}
+.f3{display:grid;grid-template-columns:2fr 1fr auto;gap:10px;align-items:end}
+@media (max-width:640px){.f3{grid-template-columns:1fr}}
+.avatar{width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex:none}
+.who{display:flex;align-items:center;gap:10px}
+.prov{width:16px;height:16px;flex:none}
+.hidden{display:none!important}
+/* sign-in */
+.signin{min-height:calc(100vh - 110px);display:flex;align-items:center;justify-content:center;padding:24px 16px}
+.signin .card{width:100%;max-width:400px;padding:26px}
+.steps{display:flex;gap:6px;margin:16px 0 18px}
+.steps span{flex:1;height:4px;border-radius:4px;background:var(--line)}
+.steps span.on{background:var(--accent)}
+.or{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12px;margin:14px 0}
+.or:before,.or:after{content:"";flex:1;height:1px;background:var(--line)}
+.bio{width:64px;height:64px;border-radius:18px;margin:6px auto 14px;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent)}
+.center{text-align:center}
+/* vault */
+.vault{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.vault .big{width:52px;height:52px;border-radius:14px;display:flex;align-items:center;justify-content:center;flex:none}
+.kh{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:4px}
+.kh div{background:var(--card2);border-radius:12px;padding:12px;font-size:12.5px}
+.kh b{display:block;font-size:13px;margin-bottom:2px}
+.log td{font-size:12.5px}
+/* connector auth */
+.methods{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-top:6px}
+.method{border:1px solid var(--line);border-radius:12px;padding:10px;cursor:pointer;background:var(--card2);font-size:12.5px}
+.method.on{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 25%,transparent)}
+.method b{display:block;font-size:13px}
+.oauthbox{margin-top:14px;background:var(--card2);border-radius:12px;padding:14px}
+.perm{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;margin-top:6px}
+.cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.conn{background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px}
+.ico{width:36px;height:36px;border-radius:10px;flex:none;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11.5px;color:#fff}
+.ctop{display:flex;gap:10px;align-items:flex-start}
+.ctop b{display:block}
+</style>
+</head>
+<body>
+<div class="banner">Design preview with sample data. Switch screens with the buttons below; nothing signs in or saves.</div>
+<div class="switcher" id="sw">
+  <button data-v="signin" class="on">1 · Sign in</button>
+  <button data-v="unlock">2 · Passkey unlock</button>
+  <button data-v="users">3 · Users &amp; access</button>
+  <button data-v="security">4 · Security &amp; vault</button>
+  <button data-v="auth">5 · Connector sign-in methods</button>
+</div>
+
+<!-- 1 sign-in -->
+<section id="v-signin" class="signin">
+  <div class="card">
+    <div class="brand"><span class="dot lock"></span>AI IT Guardian</div>
+    <div class="steps"><span class="on"></span><span></span></div>
+    <h1>Sign in</h1>
+    <p class="note" style="margin:0 0 18px">Use the account your administrator invited.</p>
+    <button class="btn big" data-go="unlock">
+      <svg class="prov" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
+      Continue with Google</button>
+    <div style="height:10px"></div>
+    <button class="btn big" data-go="unlock">
+      <svg class="prov" viewBox="0 0 23 23"><path fill="#f35325" d="M1 1h10v10H1z"/><path fill="#81bc06" d="M12 1h10v10H12z"/><path fill="#05a6f0" d="M1 12h10v10H1z"/><path fill="#ffba08" d="M12 12h10v10H12z"/></svg>
+      Continue with Microsoft</button>
+    <div class="or">or</div>
+    <button class="btn big ghost" style="border:1px solid var(--line)" data-go="unlock">Use a recovery key</button>
+    <p class="note center" style="margin:18px 0 0">Only invited accounts can sign in. Signing in never unlocks connector secrets by itself: that needs your passkey.</p>
+  </div>
+</section>
+
+<!-- 2 unlock -->
+<section id="v-unlock" class="signin hidden">
+  <div class="card center">
+    <div class="brand" style="justify-content:center"><span class="dot lock"></span>AI IT Guardian</div>
+    <div class="steps"><span class="on"></span><span class="on"></span></div>
+    <div class="bio"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 11v4"/><path d="M8.5 7.5A5 5 0 0 1 17 11v1.5"/><path d="M7 11v2a5 5 0 0 0 1.5 3.6"/><path d="M12 7a4 4 0 0 0-4 4"/><path d="M16 16.5a5 5 0 0 1-1.2 1.8"/><path d="M5 9.5A8 8 0 0 1 19 9"/><path d="M4.5 13.5a8 8 0 0 0 1.4 3.4"/></svg></div>
+    <h1>Hi Raphael</h1>
+    <p class="note" style="margin:4px 0 18px">Signed in as <b>hadife@gmail.com</b> with Google.<br>Confirm with your passkey to unlock Guardian.</p>
+    <button class="btn primary big" data-go="users">Unlock with passkey</button>
+    <p class="note" style="margin:12px 0 0">Your browser will ask for Face ID, Touch ID, Windows Hello or your security key.</p>
+    <div class="or">or</div>
+    <button class="btn big ghost" style="border:1px solid var(--line)" data-go="users">Continue read-only</button>
+    <p class="note" style="margin:10px 0 0">Read-only: reports and history, no scans or connectors.</p>
+  </div>
+</section>
+
+<!-- shared settings frame -->
+<div class="wrap hidden" id="frame">
+  <header>
+    <div class="brand"><span class="dot"></span>AI IT Guardian <span class="meta">· settings</span></div>
+    <div class="row">
+      <span class="tag ok">Unlocked · auto-locks in 28 min</span>
+      <button class="btn sm">Lock now</button>
+      <span class="who"><span class="avatar" style="background:#2563eb">RH</span><span class="meta">Raphael · Admin</span></span>
+      <button class="btn sm">Sign out</button>
+    </div>
+  </header>
+  <div class="layout">
+    <nav class="card">
+      <a href="#" data-n="auth">Connectors</a>
+      <a href="#" data-n="users">Users &amp; access</a>
+      <a href="#" data-n="security">Security &amp; vault</a>
+      <a href="#">AI engine</a>
+      <a href="#">Scan scope</a>
+    </nav>
+    <main>
+      <!-- 3 users -->
+      <section id="v-users" class="stack">
+        <div><h1>Users &amp; access</h1><p class="lede">People sign in with their Google or Microsoft account and confirm with a passkey. Only admins and operators can unlock connector secrets.</p></div>
+        <div class="card">
+          <div class="sechead"><h2>Invite someone</h2></div>
+          <div class="f3">
+            <div><label>Email (Google or Microsoft account)</label><input placeholder="name@company.com"></div>
+            <div><label>Role</label><select><option>Viewer: reports only</option><option>Operator: run scans</option><option>Admin: everything</option></select></div>
+            <button class="btn primary">Send invite</button>
+          </div>
+          <p class="note" style="margin:10px 0 0">The invite link works once, for that exact email address, and expires after 7 days. Admins and operators register a passkey on first sign-in; an admin then grants them access to the vault.</p>
+        </div>
+        <div class="card">
+          <div class="sechead"><h2>Users</h2><span class="note">3 users · 1 pending</span></div>
+          <div class="tablewrap"><table>
+            <thead><tr><th>Person</th><th>Signs in with</th><th>Role</th><th>Passkeys</th><th>Vault access</th><th>Last sign-in</th><th></th></tr></thead>
+            <tbody>
+              <tr><td><span class="who"><span class="avatar" style="background:#2563eb">RH</span><span><b>Raphael</b><br><span class="meta">hadife@gmail.com</span></span></span></td><td>Google</td><td>Admin</td><td>2 <span class="meta">(MacBook, iPhone)</span></td><td><span class="tag ok">Granted</span></td><td class="meta">now</td><td><button class="btn sm">Manage</button></td></tr>
+              <tr><td><span class="who"><span class="avatar" style="background:#0f766e">AT</span><span><b>Alex Tech</b><br><span class="meta">alex@example.ch</span></span></span></td><td>Microsoft</td><td>Operator</td><td>1 <span class="meta">(Windows Hello)</span></td><td><span class="tag warn">Waiting for an admin</span></td><td class="meta">today 09:12</td><td><button class="btn sm primary">Grant access</button></td></tr>
+              <tr><td><span class="who"><span class="avatar" style="background:#7c3aed">CF</span><span><b>Client Finance</b><br><span class="meta">cfo@client.ch</span></span></span></td><td>Microsoft</td><td>Viewer</td><td class="meta">not needed</td><td><span class="tag">None (viewer)</span></td><td class="meta">27 Oct</td><td><button class="btn sm">Manage</button></td></tr>
+              <tr><td><span class="who"><span class="avatar" style="background:#94a3b8">?</span><span><b>it@client.ch</b><br><span class="meta">invited 28 Oct</span></span></span></td><td class="meta">—</td><td>Admin</td><td class="meta">—</td><td><span class="tag new">Invite pending</span></td><td class="meta">—</td><td><button class="btn sm">Resend</button> <button class="btn sm ghost danger">Revoke</button></td></tr>
+            </tbody>
+          </table></div>
+        </div>
+        <div class="card">
+          <h2 style="margin-bottom:10px">What each role can do</h2>
+          <div class="tablewrap"><table>
+            <thead><tr><th></th><th>Viewer</th><th>Operator</th><th>Admin</th></tr></thead>
+            <tbody>
+              <tr><td>Read reports and history</td><td>✓</td><td>✓</td><td>✓</td></tr>
+              <tr><td>Start and stop scans</td><td></td><td>✓</td><td>✓</td></tr>
+              <tr><td>Use connectors (unlocks secrets)</td><td></td><td>✓</td><td>✓</td></tr>
+              <tr><td>Add or edit connectors</td><td></td><td></td><td>✓</td></tr>
+              <tr><td>Manage users and security</td><td></td><td></td><td>✓</td></tr>
+            </tbody>
+          </table></div>
+        </div>
+      </section>
+
+      <!-- 4 security -->
+      <section id="v-security" class="stack hidden">
+        <div><h1>Security &amp; vault</h1><p class="lede">Connector passwords, tokens and keys are in an encrypted vault. It opens only when an admin or operator confirms with their passkey, and closes again when they sign out or after 30 minutes without activity.</p></div>
+        <div class="card vault">
+          <span class="big" style="background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok)"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 7.5-2"/></svg></span>
+          <div style="flex:1;min-width:220px"><b style="font-size:15px">Vault unlocked</b><div class="note">By Raphael with passkey "MacBook" at 15:42 · auto-locks after 30 min idle (max 8 h)</div></div>
+          <div class="row"><label style="margin:0">Auto-lock after</label><select style="width:auto"><option>15 min</option><option selected>30 min</option><option>1 hour</option></select><button class="btn">Lock now</button></div>
+        </div>
+        <div class="card">
+          <h2 style="margin-bottom:10px">How your secrets are protected</h2>
+          <div class="kh">
+            <div><b>Your passkey</b>Lives on your device (Face ID, Windows Hello, YubiKey). Never leaves it.</div>
+            <div><b>Your personal key</b>Opened only by your passkey. Stored encrypted; useless without it.</div>
+            <div><b>Vault key</b>A copy is sealed for each admin and operator. Never written to disk unencrypted.</div>
+            <div><b>Each secret</b>Encrypted separately (AES-256-GCM) and bound to its connector.</div>
+          </div>
+          <p class="note" style="margin:12px 0 0">Someone with full access to the server, including an AI tool, sees only encrypted data while the vault is locked.</p>
+        </div>
+        <div class="card">
+          <div class="sechead"><h2>Recovery key</h2><span class="tag ok">Created 29 Oct · stored offline</span></div>
+          <p class="note" style="margin:0 0 10px">Opens the vault if every admin passkey is lost. It was shown once; Guardian keeps only an encrypted copy of the vault key under it.</p>
+          <button class="btn">Replace recovery key</button>
+        </div>
+        <div class="card">
+          <div class="sechead"><h2>Audit log</h2><span class="note">Tamper-evident: each entry is chained to the previous one</span></div>
+          <div class="tablewrap"><table class="log">
+            <thead><tr><th>When</th><th>Who</th><th>What</th></tr></thead>
+            <tbody>
+              <tr><td class="meta">15:44</td><td>Raphael</td><td>Used secret of connector <b>RPHNAS2</b> (Synology) for a scan</td></tr>
+              <tr><td class="meta">15:42</td><td>Raphael</td><td>Unlocked the vault with passkey "MacBook"</td></tr>
+              <tr><td class="meta">15:41</td><td>Raphael</td><td>Signed in with Google</td></tr>
+              <tr><td class="meta">09:20</td><td>system</td><td>Vault locked (30 min idle)</td></tr>
+              <tr><td class="meta">09:12</td><td>Alex Tech</td><td>Registered passkey "Windows Hello", waiting for vault access</td></tr>
+              <tr><td class="meta">28 Oct</td><td>Raphael</td><td>Invited it@client.ch as Admin</td></tr>
+            </tbody>
+          </table></div>
+          <div class="row" style="margin-top:10px"><button class="btn sm">Verify log integrity</button><button class="btn sm">Export CSV</button></div>
+        </div>
+      </section>
+
+      <!-- 5 connector auth -->
+      <section id="v-auth" class="stack hidden">
+        <div><h1>Connector sign-in methods</h1><p class="lede">Each connector picks how Guardian signs in. Methods that avoid stored passwords come first.</p></div>
+        <div class="card">
+          <div class="sechead"><h2>New in the catalog</h2></div>
+          <div class="cgrid">
+            <div class="conn"><div class="ctop"><span class="ico" style="background:#0078d4">M365</span><div><b>Microsoft 365 / Entra ID</b><span class="meta">Sign in with Microsoft · read-only consent</span></div></div><div class="note">MFA coverage, admin roles, guest users, risky sign-ins, mail forwarding rules, Secure Score.</div></div>
+            <div class="conn"><div class="ctop"><span class="ico" style="background:#34a853">GW</span><div><b>Google Workspace</b><span class="meta">Sign in with Google · read-only scopes</span></div></div><div class="note">2-step verification, admins, external sharing, third-party app access, login audit.</div></div>
+            <div class="conn"><div class="ctop"><span class="ico" style="background:#0284c7">WIN</span><div><b>Windows (WinRM)</b><span class="meta">Kerberos · NTLM · certificate</span></div></div><div class="note">Patch level, Defender status, local admins, BitLocker, firewall, shares.</div></div>
+            <div class="conn"><div class="ctop"><span class="ico" style="background:#7c3aed">NAC</span><div><b>RADIUS / NPS / TACACS+ audit</b><span class="meta">Reads config via the systems above</span></div></div><div class="note">802.1X coverage, EAP methods (EAP-TLS vs PEAP/MS-CHAPv2), PAP/CHAP still allowed, TACACS+ for switch admins.</div></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="sechead"><h2>Example: connect Microsoft 365</h2><span class="tag">setup panel</span></div>
+          <label>How should Guardian sign in?</label>
+          <div class="methods">
+            <div class="method on"><b>Sign in with Microsoft</b>Admin approves read-only access. No password stored.</div>
+            <div class="method"><b>App + certificate</b>For unattended use. Guardian creates the certificate.</div>
+            <div class="method"><b>App + client secret</b><span class="tag warn">weaker</span> Expires; stored in the vault.</div>
+          </div>
+          <div class="oauthbox">
+            <b>Guardian will ask Microsoft for these read-only permissions</b>
+            <div class="perm">✓ <span><span class="mono">Directory.Read.All</span>: users, groups, roles</span></div>
+            <div class="perm">✓ <span><span class="mono">Policy.Read.All</span>: Conditional Access, MFA settings</span></div>
+            <div class="perm">✓ <span><span class="mono">AuditLog.Read.All</span>: sign-in activity</span></div>
+            <div class="perm">✓ <span><span class="mono">SecurityEvents.Read.All</span>: Secure Score</span></div>
+            <p class="note" style="margin:10px 0">A Microsoft 365 global admin approves once. Guardian stores only a refresh token, encrypted in the vault, and can never change anything.</p>
+            <button class="btn primary"><svg class="prov" viewBox="0 0 23 23"><path fill="#fff" d="M1 1h10v10H1zM12 1h10v10H12zM1 12h10v10H1zM12 12h10v10H12z"/></svg>Sign in with Microsoft</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="sechead"><h2>All sign-in methods</h2></div>
+          <div class="tablewrap"><table>
+            <thead><tr><th>Method</th><th>Used by</th><th>What's stored</th><th></th></tr></thead>
+            <tbody>
+              <tr><td><b>Sign in with Microsoft / Google</b> (OAuth 2.0)</td><td>Microsoft 365, Google Workspace</td><td>Refresh token</td><td><span class="tag ok">recommended</span></td></tr>
+              <tr><td><b>Certificate</b> (OAuth / mTLS)</td><td>Entra apps, APIs, WinRM</td><td>Private key, made by Guardian</td><td><span class="tag ok">recommended</span></td></tr>
+              <tr><td><b>SSH key</b></td><td>Linux, network devices</td><td>Private key, made by Guardian</td><td><span class="tag ok">recommended</span></td></tr>
+              <tr><td><b>Kerberos</b></td><td>Active Directory, Windows, LDAP</td><td>Password or keytab</td><td><span class="tag ok">recommended on AD</span></td></tr>
+              <tr><td><b>API token</b></td><td>Proxmox, Home Assistant, firewalls</td><td>Token</td><td><span class="tag">fine</span></td></tr>
+              <tr><td><b>Password</b> (LDAPS, DSM, HTTPS)</td><td>Most devices</td><td>Password</td><td><span class="tag">fine</span></td></tr>
+              <tr><td><b>SNMPv3</b></td><td>Switches, printers, UPS</td><td>Auth + privacy keys</td><td><span class="tag">fine</span></td></tr>
+              <tr><td><b>NTLM</b></td><td>Old Windows systems</td><td>Password</td><td><span class="tag warn">weak, reported</span></td></tr>
+              <tr><td><b>TOTP code</b> (add-on)</td><td>Systems that force 2FA on service accounts</td><td>2FA seed</td><td><span class="tag warn">off by default</span></td></tr>
+            </tbody>
+          </table></div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<script>
+const views = ["signin","unlock","users","security","auth"];
+function show(v){
+  document.querySelectorAll("#sw button").forEach(b=>b.classList.toggle("on",b.dataset.v===v));
+  const inFrame = !["signin","unlock"].includes(v);
+  document.getElementById("v-signin").classList.toggle("hidden",v!=="signin");
+  document.getElementById("v-unlock").classList.toggle("hidden",v!=="unlock");
+  document.getElementById("frame").classList.toggle("hidden",!inFrame);
+  ["users","security","auth"].forEach(x=>document.getElementById("v-"+x).classList.toggle("hidden",x!==v));
+  document.querySelectorAll("nav a").forEach(a=>a.classList.toggle("on",a.dataset.n===v));
+  scrollTo(0,0);
+}
+document.querySelectorAll("#sw button").forEach(b=>b.onclick=()=>show(b.dataset.v));
+document.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>show(b.dataset.go));
+document.querySelectorAll("nav a[data-n]").forEach(a=>a.onclick=e=>{e.preventDefault();show(a.dataset.n)});
+document.querySelectorAll(".method").forEach(m=>m.onclick=()=>{document.querySelectorAll(".method").forEach(x=>x.classList.toggle("on",x===m))});
+</script>
+</body>
+</html>

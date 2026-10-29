@@ -1,0 +1,8 @@
+[Unit]
+Description=Renew the AI IT Guardian console certificate
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=GUARDIAN_HOSTNAME=guardian.hadife.com
+ExecStart=/opt/ai-guardian/guardian-cert.sh
