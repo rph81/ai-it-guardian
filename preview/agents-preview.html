@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guardian Agents</title>
+<style>
+:root{
+  --accent:#3b82f6;
+  --bg:#eef1f5; --card:#ffffff; --card2:#f6f8fb; --line:#dde3ea; --text:#0f172a; --muted:#64748b;
+  --ok:#16a34a; --busy:#d97706; --bad:#dc2626; --new:#7c3aed;
+  --high:#ea580c; --med:#d97706; --low:#0891b2;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0b0f15; --card:#121821; --card2:#18202b; --line:#253041; --text:#e6ebf2; --muted:#8b98ab;
+  --ok:#4ade80; --busy:#fbbf24; --bad:#f87171; --new:#a78bfa; --high:#fb923c; --med:#fbbf24; --low:#22d3ee;}}
+:root[data-theme="dark"]{
+  --bg:#0b0f15; --card:#121821; --card2:#18202b; --line:#253041; --text:#e6ebf2; --muted:#8b98ab;
+  --ok:#4ade80; --busy:#fbbf24; --bad:#f87171; --new:#a78bfa; --high:#fb923c; --med:#fbbf24; --low:#22d3ee;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif}
+.banner{background:var(--accent);color:#fff;font-size:12.5px;text-align:center;padding:6px 16px}
+.switcher{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--card)}
+.switcher button{border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:999px;padding:6px 12px;font:inherit;font-size:12.5px;cursor:pointer}
+.switcher button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.wrap{max-width:1180px;margin:0 auto;padding:20px 16px 48px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px}
+.stack>*+*{margin-top:16px}
+h1{font-size:20px;margin:0 0 4px}
+h2{font-size:13px;margin:0 0 12px;font-weight:650;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.lede{color:var(--muted);margin:0;max-width:780px}
+.meta{color:var(--muted);font-size:13px}
+.note{font-size:12.5px;color:var(--muted)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.btn{border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:999px;padding:6px 12px;font:inherit;font-size:12.5px;cursor:pointer}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.tag{display:inline-block;font-size:11px;border-radius:999px;padding:1px 8px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.tag.ok{border-color:var(--ok);color:var(--ok)}.tag.busy{border-color:var(--busy);color:var(--busy)}.tag.web{border-color:var(--new);color:var(--new)}
+.hidden{display:none!important}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+/* pipeline */
+.pipe{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;align-items:stretch}
+@media (max-width:900px){.pipe{grid-template-columns:1fr}}
+.stage{background:var(--card2);border-radius:14px;padding:12px;position:relative}
+.stage b{display:block;font-size:13.5px}
+.stage .note{margin-top:4px}
+.stage.ai{border:1px solid color-mix(in srgb,var(--accent) 45%,var(--line))}
+.stage .kind{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-bottom:4px}
+.kind.code{color:var(--muted)}.kind.ai{color:var(--accent)}
+.par{display:flex;flex-direction:column;gap:4px;margin-top:6px}
+.par span{font-size:12px;background:var(--card);border-radius:8px;padding:3px 8px}
+/* agents */
+.agrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px}
+.agent{background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px}
+.ahead{display:flex;gap:10px;align-items:flex-start}
+.ico{width:36px;height:36px;border-radius:10px;flex:none;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11.5px;color:#fff;background:var(--accent)}
+.ahead b{display:block}
+.ahead .grow{flex:1}
+.switch{width:38px;height:22px;border-radius:999px;background:var(--accent);position:relative;flex:none;cursor:pointer}
+.switch:after{content:"";position:absolute;top:3px;right:3px;width:16px;height:16px;border-radius:50%;background:#fff}
+.switch.off{background:var(--line)}.switch.off:after{right:auto;left:3px}
+.agent ul{margin:0;padding-left:18px;font-size:12.5px}
+.agent li+li{margin-top:2px}
+.tools{display:flex;gap:5px;flex-wrap:wrap}
+.never{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px}
+.never div{background:var(--card2);border-radius:12px;padding:10px 12px;font-size:12.5px}
+.never b{display:block;font-size:13px}
+.cfg{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+label{display:block;font-size:12px;color:var(--muted);margin:0 0 4px}
+select{width:100%;border:1px solid var(--line);background:var(--card2);color:var(--text);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px}
+.cost{display:flex;gap:16px;flex-wrap:wrap;align-items:baseline}
+.cost b{font-size:22px}
+/* live board */
+.board{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
+.live{background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:6px}
+.live.working{border-color:color-mix(in srgb,var(--busy) 60%,var(--line))}
+.live.done{border-color:color-mix(in srgb,var(--ok) 50%,var(--line))}
+.live .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.now{font-size:12.5px;background:var(--card);border-radius:8px;padding:6px 8px;min-height:44px}
+.bar{height:5px;border-radius:5px;background:var(--line);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--busy)}
+.live.done .bar i{background:var(--ok)}
+.stats{display:flex;gap:12px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.stats b{color:var(--text)}
+.sev{display:flex;gap:8px;font-size:12px}
+.c-high{color:var(--high)}.c-med{color:var(--med)}.c-low{color:var(--low)}
+.job{display:flex;align-items:center;gap:12px;background:color-mix(in srgb,var(--busy) 12%,var(--card));border:1px solid color-mix(in srgb,var(--busy) 40%,var(--line));border-radius:12px;padding:10px 12px;font-size:13px;flex-wrap:wrap}
+.job .grow{flex:1}
+.tabs{display:flex;gap:6px;margin:12px 0}
+.tab{border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:999px;padding:6px 12px;font-size:12.5px}
+.tab.on{background:var(--accent);border-color:var(--accent);color:#fff}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;color:var(--muted);font-weight:500;padding:8px;border-bottom:1px solid var(--line)}
+td{padding:9px 8px;border-bottom:1px solid var(--line)}
+.tablewrap{overflow-x:auto}
+</style>
+</head>
+<body>
+<div class="banner">Design preview with sample data. Switch screens below; nothing runs.</div>
+<div class="switcher" id="sw">
+  <button data-v="about" class="on">1 · Settings → AI agents</button>
+  <button data-v="live">2 · Console → live agents during a run</button>
+  <button data-v="after">3 · After the run: what each agent did</button>
+</div>
+
+<div class="wrap">
+<!-- 1 -->
+<section id="v-about" class="stack">
+  <div><h1>AI agents</h1>
+    <p class="lede">After the network scan, a team of Claude agents analyses the results. Each specialist looks at one part of your IT, can run only the read-only checks listed on its card, and writes findings into the report.</p></div>
+
+  <div class="card">
+    <h2>How an assessment runs</h2>
+    <div class="pipe">
+      <div class="stage"><div class="kind code">Step 1 · program</div><b>Network scan</b><div class="note">Finds devices, ports, services, web pages, certificates, UPnP and what the internet sees. No AI, free.</div></div>
+      <div class="stage ai"><div class="kind ai">Step 2 · AI agent</div><b>Discovery</b><div class="note">Works out what every device is: type, vendor, model, role, OS and firmware.</div></div>
+      <div class="stage ai"><div class="kind ai">Step 3 · AI agent</div><b>Orchestrator</b><div class="note">Decides which specialist looks at which devices, so nobody wastes time on irrelevant ones.</div></div>
+      <div class="stage ai"><div class="kind ai">Step 4 · 5 AI agents, 3 at a time</div><b>Specialists</b>
+        <div class="par"><span>Network</span><span>OS &amp; endpoints</span><span>Web &amp; APIs</span><span>Firmware</span><span>Internet perimeter</span></div></div>
+      <div class="stage ai"><div class="kind ai">Step 5 · AI agent</div><b>Report writer</b><div class="note">Scores the site, writes the summary and the fix-first list in plain language.</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Engine</h2>
+    <div class="cfg">
+      <div><label>Model</label><select><option>Opus 5.5 (default)</option><option>Fable 5.1 (stronger, ~2.5× cost)</option></select></div>
+      <div><label>Effort</label><select><option>low</option><option selected>medium (default)</option><option>high</option></select></div>
+      <div><label>Max rounds per agent</label><select><option>20</option><option selected>40 (default)</option><option>60</option></select></div>
+      <div><label>Agents working at the same time</label><select><option>1</option><option>2</option><option selected>3 (default)</option></select></div>
+    </div>
+    <div class="cost" style="margin-top:14px"><span class="meta">Estimated cost of a full assessment</span><b>≈ $4–7</b><span class="note">on this network (34 devices), with prompt caching. Last real run: not yet measured.</span></div>
+  </div>
+
+  <div class="card">
+    <h2>The agents</h2>
+    <div class="agrid">
+      <div class="agent"><div class="ahead"><span class="ico">DIS</span><div class="grow"><b>Discovery &amp; identification</b><span class="meta">Runs first, on every device</span></div><span class="switch" title="Always on"></span></div>
+        <ul><li>Identifies device type, vendor, model, OS and firmware version</li><li>Uses MAC vendor, ports, banners, web page titles, certificates, UPnP and mDNS</li><li>Flags devices it can't identify</li></ul>
+        <div class="tools"><span class="tag">Read scan data</span><span class="tag">Read-only probes</span><span class="tag">Fetch web page (GET)</span><span class="tag web">Web search</span></div></div>
+      <div class="agent"><div class="ahead"><span class="ico">NET</span><div class="grow"><b>Network</b><span class="meta">Exposure and protocols</span></div><span class="switch"></span></div>
+        <ul><li>Cleartext and legacy protocols: Telnet, FTP, HTTP admin, SNMPv1, SMBv1, VNC</li><li>Weak SSH, SMB signing, open DNS recursion, UPnP/SSDP</li><li>Devices exposing more than their role needs; flat-network risks</li></ul>
+        <div class="tools"><span class="tag">Read scan data</span><span class="tag">Read-only probes</span></div></div>
+      <div class="agent"><div class="ahead"><span class="ico">OS</span><div class="grow"><b>Operating systems &amp; endpoints</b><span class="meta">OS and server software</span></div><span class="switch"></span></div>
+        <ul><li>OS families and versions, end-of-life status</li><li>Known vulnerabilities (CVEs) in exposed server software</li><li>Remote-access services exposed on endpoints</li></ul>
+        <div class="tools"><span class="tag">Read scan data</span><span class="tag">Read-only probes</span><span class="tag">CVE database</span><span class="tag">End-of-life database</span><span class="tag web">Web search</span></div></div>
+      <div class="agent"><div class="ahead"><span class="ico">WEB</span><div class="grow"><b>Web, APIs &amp; admin interfaces</b><span class="meta">Every HTTP(S) interface</span></div><span class="switch"></span></div>
+        <ul><li>Admin pages over plain HTTP, TLS versions and certificates</li><li>Missing security headers, exposed APIs and docs, default pages</li><li>Version disclosure — GET/HEAD only, never submits forms</li></ul>
+        <div class="tools"><span class="tag">Read scan data</span><span class="tag">Fetch web page (GET)</span><span class="tag">Inspect TLS</span><span class="tag">Read-only probes</span><span class="tag">CVE database</span></div></div>
+      <div class="agent"><div class="ahead"><span class="ico">FW</span><div class="grow"><b>Firmware &amp; device software</b><span class="meta">Routers, NAS, printers, IoT…</span></div><span class="switch"></span></div>
+        <ul><li>Installed firmware vs the vendor's latest release</li><li>Devices past end of support; known-exploited firmware CVEs</li><li>Says what read-only access is needed when it can't see the version</li></ul>
+        <div class="tools"><span class="tag">Read scan data</span><span class="tag">Fetch web page (GET)</span><span class="tag">CVE database</span><span class="tag web">Web search</span></div></div>
+      <div class="agent"><div class="ahead"><span class="ico">WAN</span><div class="grow"><b>Internet perimeter</b><span class="meta">What the internet sees</span></div><span class="switch"></span></div>
+        <ul><li>Ports, products and CVEs seen on your public IP (Shodan InternetDB)</li><li>Router port forwards and UPnP rules, mapped to the device behind them</li><li>Management, file sharing, cameras or databases reachable from outside</li></ul>
+        <div class="tools"><span class="tag">Read scan data</span><span class="tag">Public-IP lookup</span><span class="tag">CVE database</span></div></div>
+      <div class="agent"><div class="ahead"><span class="ico">RPT</span><div class="grow"><b>Report writer</b><span class="meta">Runs last</span></div><span class="switch" title="Always on"></span></div>
+        <ul><li>Score and grade, headline and executive summary</li><li>Fix-first list ordered by impact and effort</li><li>Plain language for a business owner</li></ul>
+        <div class="tools"><span class="tag">Read findings</span></div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>What agents can never do</h2>
+    <div class="never">
+      <div><b>No shell, no commands</b>Agents only call the fixed checks above; they can't run anything else.</div>
+      <div><b>Your network only</b>Every address is checked against the scanned network before a probe runs.</div>
+      <div><b>No logins, no changes</b>Web requests are GET/HEAD without credentials; probes are non-intrusive.</div>
+      <div><b>No access to the vault</b>Agents never see connector passwords or your API key.</div>
+    </div>
+  </div>
+</section>
+
+<!-- 2 -->
+<section id="v-live" class="stack hidden">
+  <div class="job"><span class="grow"><b>Scan + AI assessment running</b> · step 4 of 5, specialists · 14 min elapsed · <b>$2.10</b> so far</span><button class="btn">Stop</button></div>
+  <div class="tabs"><span class="tab">Report</span><span class="tab on">Agents</span><span class="tab">Live log</span></div>
+  <div class="board">
+    <div class="live done"><div class="top"><b>Discovery</b><span class="tag ok">Done</span></div>
+      <div class="now">Identified 29 of 34 devices; 5 marked unknown.</div><div class="bar"><i style="width:100%"></i></div>
+      <div class="stats"><span><b>18</b> rounds</span><span><b>1</b> finding</span><span><b>$0.71</b></span></div></div>
+    <div class="live done"><div class="top"><b>Orchestrator</b><span class="tag ok">Done</span></div>
+      <div class="now">Sent 9 devices to Network, 12 to OS, 14 to Web, 15 to Firmware.</div><div class="bar"><i style="width:100%"></i></div>
+      <div class="stats"><span><b>1</b> round</span><span><b>$0.06</b></span></div></div>
+    <div class="live working"><div class="top"><b>Network</b><span class="tag busy">Working</span></div>
+      <div class="now">Checking SNMP on the printer (192.168.1.18)…</div><div class="bar"><i style="width:55%"></i></div>
+      <div class="stats"><span><b>11</b>/40 rounds</span><span class="sev"><b class="c-med">2</b> med <b class="c-low">3</b> low</span><span><b>$0.42</b></span></div></div>
+    <div class="live working"><div class="top"><b>Web &amp; APIs</b><span class="tag busy">Working</span></div>
+      <div class="now">Inspecting TLS on RPHNAS2 (192.168.1.102:5001)…</div><div class="bar"><i style="width:40%"></i></div>
+      <div class="stats"><span><b>9</b>/40 rounds</span><span class="sev"><b class="c-med">1</b> med</span><span><b>$0.38</b></span></div></div>
+    <div class="live working"><div class="top"><b>Firmware</b><span class="tag busy">Working</span></div>
+      <div class="now">Searching the web: latest firmware for TP-Link RE450…</div><div class="bar"><i style="width:30%"></i></div>
+      <div class="stats"><span><b>7</b>/40 rounds</span><span class="sev"><b class="c-high">1</b> high</span><span><b>$0.53</b></span></div></div>
+    <div class="live"><div class="top"><b>OS &amp; endpoints</b><span class="tag">Waiting</span></div>
+      <div class="now meta">Starts when a slot frees up (3 agents at a time).</div><div class="bar"><i style="width:0"></i></div></div>
+    <div class="live"><div class="top"><b>Internet perimeter</b><span class="tag">Waiting</span></div>
+      <div class="now meta">Starts when a slot frees up.</div><div class="bar"><i style="width:0"></i></div></div>
+    <div class="live"><div class="top"><b>Report writer</b><span class="tag">Waiting</span></div>
+      <div class="now meta">Runs after all specialists finish.</div><div class="bar"><i style="width:0"></i></div></div>
+  </div>
+</section>
+
+<!-- 3 -->
+<section id="v-after" class="stack hidden">
+  <div class="card"><h2>Runs</h2>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Run</th><th>Type</th><th>Score</th><th>Findings</th><th>AI cost</th><th>Time</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">2026-11-02 09:12</td><td>Scan + AI</td><td><b>63</b> C</td><td>2 high · 7 med · 9 low</td><td><b>$5.40</b></td><td>31 min</td></tr>
+        <tr><td class="mono">2026-10-29 15:35</td><td>Scan + analysis in Claude Code</td><td><b>64</b> C</td><td>2 high · 7 med · 9 low</td><td class="meta">—</td><td>6 min scan</td></tr>
+      </tbody></table></div></div>
+  <div class="card"><h2>What each agent did · run 2026-11-02 09:12</h2>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Agent</th><th>Devices</th><th>Rounds</th><th>Checks run</th><th>Findings</th><th>Tokens</th><th>Cost</th></tr></thead>
+      <tbody>
+        <tr><td><b>Discovery</b></td><td>34</td><td>18</td><td>22 probes, 9 web pages, 4 searches</td><td>1</td><td class="mono">612k</td><td>$0.71</td></tr>
+        <tr><td><b>Orchestrator</b></td><td>34</td><td>1</td><td>—</td><td>—</td><td class="mono">24k</td><td>$0.06</td></tr>
+        <tr><td><b>Network</b></td><td>9</td><td>14</td><td>17 probes</td><td>5</td><td class="mono">402k</td><td>$0.55</td></tr>
+        <tr><td><b>OS &amp; endpoints</b></td><td>12</td><td>16</td><td>8 probes, 11 CVE lookups, 6 EOL lookups</td><td>4</td><td class="mono">455k</td><td>$0.62</td></tr>
+        <tr><td><b>Web &amp; APIs</b></td><td>14</td><td>21</td><td>31 web pages, 9 TLS checks</td><td>3</td><td class="mono">720k</td><td>$0.98</td></tr>
+        <tr><td><b>Firmware</b></td><td>15</td><td>24</td><td>12 searches, 7 CVE lookups</td><td>4</td><td class="mono">850k</td><td>$1.37</td></tr>
+        <tr><td><b>Internet perimeter</b></td><td>3</td><td>8</td><td>1 public-IP lookup, 3 CVE lookups</td><td>4</td><td class="mono">198k</td><td>$0.29</td></tr>
+        <tr><td><b>Report writer</b></td><td>—</td><td>1</td><td>—</td><td>—</td><td class="mono">61k</td><td>$0.82</td></tr>
+        <tr><td><b>Total</b></td><td></td><td>103</td><td></td><td>21</td><td class="mono">3.3M</td><td><b>$5.40</b></td></tr>
+      </tbody></table></div>
+    <p class="note" style="margin:10px 0 0">Click an agent to see every check it ran and why, step by step.</p></div>
+</section>
+</div>
+<script>
+document.querySelectorAll("#sw button").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll("#sw button").forEach(x=>x.classList.toggle("on",x===b));
+  ["about","live","after"].forEach(v=>document.getElementById("v-"+v).classList.toggle("hidden",v!==b.dataset.v));
+  scrollTo(0,0);
+});
+document.querySelectorAll(".switch").forEach(s=>{ if(!s.title) s.onclick=()=>s.classList.toggle("off"); });
+</script>
+</body>
+</html>

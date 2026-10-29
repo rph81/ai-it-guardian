@@ -23,7 +23,7 @@
       <a href="#users" data-s="users" class="admin-only">Users &amp; access</a>
       <a href="#security" data-s="security" class="admin-only">Security &amp; vault</a>
       <a href="#account" data-s="account">My account</a>
-      <a href="#ai" data-s="ai" class="admin-only">AI engine</a>
+      <a href="#ai" data-s="ai" class="admin-only">AI agents</a>
       <a href="#scope" data-s="scope">Scan scope</a>
       <a href="#schedules" data-s="schedules">Schedules &amp; alerts</a>
     </nav>
@@ -57,13 +57,27 @@
 
       <!-- AI engine -->
       <section class="stack hidden" id="s-ai">
-        <div><h1>AI engine</h1>
-          <p class="lede">The AI assessment uses Claude through an Anthropic API key. Without a key, Guardian can still scan, and the assessment can be done in a Claude Code session.</p></div>
+        <div><h1>AI agents</h1>
+          <p class="lede">After the network scan, a team of Claude agents analyses the results. Each specialist looks at one part of your IT, can only run the read-only checks listed on its card, and writes findings into the report. The Orchestrator assigns the work, passes notes between agents and answers your questions in the console chat.</p></div>
+        <div class="card"><h2>How an assessment runs</h2>
+          <ol class="pipeline">
+            <li><b>Network scan</b> <span class="tag">program</span> Finds devices, ports, services, web pages, certificates, UPnP and what the internet sees. No AI, free.</li>
+            <li><b>Discovery</b> <span class="tag">AI agent</span> Works out what every device is: type, vendor, model, role, OS and firmware.</li>
+            <li><b>Orchestrator</b> <span class="tag">AI agent</span> Decides which specialist looks at which devices, relays notes between agents and instructions from the chat.</li>
+            <li><b>Specialists</b> <span class="tag">AI agents, a few at a time</span> Network, OS &amp; endpoints, Web &amp; APIs, Firmware, Internet perimeter. When one finds something another should check, it sends that agent a note.</li>
+            <li><b>Report writer</b> <span class="tag">AI agent</span> Scores the site, writes the summary and the fix-first list in plain language.</li>
+          </ol></div>
         <form class="card" id="ai-form">
+          <h2>Engine</h2>
           <div class="f2">
             <div><label for="model">Model</label><select id="model"></select></div>
             <div><label for="effort">Effort</label><select id="effort"></select></div>
+            <div><label for="rounds">Max rounds per agent</label><select id="rounds"></select></div>
+            <div><label for="parallel">Agents working at the same time</label><select id="parallel"></select></div>
           </div>
+          <p class="note">Estimated cost of a full assessment on Opus 5.5: about $4–7 for a network of ~35 devices (prompt caching on). Fable 5.1 costs about 2.5× more. Each run's real cost is shown in the console, per agent.</p>
+          <h2 class="gap">The agents</h2>
+          <div class="cgrid" id="agent-cards"></div>
           <div class="field"><label for="akey">Anthropic API key <span id="akey-state"></span></label>
             <input id="akey" type="password" autocomplete="off" placeholder="Paste to set or replace"></div>
           <div class="field"><label for="nkey">NVD API key <span id="nkey-state"></span></label>
@@ -71,6 +85,13 @@
           <div class="row field"><button class="btn primary sm" type="submit">Save</button><span class="note" id="ai-msg"></span></div>
           <p class="note">Keys are write-only: the console never shows or returns them.</p>
         </form>
+        <div class="card"><h2>What agents can never do</h2>
+          <ul class="never">
+            <li><b>No shell, no commands.</b> Agents only call the fixed checks on their cards.</li>
+            <li><b>Your network only.</b> Every address is checked against the scanned network before a probe runs.</li>
+            <li><b>No logins, no changes.</b> Web requests are GET/HEAD without credentials; probes are non-intrusive. The chat can't change anything either.</li>
+            <li><b>No access to the vault.</b> Agents never see connector passwords or your API key.</li>
+          </ul></div>
       </section>
 
       <!-- Users -->
@@ -103,10 +124,10 @@
         <div><h1>Security &amp; vault</h1>
           <p class="lede">Connector passwords, tokens, keys and API keys are in an encrypted vault. It opens only when an admin or operator confirms with their passkey, and closes when they sign out or go idle.</p></div>
         <div class="card"><div class="vaultrow" id="vault-status"></div>
-          <div class="row field"><label for="al-idle" style="margin:0">Auto-lock after</label>
-            <select id="al-idle" style="width:auto"><option value="5">5 min</option><option value="15">15 min</option><option value="30">30 min</option><option value="60">1 hour</option></select>
-            <label for="al-max" style="margin:0">and at most</label>
-            <select id="al-max" style="width:auto"><option value="1">1 hour</option><option value="4">4 hours</option><option value="8">8 hours</option><option value="12">12 hours</option></select>
+          <div class="row field"><label for="al-idle" class="m0">Auto-lock after</label>
+            <select id="al-idle" class="wauto"><option value="5">5 min</option><option value="15">15 min</option><option value="30">30 min</option><option value="60">1 hour</option></select>
+            <label for="al-max" class="m0">and at most</label>
+            <select id="al-max" class="wauto"><option value="1">1 hour</option><option value="4">4 hours</option><option value="8">8 hours</option><option value="12">12 hours</option></select>
             <button class="btn sm" id="al-save">Save</button><span class="note" id="al-msg"></span></div></div>
         <div class="card"><h2>How your secrets are protected</h2>
           <div class="kh">
@@ -158,7 +179,7 @@
     <label for="d-name">Name</label><input id="d-name" maxlength="60" required>
     <div id="d-fields"></div>
     <div id="d-result"></div>
-    <div class="row" style="margin-top:16px">
+    <div class="row mt16">
       <button class="btn" type="button" id="d-test">Test connection</button>
       <button class="btn primary" type="submit" id="d-save">Save connector</button>
       <button class="btn ghost danger hidden" type="button" id="d-delete">Remove</button>

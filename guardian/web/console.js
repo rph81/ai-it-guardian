@@ -68,9 +68,11 @@ function renderRuns(runs, job) {
     if (r.devices != null) sevs.append(el("span", {}, `${r.devices} device${r.devices === 1 ? "" : "s"}`));
     if (r.analysed) for (const s of SEVS) if (r.counts[s]) sevs.append(el("span", {}, el("b", {class: `c-${s}`}, String(r.counts[s])), ` ${s === "medium" ? "med" : s}`));
     if (r.has_graph && !r.analysed) sevs.append(el("span", {}, "no AI analysis yet"));
+    if (r.cost != null) sevs.append(el("span", {}, `AI $${r.cost.toFixed(2)}`));
     const acts = el("div", {class: "row"});
     const canRun = me && me.role !== "viewer";
     if (r.has_report) acts.append(el("button", {class: "btn sm", onclick: ev => { ev.stopPropagation(); openRun(r.id, true); }}, "Report"));
+    if (r.has_agents) acts.append(el("button", {class: "btn sm", onclick: ev => { ev.stopPropagation(); openRun(r.id, r.has_report); showTab("map"); }}, "Agent map"));
     if (r.has_graph) {
       if (canRun) acts.append(el("button", {class: "btn sm", onclick: ev => { ev.stopPropagation(); startJob("resume", r.id); }}, r.analysed ? "Re-run AI" : "Run AI"));
       if (canRun && (r.analysed || r.has_report)) acts.append(el("button", {class: "btn sm", onclick: ev => { ev.stopPropagation(); startJob("report", r.id); }}, "Rebuild report"));
@@ -84,6 +86,7 @@ function openRun(id, hasReport) {
   current = id;
   document.querySelectorAll(".run").forEach(n => n.classList.toggle("on", n.querySelector(".mono")?.textContent === fmtRun(id)));
   $("current").textContent = `run ${fmtRun(id)}`;
+  if (typeof Agents !== "undefined") Agents.show(id);
   const url = `/api/runs/${id}/report`;
   if (hasReport) {
     $("frame").src = url; $("frame-empty").classList.add("hidden");
@@ -136,9 +139,10 @@ function appendLog(lines) {
 
 function renderJob(s) {
   const busy = s.running;
+  if (typeof Agents !== "undefined") Agents.follow(s);
   $("dot").className = "dot" + (busy ? " busy" : "");
   for (const b of ["go-collect", "go-full"]) $(b).disabled = busy;
-  document.querySelectorAll(".run .btn").forEach(b => { if (b.tagName === "BUTTON" && b.textContent !== "Report") b.disabled = busy; });
+  document.querySelectorAll(".run .btn").forEach(b => { if (b.tagName === "BUTTON" && !["Report", "Agent map"].includes(b.textContent)) b.disabled = busy; });
   if (!s.mode) { $("job").classList.add("hidden"); return; }
   const failed = !busy && (s.stopped || s.exit_code !== 0);
   $("job").className = "job" + (busy ? "" : failed ? " failed" : " done");
@@ -170,8 +174,8 @@ async function poll() {
 // -- tabs, theme, start-up ----------------------------------------------------------
 function showTab(t) {
   document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.t === t));
-  $("p-report").classList.toggle("hidden", t !== "report");
-  $("p-log").classList.toggle("hidden", t !== "log");
+  for (const p of ["report", "agents", "map", "log"]) $("p-" + p).classList.toggle("hidden", t !== p);
+  if ((t === "agents" || t === "map") && typeof Agents !== "undefined") Agents.refresh();
   if (t === "log") $("p-log").scrollTop = $("p-log").scrollHeight;
 }
 document.querySelectorAll(".tab").forEach(b => b.addEventListener("click", () => showTab(b.dataset.t)));
@@ -193,6 +197,7 @@ async function start() {
   renderRuns(o.runs, o.job);
   const latest = o.runs.find(r => r.has_report);
   if (latest) openRun(latest.id, true);
+  else if (o.runs.length) openRun(o.runs[0].id, false);
   const s = await api("/api/job?since=0");
   if (s.lines.length) { appendLog(s.lines); seq = s.seq; }
   renderJob(s);

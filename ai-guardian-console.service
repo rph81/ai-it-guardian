@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 WorkingDirectory=/opt/ai-guardian
-Environment=GUARDIAN_HOSTNAME=guardian.hadife.com
+EnvironmentFile=-/etc/default/ai-guardian
 ExecStart=/opt/ai-guardian/venv/bin/python /opt/ai-guardian/console.py
 Restart=on-failure
 RestartSec=5

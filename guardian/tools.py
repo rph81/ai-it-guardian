@@ -135,6 +135,14 @@ class Toolbox:
                     "references": {"type": "array", "items": {"type": "string"}}},
                     "required": ["asset", "title", "severity", "confidence", "evidence", "impact", "recommendation"],
                     "additionalProperties": False}},
+            "update_finding": {
+                "description": "Update an existing finding after a re-check: mark it resolved when the issue is confirmed gone, or add new evidence / change severity. Quote what you observed.",
+                "input_schema": {"type": "object", "properties": {
+                    "id": {"type": "string", "description": "Finding ID, e.g. F007."},
+                    "status": {"type": "string", "enum": ["open", "resolved"]},
+                    "severity": {"type": "string", "enum": SEVERITIES},
+                    "evidence": {"type": "string", "description": "What the re-check observed."}},
+                    "required": ["id", "status", "evidence"], "additionalProperties": False}},
         }
         return [{"name": n, **all_tools[n]} for n in names]
 
@@ -229,6 +237,60 @@ class Toolbox:
 
     def t_record_finding(self, **f):
         f["layer"] = self.agent
+        f["status"] = "open"
         fid = self.g.add_finding(f)
         self.g.log(self.agent, f'{fid} [{f["severity"]}] {f["asset"]}: {f["title"]}')
+        self.g.event("find", self.agent, "orchestrator", f'{f["title"]} ({f["severity"]})', finding=fid, severity=f["severity"])
         return {"ok": True, "id": fid}
+
+    def t_update_finding(self, id, status, evidence, severity=None):
+        with self.g.lock:
+            f = next((x for x in self.g.data["findings"] if x["id"] == id), None)
+            if not f:
+                return {"error": f"no finding {id}"}
+            f.setdefault("history", []).append({"t": time.strftime("%Y-%m-%dT%H:%M:%S"), "by": self.agent,
+                                                "status": status, "evidence": evidence[:2000],
+                                                **({"severity": severity} if severity else {})})
+            f["status"] = status
+            if severity:
+                f["severity"] = severity
+        self.g.log(self.agent, f"{id} updated: {status}")
+        self.g.event("find", self.agent, "orchestrator", f'{id} {"resolved" if status == "resolved" else "updated"}: {f["title"]}',
+                     finding=id, severity=f["severity"], status=status)
+        return {"ok": True}
+
+
+def describe(name, args):
+    """One line, in plain words, for the live map and the agent cards."""
+    a = args or {}
+    if name == "probe":
+        return f'Probe {a.get("ip")} {"UDP" if a.get("udp") else "TCP"} {",".join(map(str, a.get("ports", [])))}: {", ".join(a.get("checks", []))}'
+    if name == "http_get":
+        return f'{a.get("method", "GET")} {a.get("url")}'
+    if name == "tls_inspect":
+        return f'TLS check {a.get("ip")}:{a.get("port")}'
+    if name == "cve_lookup":
+        return f'CVE lookup: {a.get("cpe") or a.get("keywords")}'
+    if name == "eol_lookup":
+        return f'End-of-life lookup: {a.get("product")}'
+    if name == "wan_info":
+        return "Read public-IP data and router port forwards"
+    if name == "inventory":
+        return "Read the inventory" + (f' ({len(a["ips"])} devices)' if a.get("ips") else "")
+    if name == "asset_details":
+        return f'Read everything known about {a.get("ip")}'
+    if name == "annotate_asset":
+        f = a.get("fields", {})
+        what = " ".join(x for x in (f.get("vendor"), f.get("model"), f.get("device_type")) if x)
+        return f'Identified {a.get("ip")}' + (f": {what}" if what else "")
+    if name == "record_finding":
+        return f'Recorded a finding: {a.get("title")} ({a.get("severity")})'
+    if name == "update_finding":
+        return f'Updated {a.get("id")}: ' + ("confirmed fixed" if a.get("status") == "resolved" else "still open, new evidence added")
+    if name == "web_search":
+        return f'Web search: {a.get("query", "")}'
+    return name.replace("_", " ")
+
+
+# checks that touch the network or the internet (drawn as a pulse on the map); the rest only read the run's data
+ACTIVE = {"probe", "http_get", "tls_inspect", "cve_lookup", "eol_lookup", "web_search"}

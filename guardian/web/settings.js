@@ -229,18 +229,53 @@ $("d-delete").addEventListener("click", async () => {
   try { await api(`/api/connectors/${editing.id}/delete`, {}); closeDrawer(); await loadConnectors(); } catch (e) { alert(e.message); }
 });
 
-// -- AI engine ------------------------------------------------------------------------
+// -- AI agents ------------------------------------------------------------------------
+const AGENT_INFO = {
+  discovery: {what: "Identifies device type, vendor, model, OS and firmware; flags devices it can't identify.",
+    tools: "Scan data, read-only probes, web pages (GET), web search", always: true},
+  network: {what: "Cleartext and legacy protocols, weak SSH, SMB signing, open DNS, UPnP; devices exposing more than their role needs.",
+    tools: "Scan data, read-only probes", connector: "With an SNMPv3 or firewall connector: VLANs, firewall rules, switch ports."},
+  os: {what: "OS and server-software versions, end-of-life status, known vulnerabilities (CVEs), remote access on endpoints.",
+    tools: "Scan data, read-only probes, CVE and end-of-life databases, web search", connector: "With a Linux SSH or Windows connector: installed patches, users, services from the inside."},
+  web: {what: "Admin pages over plain HTTP, TLS and certificates, security headers, exposed APIs and default pages.",
+    tools: "Web pages (GET/HEAD), TLS inspection, read-only probes, CVE database", connector: "With a NAS or hypervisor connector: the settings behind the login page."},
+  firmware: {what: "Installed firmware against the vendor's latest release; end of support; known-exploited firmware CVEs.",
+    tools: "Scan data, web pages (GET), CVE database, web search", connector: "With a device connector: exact firmware versions it can't see from outside."},
+  wan: {what: "What the internet sees on your public IP, router port forwards and UPnP rules, mapped to the device behind them.",
+    tools: "Public-IP data (Shodan InternetDB), CVE database"},
+};
+let agentsOff = new Set();
+function renderAgents(c) {
+  agentsOff = new Set(c.agents_off);
+  const box = $("agent-cards"); box.replaceChildren();
+  for (const [k, info] of Object.entries(AGENT_INFO)) {
+    const on = !agentsOff.has(k);
+    const sw = el("input", {type: "checkbox", "aria-label": `${c.agents[k]} on`});
+    sw.checked = on; if (info.always) sw.disabled = true;
+    sw.addEventListener("change", () => { sw.checked ? agentsOff.delete(k) : agentsOff.add(k); card.classList.toggle("off", !sw.checked); });
+    const card = el("div", {class: "conn agent" + (on ? "" : " off")},
+      el("div", {class: "ahead"}, el("b", {}, c.agents[k]), el("label", {class: "switch", title: info.always ? "Always on: the other agents depend on it" : ""}, sw, el("span"))),
+      el("p", {class: "note"}, info.what), el("p", {class: "note"}, el("b", {}, "Checks: "), info.tools),
+      info.connector ? el("p", {class: "note"}, el("b", {}, "Sees more with: "), info.connector.replace(/^With /, "")) : null);
+    box.append(card);
+  }
+}
 function renderConfig(c) {
   $("model").replaceChildren(...Object.entries(c.models).map(([v, t]) => el("option", {value: v}, t)));
   $("effort").replaceChildren(...c.efforts.map(v => el("option", {value: v}, v + (v === "medium" ? " (default)" : ""))));
   $("model").value = c.model; $("effort").value = c.effort;
+  $("rounds").replaceChildren(...c.rounds.map(v => el("option", {value: v}, v + (v === 40 ? " (default)" : ""))));
+  $("parallel").replaceChildren(...c.parallels.map(v => el("option", {value: v}, v + (v === 3 ? " (default)" : ""))));
+  $("rounds").value = c.max_rounds; $("parallel").value = c.parallel;
+  renderAgents(c);
   $("akey-state").replaceChildren(c.anthropic_key_set ? el("span", {class: "ok"}, "✓ set") : el("span", {class: "c-high"}, "not set"));
   $("nkey-state").replaceChildren(c.nvd_key_set ? el("span", {class: "ok"}, "✓ set") : el("span", {}, "(optional)"));
 }
 $("ai-form").addEventListener("submit", async e => {
   e.preventDefault(); $("ai-msg").textContent = "";
   try {
-    renderConfig(await api("/api/settings", {model: $("model").value, effort: $("effort").value, anthropic_key: $("akey").value, nvd_key: $("nkey").value}));
+    renderConfig(await api("/api/settings", {model: $("model").value, effort: $("effort").value, max_rounds: +$("rounds").value,
+      parallel: +$("parallel").value, agents_off: [...agentsOff], anthropic_key: $("akey").value, nvd_key: $("nkey").value}));
     $("akey").value = ""; $("nkey").value = ""; $("ai-msg").textContent = "Saved";
   } catch (err) { $("ai-msg").textContent = err.message; }
 });

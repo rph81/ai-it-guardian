@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="/console.css">
 <script src="/passkey.js" defer></script>
 <script src="/console.js" defer></script>
+<script src="/agents.js" defer></script>
 </head>
 <body>
 <div class="wrap" id="app">
@@ -43,11 +44,46 @@
         <button class="btn sm danger hidden" id="stop">Stop</button>
       </div>
       <div class="tabs">
-        <div class="row"><button class="tab on" data-t="report">Report</button><button class="tab" data-t="log">Live log</button></div>
+        <div class="row"><button class="tab on" data-t="report">Report</button><button class="tab" data-t="agents">Agents</button><button class="tab" data-t="map">Map &amp; chat</button><button class="tab" data-t="log">Live log</button></div>
         <span class="row"><span class="meta mono" id="current"></span><a class="btn sm hidden" id="newtab" target="_blank" rel="noopener">Open in new tab</a></span>
       </div>
       <div class="panel" id="p-report"><iframe id="frame" sandbox="allow-scripts" title="Report"></iframe>
         <div class="empty" id="frame-empty">Choose a run with a report on the left.</div></div>
+      <div class="panel scroll hidden" id="p-agents">
+        <div class="cardhead"><h2>Agents</h2><span class="meta" id="a-cost"></span></div>
+        <p class="note hidden" id="a-empty">No AI agents have worked on this run yet. Start "Scan + AI assessment", or "Run AI" on a scan.</p>
+        <div class="acards" id="a-cards"></div>
+        <div id="a-table" class="hidden"></div>
+        <div class="card drill hidden" id="a-drill"></div>
+      </div>
+      <div class="panel scroll hidden" id="p-map">
+        <div class="mapbar">
+          <span class="totals"><span>Time <b id="m-clock">0:00</b></span><span>Findings <b id="m-find">0</b></span><span>Notes <b id="m-note">0</b></span><span>AI cost <b id="m-cost">$0.00</b></span></span>
+          <span class="row"><span class="tag ok hidden" id="m-live">Live</span>
+            <button class="btn sm hidden" id="m-replay">Replay run</button><button class="btn sm hidden" id="m-play">Pause</button>
+            <button class="btn sm" data-speed="1">1×</button><button class="btn sm on" data-speed="3">3×</button><button class="btn sm" data-speed="8">8×</button></span>
+        </div>
+        <div class="maplayout">
+          <div>
+            <svg id="map" viewBox="0 0 800 640" role="img" aria-label="Agents around the orchestrator, with their orders, checks, findings and notes"></svg>
+            <p class="note hidden" id="m-empty">The map fills in when AI agents work on this run.</p>
+            <div class="legend">
+              <span><i class="lg-order"></i>Order</span><span><i class="lg-tool"></i>Check on the network</span>
+              <span><i class="lg-find"></i>Finding</span><span><i class="lg-note"></i>Note between agents</span><span><i class="lg-done"></i>Finished</span>
+            </div>
+            <p class="note">A purple line stays once two agents have talked: the arrow shows who wrote to whom, the number how many notes. Click a line to read them, or an agent to see every step it took.</p>
+          </div>
+          <div><div class="lp" id="lp" hidden></div><div class="feed" id="feed"></div></div>
+        </div>
+        <div class="chat">
+          <h2>Talk to the Orchestrator</h2>
+          <p class="note">Ask about this run, or ask for more checks: it proposes orders, and nothing goes to an agent until an operator clicks Send. Everything stays read-only.</p>
+          <div class="callout warn hidden" id="c-locked">The chat uses the API key, so the vault has to be unlocked (by an operator or admin).</div>
+          <div class="callout hidden" id="c-waiting">An instruction arrived after the run had finished reading them. <button class="btn sm primary" id="c-run">Run it now</button></div>
+          <div class="msgs" id="c-msgs"></div>
+          <div class="compose"><input id="c-input" maxlength="2000" placeholder="Ask the Orchestrator…" aria-label="Message to the Orchestrator"><button class="btn primary" id="c-send">Send</button></div>
+        </div>
+      </div>
       <div class="panel console hidden" id="p-log"></div>
     </div>
   </div>

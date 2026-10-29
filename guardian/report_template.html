@@ -224,7 +224,7 @@ function init(){
   $("acount").textContent = ips.length;
   $("assets").innerHTML = ips.map(ip=>{
     const a = A[ip], fs = F.filter(f=>f.asset===ip);
-    const svcs = (a.ports||[]).filter(p=>(p.state||"").startsWith("open")).map(p=>`${p.port}/${p.proto==="udp"?"u":"t"} ${p.service||""}`);
+    const svcs = (a.ports||[]).filter(p=>p.state==="open").map(p=>`${p.port}/${p.proto==="udp"?"u":"t"} ${p.service||""}`);
     return `<tr class="asset" onclick="document.getElementById('q').value='${ip}';document.getElementById('q').dispatchEvent(new Event('input'));document.getElementById('findings').scrollIntoView({behavior:'smooth'})">
       <td class="mono">${ip}<br><span class="muted">${esc(a.hostname||"")}</span></td>
       <td>${esc(a.device_type||"unknown")}<br><span class="muted">${esc(a.role||"")}</span></td>

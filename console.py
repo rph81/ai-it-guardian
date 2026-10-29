@@ -20,6 +20,7 @@ import os
 import re
 import secrets
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -32,7 +33,9 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 
 from guardian import auth
+from guardian import chat
 from guardian import connectors as conn
+from guardian.agents import LAYERS
 from guardian.vault import ROLES, VAULT_ROLES, Vault, VaultLocked
 
 BASE = Path(__file__).resolve().parent
@@ -59,7 +62,9 @@ MODES = {
     "resume": {"label": "Re-run AI on a scan", "args": ["--resume"],
                "steps": ["Identifying devices", "AI specialists", "Writing the report"]},
     "report": {"label": "Rebuild report", "args": ["--report"], "steps": ["Rebuilding the report"]},
+    "followup": {"label": "Follow-up from the chat", "args": ["--followup"], "steps": ["AI specialists", "Writing the report"]},
 }
+ROUNDS, PARALLELS = (20, 40, 60), (1, 2, 3)
 STEP_OF_AGENT = {"collector": "Scanning the network", "discovery": "Identifying devices", "report": "Writing the report"}
 
 
@@ -105,7 +110,7 @@ def setup_code():
 
 
 def site():
-    host = os.environ.get("GUARDIAN_HOSTNAME") or vault.get("hostname") or "guardian.hadife.com"
+    host = os.environ.get("GUARDIAN_HOSTNAME") or vault.get("hostname") or socket.getfqdn()
     port = int(os.environ.get("GUARDIAN_CONSOLE_PORT", "8443"))
     base = os.environ.get("GUARDIAN_PUBLIC_URL") or f"https://{host}" + ("" if port == 443 else f":{port}")
     return host, base, [base, f"https://{host}"]
@@ -154,8 +159,11 @@ def api_keys():
 def public_config():
     env, keys = read_env(), vault.get("api_keys_set", {})
     return {"model": env.get("GUARDIAN_MODEL") or "claude-opus-5-5", "effort": env.get("GUARDIAN_EFFORT") or "medium",
+            "max_rounds": int(env.get("GUARDIAN_MAX_TURNS") or 40), "parallel": int(env.get("GUARDIAN_PARALLEL") or 3),
+            "agents_off": [x for x in (env.get("GUARDIAN_AGENTS_OFF") or "").split(",") if x in LAYERS],
+            "agents": {k: v["title"] for k, v in LAYERS.items()},
             "anthropic_key_set": bool(keys.get("anthropic")), "nvd_key_set": bool(keys.get("nvd")),
-            "models": MODELS, "efforts": EFFORTS}
+            "models": MODELS, "efforts": EFFORTS, "rounds": ROUNDS, "parallels": PARALLELS}
 
 
 def migrate_legacy():
@@ -354,8 +362,12 @@ def run_summary(d):
             info["devices"] = len(g.get("assets") or {})
             s = g.get("summary") or {}
             info["score"], info["grade"] = s.get("score"), s.get("grade")
+            info["cost"] = round(g["cost_total"], 2) if g.get("cost_total") else None
+            info["has_agents"] = bool(g.get("agents"))
             info["analysed"] = bool(s)
             for f in g.get("findings") or []:
+                if f.get("status") == "resolved":
+                    continue
                 sev = f.get("severity", "info")
                 info["counts"][sev] = info["counts"].get(sev, 0) + 1
         except (OSError, ValueError):
@@ -393,7 +405,7 @@ REPORT_CSP = ("sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inl
               "style-src 'unsafe-inline'; img-src data:")
 STATIC = {"/console.css": ("console.css", "text/css"), "/console.js": ("console.js", "text/javascript"),
           "/settings.js": ("settings.js", "text/javascript"), "/signin.js": ("signin.js", "text/javascript"),
-          "/passkey.js": ("passkey.js", "text/javascript")}
+          "/passkey.js": ("passkey.js", "text/javascript"), "/agents.js": ("agents.js", "text/javascript")}
 PAGES = {"/": "console.html", "/settings": "settings.html", "/signin": "signin.html"}
 
 
@@ -847,20 +859,27 @@ class Start(BaseModel):
 @app.post("/api/job/start")
 async def start(body: Start, request: Request):
     sid, s, user = require(request, "operator")
+    if body.mode == "followup":
+        raise HTTPException(400, "Follow-ups start from the chat")
+    return launch(body.mode, body.run_id, sid, user)
+
+
+def launch(mode, run_id, sid, user):
     if job.running:
         raise HTTPException(409, "A run is already in progress")
-    if body.mode not in MODES:
+    if mode not in MODES:
         raise HTTPException(400, "Unknown mode")
+    body = Start(mode=mode, run_id=run_id)
     cmd = [PYTHON, str(BASE / "run.py"), *MODES[body.mode]["args"]]
     target = None
-    if body.mode in ("resume", "report"):
+    if body.mode in ("resume", "report", "followup"):
         d = run_dir(body.run_id)
         if not (d / "graph.json").exists():
             raise HTTPException(400, "That run has no scan data")
         cmd.append(str(d))
         target = d.name
     extra = {}
-    if body.mode in ("full", "resume"):
+    if body.mode in ("full", "resume", "followup"):
         if sid not in vault.holders:
             raise HTTPException(423, "Unlock the vault with your passkey first: the AI step needs the API key")
         keys = api_keys()
@@ -905,6 +924,9 @@ def job_status(request: Request, since: int = 0):
 class Settings(BaseModel):
     model: str
     effort: str
+    max_rounds: int = 40
+    parallel: int = 3
+    agents_off: list[str] = []
     anthropic_key: Optional[str] = None
     nvd_key: Optional[str] = None
 
@@ -914,7 +936,16 @@ def save_settings(body: Settings, request: Request):
     sid, s, user = require(request, "admin")
     if body.model not in MODELS or body.effort not in EFFORTS:
         raise HTTPException(400, "Unknown model or effort")
-    write_env({"GUARDIAN_MODEL": body.model, "GUARDIAN_EFFORT": body.effort})
+    if body.max_rounds not in ROUNDS or body.parallel not in PARALLELS:
+        raise HTTPException(400, "Unknown engine setting")
+    off = sorted(set(body.agents_off))
+    if any(a not in LAYERS or a == "discovery" for a in off):
+        raise HTTPException(400, "Discovery can't be turned off: the other agents depend on it")
+    before = public_config()
+    write_env({"GUARDIAN_MODEL": body.model, "GUARDIAN_EFFORT": body.effort, "GUARDIAN_MAX_TURNS": body.max_rounds,
+               "GUARDIAN_PARALLEL": body.parallel, "GUARDIAN_AGENTS_OFF": ",".join(off)})
+    if off != before["agents_off"]:
+        vault.audit(user["email"], "agents-changed", "Turned off: " + (", ".join(off) or "none"))
     new = {k: (v or "").strip() for k, v in (("anthropic", body.anthropic_key), ("nvd", body.nvd_key)) if (v or "").strip()}
     if new:
         if sid not in vault.holders:
@@ -928,6 +959,131 @@ def save_settings(body: Settings, request: Request):
         vault.put("api_keys_set", {"anthropic": bool(rec.get("anthropic")), "nvd": bool(rec.get("nvd"))})
         vault.audit(user["email"], "secret-changed", "API keys: " + ", ".join(new))
     return public_config()
+
+
+# -- agents: live map, agent cards, Orchestrator chat ------------------------------------------------
+def _read_graph(d):
+    try:
+        return json.loads((d / "graph.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+@app.get("/api/runs/{run_id}/live")
+def run_live(run_id: str, request: Request, since: int = 0):
+    """Everything the agent map and the agent cards need; events are incremental (n > since)."""
+    require(request)
+    d = run_dir(run_id)
+    events = []
+    path = d / "events.jsonl"
+    if path.exists():
+        with open(path) as f:
+            for i, line in enumerate(f, 1):
+                if i > since:
+                    try:
+                        events.append(json.loads(line))
+                    except ValueError:
+                        pass
+                    if len(events) >= 3000:
+                        break
+    g = _read_graph(d)
+    per_layer = collections.Counter(f.get("layer") for f in g.get("findings", []) if f.get("status") != "resolved")
+    by_sev = collections.defaultdict(collections.Counter)
+    for f in g.get("findings", []):
+        if f.get("status") != "resolved":
+            by_sev[f.get("layer")][f.get("severity", "info")] += 1
+    agents = {}
+    for name, a in (g.get("agents") or {}).items():
+        agents[name] = {k: a.get(k) for k in ("status", "activity", "rounds", "max_rounds", "cost", "usage", "checks",
+                                               "started", "ended", "devices", "followups")}
+        agents[name]["findings"] = per_layer.get(name, 0)
+        agents[name]["by_severity"] = dict(by_sev.get(name, {}))
+    return {"events": events, "agents": agents, "notes": g.get("notes", []), "cost_total": g.get("cost_total", 0),
+            "ai": g.get("ai"), "running": job.running and job.run_id == run_id,
+            "titles": {**{k: v["title"] for k, v in LAYERS.items()}, "orchestrator": "Orchestrator",
+                       "report": "Report writer", "collector": "Scanner"}}
+
+
+chat_times = collections.defaultdict(list)
+
+
+@app.get("/api/runs/{run_id}/chat")
+def chat_history(run_id: str, request: Request):
+    sid, s, user = require(request)
+    d = run_dir(run_id)
+    items = [{k: v for k, v in m.items() if k != "uid"} for m in chat.history(d)]
+    return {"messages": items, "can_ask": vault.unlocked and bool(api_keys().get("anthropic")),
+            "can_order": ROLES.index(user["role"]) >= ROLES.index("operator"),
+            "waiting": chat.inbox_waiting(d) and not (job.running and job.run_id == run_id)}
+
+
+class ChatBody(BaseModel):
+    message: str
+
+
+@app.post("/api/runs/{run_id}/chat")
+def chat_ask(run_id: str, body: ChatBody, request: Request):
+    sid, s, user = require(request)
+    d = run_dir(run_id)
+    msg = body.message.strip()
+    if not msg or len(msg) > 2000:
+        raise HTTPException(400, "Write a message (up to 2000 characters)")
+    if not (d / "graph.json").exists():
+        raise HTTPException(400, "This run has no scan data yet")
+    now = time.time()
+    chat_times[user["id"]] = [t for t in chat_times[user["id"]] if now - t < 600]
+    if len(chat_times[user["id"]]) >= 30:
+        raise HTTPException(429, "That's a lot of questions in 10 minutes; wait a little")
+    chat_times[user["id"]].append(now)
+    key = api_keys().get("anthropic")
+    if not key:
+        raise HTTPException(423, "The chat needs the API key: an operator or admin has to unlock the vault")
+    can_order = ROLES.index(user["role"]) >= ROLES.index("operator")
+    model = read_env().get("GUARDIAN_MODEL") or "claude-opus-5-5"
+    try:
+        entry = chat.ask(d, msg, user, can_order, key, model)
+    except chat.anthropic.APIError as e:
+        raise HTTPException(502, f"The AI service returned an error: {str(e)[:200]}")
+    vault.audit(user["email"], "chat", f"Run {run_id}: {msg[:120]}")
+    return entry
+
+
+@app.post("/api/runs/{run_id}/chat/orders/{oid}")
+async def chat_order(run_id: str, oid: str, request: Request, body: dict):
+    sid, s, user = require(request, "operator")
+    d = run_dir(run_id)
+    action = body.get("action")
+    if action == "dismiss":
+        o = chat.set_order(d, oid, "dismissed", user["name"])
+        if not o:
+            raise HTTPException(404, "That order was already handled")
+        return {"order": o}
+    if action != "send":
+        raise HTTPException(400, "Unknown action")
+    live = job.running and job.run_id == run_id
+    if job.running and not live:
+        raise HTTPException(409, "Another run is in progress; send this when it finishes")
+    if not live and sid not in vault.holders:
+        raise HTTPException(423, "Unlock the vault with your passkey first: the follow-up needs the API key")
+    o = chat.set_order(d, oid, "sent", user["name"])
+    if not o:
+        raise HTTPException(404, "That order was already handled")
+    chat.send_to_inbox(d, o, user["name"])
+    vault.audit(user["email"], "agent-order", f'Run {run_id} → {o["agent"]}: {o["instruction"][:160]}')
+    status = None
+    if not live:
+        status = launch("followup", run_id, sid, user)
+    return {"order": o, "delivered": "live" if live else "follow-up", "job": status}
+
+
+@app.post("/api/runs/{run_id}/followup")
+async def run_followup(run_id: str, request: Request):
+    """Run instructions that arrived after the run stopped reading them."""
+    sid, s, user = require(request, "operator")
+    d = run_dir(run_id)
+    if not chat.inbox_waiting(d):
+        raise HTTPException(400, "Nothing is waiting")
+    return launch("followup", run_id, sid, user)
 
 
 # -- connectors -----------------------------------------------------------------------------------------

@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guardian Agent Map</title>
+<style>
+:root{
+  --accent:#3b82f6;
+  --bg:#eef1f5; --card:#ffffff; --card2:#f6f8fb; --line:#dde3ea; --text:#0f172a; --muted:#64748b;
+  --ok:#16a34a; --busy:#d97706; --note:#7c3aed; --find:#ea580c; --tool:#0891b2;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0b0f15; --card:#121821; --card2:#18202b; --line:#253041; --text:#e6ebf2; --muted:#8b98ab;
+  --ok:#4ade80; --busy:#fbbf24; --note:#a78bfa; --find:#fb923c; --tool:#22d3ee;}}
+:root[data-theme="dark"]{
+  --bg:#0b0f15; --card:#121821; --card2:#18202b; --line:#253041; --text:#e6ebf2; --muted:#8b98ab;
+  --ok:#4ade80; --busy:#fbbf24; --note:#a78bfa; --find:#fb923c; --tool:#22d3ee;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif}
+.banner{background:var(--accent);color:#fff;font-size:12.5px;text-align:center;padding:6px 16px}
+.wrap{max-width:1280px;margin:0 auto;padding:18px 16px 40px}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+h1{font-size:20px;margin:0}
+.meta{color:var(--muted);font-size:13px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn{border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:999px;padding:6px 12px;font:inherit;font-size:12.5px;cursor:pointer}
+.btn.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:16px}
+@media (max-width:980px){.layout{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px}
+svg{width:100%;height:auto;display:block}
+.edge{stroke:var(--line);stroke-width:1.5}
+.edge.hot{stroke:color-mix(in srgb,var(--accent) 60%,var(--line))}
+.node circle.body{fill:var(--card2);stroke:var(--line);stroke-width:2}
+.node.waiting circle.body{opacity:.55}
+.node.working circle.body{stroke:var(--busy)}
+.node.done circle.body{stroke:var(--ok)}
+.node .label{fill:var(--text);font-size:13px;font-weight:650;text-anchor:middle}
+.node .sub{fill:var(--muted);font-size:11px;text-anchor:middle}
+.node .ring{fill:none;stroke:var(--busy);stroke-width:2;opacity:0}
+.node.working .ring{animation:pulse 1.6s ease-out infinite}
+@keyframes pulse{0%{opacity:.7;r:46}100%{opacity:0;r:62}}
+.center circle.body{fill:color-mix(in srgb,var(--accent) 14%,var(--card));stroke:var(--accent)}
+.badge{font-size:10.5px;font-weight:700;text-anchor:middle}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:8px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+.feed{height:620px;overflow:auto;display:flex;flex-direction:column;gap:6px}
+.ev{background:var(--card2);border-radius:10px;padding:7px 10px;font-size:12.5px;border-left:3px solid var(--line);animation:in .3s ease-out}
+@keyframes in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.ev .t{color:var(--muted);font-size:11px;font-family:ui-monospace,Menlo,monospace}
+.ev b{font-weight:650}
+.ev.order{border-left-color:var(--accent)}.ev.tool{border-left-color:var(--tool)}.ev.find{border-left-color:var(--find)}.ev.note{border-left-color:var(--note)}.ev.done{border-left-color:var(--ok)}
+.totals{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-bottom:10px}
+.totals b{color:var(--text);font-size:15px}
+.hint{font-size:12px;color:var(--muted);margin:8px 0 0}
+.chat{margin-top:16px}
+.chat h2{font-size:15px;margin:0 0 4px}
+.chat .sub2{font-size:12px;color:var(--muted);margin:0 0 10px}
+.msgs{display:flex;flex-direction:column;gap:8px;max-height:340px;overflow:auto;padding:2px}
+.bub{max-width:82%;padding:8px 12px;border-radius:14px;font-size:13px}
+.bub.me{align-self:flex-end;background:var(--accent);color:#fff;border-bottom-right-radius:4px}
+.bub.ai{align-self:flex-start;background:var(--card2);border-bottom-left-radius:4px}
+.bub .meta2{font-size:11px;color:var(--muted);margin-top:4px}
+.bub.me .meta2{color:rgba(255,255,255,.75)}
+.bub .act{margin-top:6px;border-left:3px solid var(--accent);padding:3px 8px;font-size:12px;background:color-mix(in srgb,var(--accent) 8%,transparent);border-radius:0 8px 8px 0}
+.compose{display:flex;gap:8px;margin-top:10px}
+.compose input{flex:1;min-width:0;border:1px solid var(--line);background:var(--card2);color:var(--text);border-radius:999px;padding:8px 14px;font:inherit;font-size:13px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.chips button{border:1px dashed var(--line);background:none;color:var(--muted);border-radius:999px;padding:3px 10px;font:inherit;font-size:12px;cursor:pointer}
+.link{cursor:pointer}
+.link .hit{stroke:transparent;stroke-width:16;fill:none}
+.link .line{fill:none;stroke:var(--note);stroke-dasharray:6 5;opacity:.75;transition:stroke-width .3s}
+.link:hover .line,.link.sel .line{opacity:1}
+.link.sel .line{stroke-dasharray:none}
+.link .count circle{fill:var(--note)}
+.link .count text{fill:#fff;font-size:11px;font-weight:700;text-anchor:middle}
+.link:focus{outline:none}.link:focus-visible .count circle{stroke:var(--text);stroke-width:2}
+.lp{background:color-mix(in srgb,var(--note) 10%,var(--card2));border:1px solid color-mix(in srgb,var(--note) 40%,var(--line));border-radius:12px;padding:10px 12px;margin-bottom:10px;font-size:12.5px}
+.lp h3{margin:0 0 6px;font-size:13.5px;display:flex;justify-content:space-between;gap:8px;align-items:center}
+.lp h3 button{border:0;background:none;color:var(--muted);font-size:16px;cursor:pointer;line-height:1}
+.lp .msg{border-left:3px solid var(--note);padding:3px 0 3px 8px;margin:6px 0}
+.lp .msg .t{color:var(--muted);font-size:11px;font-family:ui-monospace,Menlo,monospace}
+.lp .then{color:var(--muted);margin-top:2px}
+.lp .then b{color:var(--ok);font-weight:650}
+.lp .wait{color:var(--busy)}
+</style>
+</head>
+<body>
+<div class="banner">Design preview: replays a sample run. In the real console the map follows a live run as it happens, or replays a finished one.</div>
+<div class="wrap">
+  <header>
+    <div><h1>Agent map</h1><div class="meta">Run 2026-11-02 09:12 · Scan + AI assessment</div></div>
+    <div class="row">
+      <button class="btn on" id="play">Pause</button>
+      <button class="btn" data-speed="1">1×</button><button class="btn on" data-speed="3">3×</button><button class="btn" data-speed="8">8×</button>
+      <button class="btn" id="restart">Restart</button>
+    </div>
+  </header>
+  <div class="layout">
+    <div class="card">
+      <svg id="map" viewBox="0 0 800 640" role="img" aria-label="Agents connected to the orchestrator"></svg>
+      <div class="legend">
+        <span><i style="background:var(--accent)"></i>Order from the orchestrator</span>
+        <span><i style="background:var(--tool)"></i>Check run on the network</span>
+        <span><i style="background:var(--find)"></i>Finding reported</span>
+        <span><i style="background:var(--note)"></i>Note between agents</span>
+        <span><i style="background:var(--ok)"></i>Agent finished</span>
+      </div>
+      <p class="hint">A purple line stays once two agents have talked: the arrow shows who wrote to whom, the number how many notes. Click a line to read them. In the real console, clicking an agent opens everything it did, step by step.</p>
+    </div>
+    <div class="card">
+      <div class="lp" id="lp" hidden></div>
+      <div class="totals"><span>Time <b id="clock">0:00</b></span><span>Findings <b id="nfind">0</b></span><span>Notes <b id="nnote">0</b></span><span>AI cost <b id="cost">$0.00</b></span></div>
+      <div class="feed" id="feed"></div>
+    </div>
+  </div>
+  <div class="card chat">
+    <h2>Talk to the Orchestrator</h2>
+    <p class="sub2">Ask about this run, or give instructions: it turns them into orders for the agents (they appear on the map in blue). Read-only checks only, your network only. Viewers can ask; operators and admins can give orders.</p>
+    <div class="msgs" id="msgs"></div>
+    <div class="chips" id="chips"></div>
+    <div class="compose"><input id="ask" placeholder="Ask the Orchestrator…" aria-label="Message to the Orchestrator"><button class="btn on" id="send">Send</button></div>
+  </div>
+</div>
+<script>
+const NODES = {
+  orch: {x: 400, y: 320, label: "Orchestrator", sub: "assigns · relays", center: true},
+  scan: {x: 400, y: 70, label: "Scanner", sub: "program, not AI"},
+  disc: {x: 640, y: 150, label: "Discovery", sub: "identifies devices"},
+  net:  {x: 700, y: 380, label: "Network", sub: "exposure, protocols"},
+  os:   {x: 560, y: 560, label: "OS & endpoints", sub: "versions, EOL, CVEs"},
+  web:  {x: 240, y: 560, label: "Web & APIs", sub: "admin pages, TLS"},
+  fw:   {x: 100, y: 380, label: "Firmware", sub: "vendor releases"},
+  wan:  {x: 160, y: 150, label: "Internet perimeter", sub: "public IP, forwards"},
+  rpt:  {x: 400, y: 470, label: "Report writer", sub: "score, summary", small: true},
+};
+const COLORS = {order: "--accent", tool: "--tool", find: "--find", note: "--note", done: "--ok"};
+// [seconds, kind, from, to, text, costDelta]
+const SCRIPT = [
+  [0, "order", "scan", "orch", "Scan finished: 34 devices, 180 open ports, 8 router forwards", 0],
+  [2, "order", "orch", "disc", "Identify all 34 devices", 0.02],
+  [3, "tool", "disc", "disc", "Discovery reads UPnP descriptions and certificates", 0.05],
+  [5, "tool", "disc", "disc", "Probe http_title on 192.168.1.251 → \"Smart Switch\"", 0.06],
+  [7, "tool", "disc", "disc", "Web search: Skyworth SKWHP44H → Google TV", 0.05],
+  [9, "find", "disc", "orch", "29 of 34 identified · 5 unknown (info)", 0.08],
+  [10, "done", "disc", "disc", "Discovery done · 18 rounds · $0.71", 0.45],
+  [12, "order", "orch", "net", "Network: 9 devices (router, switches, NAS, printer, receiver…)", 0.03],
+  [12.4, "order", "orch", "os", "OS & endpoints: 12 devices (servers, Macs, Pi, NAS)", 0],
+  [12.8, "order", "orch", "web", "Web & APIs: 14 admin interfaces", 0],
+  [13.2, "order", "orch", "fw", "Firmware: 15 devices (queued: 3 agents at a time)", 0],
+  [13.6, "order", "orch", "wan", "Internet perimeter: public IP + 8 forwards (queued)", 0],
+  [15, "tool", "net", "net", "Probe snmp_info on printer 192.168.1.18", 0.06],
+  [16, "tool", "os", "os", "Probe ssh_auth_methods on VPN server 192.168.1.80", 0.06],
+  [17, "tool", "web", "web", "TLS check on RPHNAS2 :5001", 0.07],
+  [19, "find", "net", "orch", "Printer answers SNMPv1 'public' (low)", 0.05],
+  [20, "tool", "os", "os", "Web search: Debian security tracker, OpenSSH 10.0p2 deb13u4", 0.08],
+  [22, "note", "os", "net", "VPN server allows SSH password login and is the UDP 51820 forward target: check what else it exposes", 0.04, "Network re-checked 192.168.1.80 on its next round", 23],
+  [23, "tool", "net", "net", "Network re-checks 192.168.1.80 after OS's note", 0.06],
+  [24, "note", "net", "os", "Only UDP 51820 is forwarded to 192.168.1.80; SSH is reachable from the LAN only", 0.03, "OS kept the finding at medium (not internet-exposed)", 26],
+  [25, "find", "web", "orch", "RPHNAS2 DSM login over plain HTTP :5000 (medium)", 0.07],
+  [26, "find", "os", "orch", "VPN server: SSH password login enabled (medium)", 0.06],
+  [26.5, "note", "os", "net", "Same server also accepts root login with a key: include it in your exposure check", 0.03, "Network added it to the VPN server's exposure notes", 29],
+  [27, "note", "web", "fw", "Netgear GS110EMX shows firmware 1.0.2.8 on its admin page", 0.03, "Firmware was still queued: the Orchestrator attached the note when it started, and Firmware checked 1.0.2.8 against the vendor's releases", 30],
+  [28, "done", "os", "os", "OS & endpoints done · 16 rounds · $0.62", 0.3],
+  [28.5, "order", "orch", "fw", "Firmware starts (slot free) · note from Web attached", 0.02],
+  [30, "tool", "fw", "fw", "Web search: latest firmware TP-Link RE450", 0.09],
+  [32, "find", "fw", "orch", "Range extender on 2015-era OpenWrt (high)", 0.08],
+  [33, "done", "net", "net", "Network done · 14 rounds · $0.55", 0.2],
+  [33.5, "order", "orch", "wan", "Internet perimeter starts (slot free)", 0.02],
+  [35, "tool", "wan", "wan", "Read public-IP data and UPnP forwards", 0.05],
+  [36, "note", "wan", "net", "UPnP forward 6881 → NAS (Transmission): flag together with NAS services", 0.03, "Network had already finished, so the Orchestrator started a follow-up; Network reported the BitTorrent client as reachable from the internet", 39],
+  [37, "find", "wan", "orch", "UPnP opened 8 doors in the router (high)", 0.08],
+  [38, "order", "orch", "net", "Follow-up for Network: note from Internet perimeter", 0.02],
+  [39, "find", "net", "orch", "NAS: BitTorrent client reachable from the internet (medium)", 0.06],
+  [40, "done", "web", "web", "Web & APIs done · 21 rounds · $0.98", 0.4],
+  [42, "done", "wan", "wan", "Internet perimeter done · 8 rounds · $0.29", 0.15],
+  [44, "done", "fw", "fw", "Firmware done · 24 rounds · $1.37", 0.6],
+  [45, "order", "orch", "rpt", "All specialists done: 21 findings to the report writer", 0.02],
+  [48, "done", "rpt", "rpt", "Report ready · score 63 (C) · total $5.40", 0.82],
+];
+const NS = "http://www.w3.org/2000/svg";
+const svg = document.getElementById("map");
+const mk = (t, a = {}, p = svg) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); p.append(e); return e; };
+const color = k => getComputedStyle(document.documentElement).getPropertyValue(COLORS[k]).trim();
+const edges = {};
+for (const id in NODES) if (id !== "orch") edges[id] = mk("line", {class: "edge", x1: NODES.orch.x, y1: NODES.orch.y, x2: NODES[id].x, y2: NODES[id].y});
+const gEdgesExtra = mk("g");
+const defs = mk("defs");
+const arrow = mk("marker", {id: "arr", viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 5, markerHeight: 5, orient: "auto-start-reverse"}, defs);
+mk("path", {d: "M0,0 L10,5 L0,10 z", fill: color("note")}, arrow);
+const links = {};                                      // "from>to" -> {g, line, count, msgs}
+let selected = null;
+function linkPath(from, to) {                           // curve to one side so A→B and B→A don't overlap; stop at the circle's edge
+  const a = NODES[from], b = NODES[to], dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy);
+  const mx = (a.x + b.x) / 2 - dy * 0.22, my = (a.y + b.y) / 2 + dx * 0.22;
+  const ra = 50, rb = (NODES[to].small ? 42 : 52);
+  const sx = a.x + (mx - a.x) / Math.hypot(mx - a.x, my - a.y) * ra, sy = a.y + (my - a.y) / Math.hypot(mx - a.x, my - a.y) * ra;
+  const ex = b.x + (mx - b.x) / Math.hypot(mx - b.x, my - b.y) * rb, ey = b.y + (my - b.y) / Math.hypot(mx - b.x, my - b.y) * rb;
+  return `M${sx},${sy} Q${mx},${my} ${ex},${ey}`;
+}
+function getLink(from, to) {
+  const key = from + ">" + to;
+  if (links[key]) return links[key];
+  const g = mk("g", {class: "link", tabindex: 0, role: "button", "aria-label": `Notes from ${NODES[from].label} to ${NODES[to].label}`}, gEdgesExtra);
+  const d = linkPath(from, to);
+  mk("path", {class: "hit", d}, g);
+  const line = mk("path", {class: "line", d, "marker-end": "url(#arr)", "stroke-width": 2}, g);
+  const L = line.getTotalLength(), m = line.getPointAtLength(L / 2);
+  const count = mk("g", {class: "count", transform: `translate(${m.x},${m.y})`}, g);
+  mk("circle", {r: 10}, count); const ct = mk("text", {y: 4}, count);
+  const title = mk("title", {}, g);
+  const link = {key, from, to, g, line, ct, title, msgs: []};
+  g.onclick = () => select(link); g.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(link); } };
+  return links[key] = link;
+}
+function addNote(from, to, text, at, outcome, outAt) {
+  const link = getLink(from, to);
+  link.msgs.push({text, at, outcome, outAt});
+  const n = link.msgs.length;
+  link.ct.textContent = n; link.line.setAttribute("stroke-width", Math.min(2 + (n - 1) * 1.5, 6));
+  link.title.textContent = `${NODES[from].label} → ${NODES[to].label}: ${n} note${n > 1 ? "s" : ""}`;
+  if (selected === link) renderPanel();
+  return link.line;
+}
+function select(link) { if (selected) selected.g.classList.remove("sel"); selected = selected === link ? null : link; if (selected) selected.g.classList.add("sel"); renderPanel(); }
+function renderPanel() {
+  const lp = document.getElementById("lp");
+  if (!selected) { lp.hidden = true; return; }
+  lp.hidden = false; lp.replaceChildren();
+  const h = document.createElement("h3"); h.textContent = `${NODES[selected.from].label} → ${NODES[selected.to].label}`;
+  const x = document.createElement("button"); x.textContent = "×"; x.setAttribute("aria-label", "Close"); x.onclick = () => select(selected); h.append(x); lp.append(h);
+  for (const m of selected.msgs) {
+    const d = document.createElement("div"); d.className = "msg";
+    const t = document.createElement("div"); t.className = "t"; t.textContent = fmt(m.at * 40) + "  note";
+    const then = document.createElement("div"); then.className = "then";
+    if (clock >= m.outAt) { const b = document.createElement("b"); b.textContent = "Then: "; then.append(b, m.outcome); }
+    else { then.classList.add("wait"); then.textContent = `Waiting for ${NODES[selected.to].label} to read it`; }
+    d.append(t, m.text, then); lp.append(d);
+  }
+}
+const gPackets = mk("g");
+const nodeEls = {};
+for (const [id, n] of Object.entries(NODES)) {
+  const g = mk("g", {class: "node " + (n.center ? "center working" : "waiting"), transform: `translate(${n.x},${n.y})`, tabindex: 0});
+  const r = n.center ? 60 : n.small ? 38 : 46;
+  mk("circle", {class: "ring", r: r}, g);
+  mk("circle", {class: "body", r: r}, g);
+  const t = mk("text", {class: "label", y: n.center ? -2 : 0}, g); t.textContent = n.label;
+  const s = mk("text", {class: "sub", y: 15}, g); s.textContent = n.sub;
+  const b = mk("text", {class: "badge", y: r + 16}, g);
+  nodeEls[id] = {g, badge: b, finds: 0};
+}
+function setState(id, st) { const g = nodeEls[id].g; if (NODES[id].center) return; g.classList.remove("waiting", "working", "done"); g.classList.add(st); }
+function packet(kind, from, to, path) {
+  const a = NODES[from], b = NODES[to];
+  if (from === to) {                                   // a check against the network: a ping out and back
+    const c = mk("circle", {r: 5, fill: color(kind), cx: a.x, cy: a.y}, gPackets);
+    let t = 0; const ang = Math.atan2(a.y - 320, a.x - 400);
+    const step = () => { t += 0.04 * speed; const d = 70 * Math.sin(Math.min(t, 1) * Math.PI);
+      c.setAttribute("cx", a.x + Math.cos(ang) * d); c.setAttribute("cy", a.y + Math.sin(ang) * d);
+      if (t < 1) requestAnimationFrame(step); else c.remove(); };
+    return requestAnimationFrame(step);
+  }
+  let extra = null;
+  if (path) {                                          // agent-to-agent note: travel along its persistent link
+    extra = path;
+  } else {
+    const e = edges[from === "orch" ? to : from]; e.classList.add("hot"); setTimeout(() => e.classList.remove("hot"), 900 / speed);
+  }
+  const c = mk("circle", {r: 7, fill: color(kind)}, gPackets);
+  let t = 0;
+  const step = () => { t += 0.025 * speed;
+    let x, y;
+    if (extra) { const L = extra.getTotalLength(); const p = extra.getPointAtLength(L * Math.min(t, 1)); x = p.x; y = p.y; }
+    else { x = a.x + (b.x - a.x) * Math.min(t, 1); y = a.y + (b.y - a.y) * Math.min(t, 1); }
+    c.setAttribute("cx", x); c.setAttribute("cy", y);
+    if (t < 1) requestAnimationFrame(step); else c.remove(); };
+  requestAnimationFrame(step);
+}
+const feed = document.getElementById("feed");
+let speed = 3, playing = true, clock = 0, idx = 0, cost = 0, nfind = 0, nnote = 0, last = performance.now();
+function fmt(s) { return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`; }
+function fire([at, kind, from, to, text, dc, outcome, outAt]) {
+  cost += dc;
+  if (kind === "order" && to !== "orch" && !text.includes("queued")) setState(to, "working");
+  if (kind === "done") setState(from, "done");
+  if (kind === "find") { nfind++; nodeEls[from].finds++; nodeEls[from].badge.textContent = `${nodeEls[from].finds} finding${nodeEls[from].finds > 1 ? "s" : ""}`; nodeEls[from].badge.setAttribute("fill", color("find")); }
+  if (kind === "note") { nnote++; packet(kind, from, to, addNote(from, to, text, at, outcome, outAt)); }
+  else if (kind !== "done") packet(kind, from, to);
+  const who = kind === "note" ? `${NODES[from].label} → ${NODES[to].label}` : kind === "order" ? `${NODES[from].label} → ${NODES[to].label}` : NODES[from].label;
+  const ev = document.createElement("div"); ev.className = "ev " + kind;
+  const t = document.createElement("div"); t.className = "t"; t.textContent = fmt(at * 40) + "  " + {order: "order", tool: "check", find: "finding", note: "note", done: "done"}[kind];
+  const b = document.createElement("b"); b.textContent = who + ": ";
+  ev.append(t, b, text); feed.prepend(ev);
+  document.getElementById("cost").textContent = "$" + cost.toFixed(2);
+  document.getElementById("nfind").textContent = nfind; document.getElementById("nnote").textContent = nnote;
+}
+function tick(now) {
+  const dt = (now - last) / 1000; last = now;
+  if (playing) {
+    clock += dt * speed / 3 * 1.2;
+    const before = idx;
+    while (idx < SCRIPT.length && SCRIPT[idx][0] <= clock) fire(SCRIPT[idx++]);
+    if (selected && idx !== before) renderPanel();
+    document.getElementById("clock").textContent = fmt(Math.min(clock, 48) * 40);
+  }
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+document.getElementById("play").onclick = e => { playing = !playing; e.target.textContent = playing ? "Pause" : "Play"; e.target.classList.toggle("on", playing); };
+document.querySelectorAll("[data-speed]").forEach(b => b.onclick = () => { speed = +b.dataset.speed; document.querySelectorAll("[data-speed]").forEach(x => x.classList.toggle("on", x === b)); });
+document.getElementById("restart").onclick = () => { clock = 0; idx = 0; cost = 0; nfind = 0; nnote = 0; feed.replaceChildren();
+  for (const id in nodeEls) { setState(id, "waiting"); nodeEls[id].finds = 0; nodeEls[id].badge.textContent = ""; }
+  gEdgesExtra.replaceChildren(); for (const k in links) delete links[k]; selected = null; renderPanel(); };
+// ---- Orchestrator chat (simulated replies in this preview) ----
+const CANNED = {
+  "Why is the range extender rated high?": ["The TP-Link RE450 at 192.168.1.40 runs OpenWrt from 2015 (Firmware saw it on its admin page). TP-Link stopped updates for this model, and that OpenWrt version has 6 known vulnerabilities, 2 of them used in real attacks. It sits on the same network as your NAS and PCs, so if it's taken over, the attacker is inside. Evidence: finding F014.", null, 0.03],
+  "Look at the NAS first": ["Done: I moved RPHNAS and RPHNAS2 to the front of the queue for Network, Web & APIs and Firmware.", "Order sent → Network, Web & APIs, Firmware: start with 192.168.1.101 and .102", 0.02],
+  "Re-check 192.168.1.80, I turned off SSH password login": ["Sending OS & endpoints back to check it. Only that agent runs; the finding will be updated (closed if confirmed fixed).", "Follow-up order → OS & endpoints: re-check SSH on 192.168.1.80 · est. $0.30–0.60", 0.02],
+  "Turn off UPnP on the router": ["I can't change settings: this run is read-only, and so am I. To fix it yourself: router admin page → Advanced → NAT forwarding → UPnP → off. Then ask me to re-check the router and I'll confirm the 8 forwards are gone.", null, 0.02],
+};
+const msgs = document.getElementById("msgs");
+function bubble(who, text, meta, act) {
+  const d = document.createElement("div"); d.className = "bub " + who; d.append(text);
+  if (act) { const a = document.createElement("div"); a.className = "act"; a.textContent = act; d.append(a); }
+  if (meta) { const m = document.createElement("div"); m.className = "meta2"; m.textContent = meta; d.append(m); }
+  msgs.append(d); msgs.scrollTop = msgs.scrollHeight;
+}
+function askOrch(q) {
+  if (!q.trim()) return;
+  bubble("me", q, "You · operator");
+  const c = CANNED[q] || ["(Preview) In the real console the Orchestrator answers from this run's findings, events and agent notes, and links to the evidence.", null, 0.02];
+  setTimeout(() => { bubble("ai", c[0], `Orchestrator · $${c[2].toFixed(2)}`, c[1]);
+    if (c[1] && c[1].startsWith("Follow-up")) fire([clock, "order", "orch", "os", "Follow-up from chat: re-check SSH on 192.168.1.80", 0.02]); }, 700);
+}
+bubble("ai", "Hi, I'm running this assessment. Ask me anything about it, or tell me what to focus on.", "Orchestrator");
+const chips = document.getElementById("chips");
+for (const q of Object.keys(CANNED)) { const b = document.createElement("button"); b.textContent = q; b.onclick = () => askOrch(q); chips.append(b); }
+const askIn = document.getElementById("ask");
+document.getElementById("send").onclick = () => { askOrch(askIn.value); askIn.value = ""; };
+askIn.onkeydown = e => { if (e.key === "Enter") { askOrch(askIn.value); askIn.value = ""; } };
+</script>
+</body>
+</html>

@@ -1,120 +1,76 @@
-# AI IT Guardian — proof of concept
+# AI IT Guardian
 
-A read-only IT and security assessment of a network, done by AI agents.
-A deterministic collector maps the network; six Claude agents then identify every device,
-assess each layer and write a prioritized report for a business owner.
+A read-only IT and security assessment of a small business network, done by a team of AI agents.
+A scanner maps the network; Claude agents identify every device, assess each layer, talk to each other when
+one finds something another should check, and write a prioritized report for the business owner.
+You watch them work live and can talk to the Orchestrator that coordinates them.
 
-Nothing on the network is changed. Agents have no shell: only fixed, non-intrusive checks,
-web requests without credentials, and public vulnerability lookups (NVD, CISA KEV, endoflife.date).
+**Installing: see [INSTALL.md](INSTALL.md)**. It covers everything from creating the Proxmox container to the first report.
 
-## Where it runs
+Nothing on the network is changed. Agents have no shell: only fixed, non-intrusive checks, web requests without
+credentials, and public vulnerability lookups (NVD, CISA KEV, endoflife.date).
 
-| What | Where |
+## What's in it
+
+| Part | What it does |
 |---|---|
-| Collector + agents | Proxmox container **303 `ai-guardian`** (192.168.1.92), installed in `/opt/ai-guardian` |
-| Source code | this folder |
-| Results | `/opt/ai-guardian/runs/<date-time>/` in the container (`graph.json` + `report.html`) |
+| **Scanner** (`guardian/collector.py`) | ARP, ports, services, OS guesses, web titles, TLS, UPnP, mDNS, router forwards, what the internet sees on the public IP. No AI, free, ~7 min. |
+| **Agents** (`guardian/agents.py`) | Discovery → Orchestrator → specialists (Network, OS & endpoints, Web & APIs, Firmware, Internet perimeter), a few at a time → Report writer. |
+| **Agent notes** | A specialist that finds something in another's area sends it a note (`send_note`). The Orchestrator delivers it on the receiver's next round, adds it to its brief if it hasn't started, or runs a follow-up if it has finished. |
+| **Console** (`console.py`, `guardian/web/`) | HTTPS web app: start/stop runs, reports, live **Agents** cards, the live **agent map** (with replay), the **Orchestrator chat**, settings. |
+| **Orchestrator chat** (`guardian/chat.py`) | Ask about a run; ask for re-checks. It proposes orders; an operator confirms each one before an agent gets it. |
+| **Vault** (`guardian/vault.py`) | Users, passkeys (with PRF), encrypted secrets (API keys, connector passwords, SSH key), tamper-evident audit log. |
+| **Sign-in** (`guardian/auth.py`) | Passkeys (Touch ID, Face ID, Windows Hello, security keys); optionally Google / Microsoft accounts. Roles: viewer, operator, admin. |
+| **Connectors** (`guardian/connectors.py`) | Read-only accounts on systems (Synology, Proxmox, Linux SSH, SNMPv3, AD, e-mail domain…), suggested from the scan. Tested and stored now; used by agents in a later phase. |
+| **Report** (`guardian/report.py`) | One self-contained HTML file: score, summary, fix-first list, findings with evidence. |
 
-## One-time setup: API key (for the AI step)
+## What it costs to run
 
-1. Create a key at **console.anthropic.com → Settings → API Keys** (needs billing set up).
-2. Paste it in the web console under **Settings**, or in the Proxmox web UI open **lab → Shell** and run
-   (the key is not shown while you type):
-
-   ```bash
-   read -rsp "API key: " K && pct exec 303 -- sed -i "s|^ANTHROPIC_API_KEY=.*|ANTHROPIC_API_KEY=$K|" /opt/ai-guardian/.env && unset K && echo " saved"
-   ```
-
-Optional settings in `/opt/ai-guardian/.env`:
-- `GUARDIAN_MODEL` — `claude-opus-5-5` (default) or `claude-fable-5-1` (stronger, ~2.5x the cost)
-- `GUARDIAN_EFFORT` — `low`, `medium` (default), `high`
-- `NVD_API_KEY` — free key from nvd.nist.gov; makes vulnerability lookups much faster
-
-## Web console
-
-Open **https://192.168.1.92:8443** in a browser. The certificate is self-signed, so the browser warns once:
-choose *Advanced → Proceed*.
-
-From the console you can:
-- start a **Scan only** or **Scan + AI assessment** run, follow its live log, and **Stop** it
-- open any run's report, re-run the AI on an existing scan, or rebuild a report
-- set the model, effort and API keys (keys are write-only: the console never shows them)
-
-It runs as the service `ai-guardian-console` and starts with the container.
-`systemctl status ai-guardian-console` shows its state; `journalctl -u ai-guardian-console` its errors.
-
-Sign-in is off: anyone on the LAN can use the console. Turn it on under **Settings → Access & sign-in**
-(or add `GUARDIAN_CONSOLE_AUTH=on` to `/opt/ai-guardian/.env`); the code is in `/opt/ai-guardian/console/access-code`.
-
-## Connectors (Settings → Connectors)
-
-A scan only sees devices from the outside. A connector gives Guardian a **read-only** account on a system
-so it can look inside. Each setup panel explains how to create that account, and **Test connection** warns
-if the account could change anything.
-
-- **Suggested from your last scan:** Guardian proposes connectors for what it found (Synology, Proxmox VE,
-  Proxmox Backup Server, Home Assistant, Linux servers, switches, and your e-mail domain). Devices that
-  appear in a later scan are flagged as new.
-- **Standard connectors** are always available, several of each if needed: Active Directory, e-mail domain
-  (DNS), Synology, Proxmox, Home Assistant, Linux (SSH, using Guardian's own key), SNMPv3.
-  Microsoft 365, Google Workspace, VMware, Docker, Windows and firewall APIs are listed as planned.
-- Passwords and tokens are encrypted in `/opt/ai-guardian/console/connectors.json` with a key in
-  `console/secret.key` (both readable by root only) and are never sent back to the browser.
-- Self-signed certificates are pinned on the first successful test; a changed certificate is refused.
-
-Connectors are tested and saved today; using them during an assessment is the next step.
-
-## Running it from the command line
-
-From **lab → Shell** in the Proxmox web UI:
-
-```bash
-pct enter 303
-cd /opt/ai-guardian
-```
-
-| Command | What it does | Time | Cost |
-|---|---|---|---|
-| `./venv/bin/python run.py --collect-only` | Scan only, no AI | ~7 min | free |
-| `./venv/bin/python run.py` | Scan + AI agents + report | ~20–40 min | a few dollars |
-| `./venv/bin/python run.py --resume runs/<dir>` | AI agents + report on an existing scan | ~15–30 min | a few dollars |
-| `./venv/bin/python run.py --report runs/<dir>` | Re-create the HTML report | seconds | free |
-
-`exit` leaves the container.
-
-## Viewing a report on your Mac
-
-In Terminal on your Mac (asks for the Proxmox root password; replace `<dir>`):
-
-```bash
-ssh root@192.168.1.252 "pct exec 303 -- cat /opt/ai-guardian/runs/<dir>/report.html" > ~/Downloads/guardian-report.html && open ~/Downloads/guardian-report.html
-```
-
-To list runs: `ssh root@192.168.1.252 "pct exec 303 -- ls /opt/ai-guardian/runs"`
-
-## What the agents do
-
-| Agent | Looks at |
+| | |
 |---|---|
-| Discovery | Identifies every device: type, role, vendor, model, OS, firmware |
-| Orchestrator | Decides which specialist looks at which device |
-| Network | Exposed services, legacy/cleartext protocols, segmentation |
-| OS & endpoints | Operating systems, end-of-life status, server software CVEs |
-| Web & APIs | Admin pages, TLS and certificates, exposed APIs, headers |
-| Firmware | Installed vs latest firmware, vendor support status, firmware CVEs |
-| Internet perimeter | What the internet sees on the public IP, router port forwards |
-| Report | Score, grade, executive summary, prioritized fix list |
+| Scan only | free |
+| Full AI assessment, Opus 5.5 (default), ~35 devices | about **$4–7** with prompt caching (about $10–20 without) |
+| Same on Fable 5.1 | about 2.5× more |
+| A chat question | a few cents |
+| A follow-up re-check by one agent | about $0.30–1.50 |
 
-## Updating the code in the container
+Each run's real cost is shown per agent in the console (Agents tab, and in the runs list).
 
-Changed files are copied with the Proxmox connector and checked with `sha256sum` against this folder.
-`install.sh` installs from scratch on any Debian 13 machine (run as root from this folder).
+## How a run is recorded
 
-## Removing it
+Each run is a folder `runs/<date-time>/`:
 
-- Container: Proxmox UI → 303 → More → Remove.
-- Connector SSH access to the host, in **lab → Shell**:
+- `graph.json`: everything known (devices, findings, agent states and costs, notes between agents, plan, summary)
+- `events.jsonl`: one line per event (order, check, finding, note, done…), which the agent map draws
+- `chat.json`: the Orchestrator chat for that run, including proposed and sent orders
+- `inbox.jsonl`: orders sent from the chat to the agents
+- `report.html`: the report
 
-  ```bash
-  sed -i --follow-symlinks '/ proxmox-mcp$/d' /root/.ssh/authorized_keys
-  ```
+## Safety rules the code enforces
+
+- Agents only call the tools listed for their layer; every address is checked against the scanned network.
+- HTTP is GET/HEAD only, without credentials; probes are nmap scripts from the safe/discovery categories.
+- Text found on the network (banners, pages, device names) is passed to agents as data, never as instructions.
+- The chat can't send orders by itself: it proposes them, and an operator confirms.
+- API keys are given to a run in memory only; agents never see them or connector passwords.
+
+## Roadmap
+
+1. **Now**: read-only assessment, live agents, agent-to-agent notes, Orchestrator chat, cost tracking.
+2. **Next**: agents use the connectors (inside view of NAS, hypervisors, servers); more connector sign-in methods
+   (Kerberos, WinRM, OAuth with certificates, client certificates, TOTP); Microsoft 365 and Google Workspace;
+   RADIUS / TACACS+ / 802.1X checks.
+3. **Later**: remediation mode. Off by default, turned on by an admin with a passkey for a limited time; agents propose
+   fixes from a list of tested recipes, a person approves each one, with a backup and rollback first.
+
+## Command line
+
+See [INSTALL.md § 11](INSTALL.md#11-command-line-optional). In short:
+
+| Command | What it does |
+|---|---|
+| `run.py --collect-only` | scan only |
+| `run.py` | scan + agents + report |
+| `run.py --resume runs/<dir>` | agents + report on an existing scan |
+| `run.py --followup runs/<dir>` | run orders sent from the chat, then refresh the report |
+| `run.py --report runs/<dir>` | rebuild the report |
