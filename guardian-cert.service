@@ -4,5 +4,5 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-Environment=GUARDIAN_HOSTNAME=guardian.hadife.com
+Environment=GUARDIAN_HOSTNAME=guardian.hadife.com ACME_EMAIL=hadife@outlook.com
 ExecStart=/opt/ai-guardian/guardian-cert.sh
