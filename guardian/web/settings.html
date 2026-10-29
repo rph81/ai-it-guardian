@@ -91,6 +91,19 @@
             <div><label for="parallel">Agents working at the same time</label><select id="parallel"></select></div>
           </div>
           <p class="note">Estimated cost of a full assessment on Opus 5.5: about $4–7 for a network of ~35 devices (prompt caching on). Fable 5.1 costs about 2.5× more. Each run's real cost is shown in the console, per agent.</p>
+          <h2 class="gap">Scaling</h2>
+          <p class="note">For big sites: a specialist's devices are split across several copies of it that work in parallel.</p>
+          <div class="seg mt16" role="group" aria-label="Scaling mode">
+            <button type="button" data-scale="auto" aria-pressed="true">Automatic</button>
+            <button type="button" data-scale="manual" aria-pressed="false">Manual per agent</button>
+          </div>
+          <p class="note" id="scale-note"></p>
+          <div class="f2 field">
+            <div><label for="per-copy">Devices per copy (automatic) <span id="per-copy-v"></span></label><input type="range" id="per-copy" min="5" max="100" step="5" class="accent"></div>
+            <div><label>Agents at the same time</label><p class="note m0">Set above. Your API plan's rate limit is the ceiling.</p></div>
+          </div>
+          <div class="tablewrap field"><table><thead><tr><th>Agent</th><th>Min copies</th><th>Max copies</th><th>Copies (manual)</th></tr></thead><tbody id="scale-rows"></tbody></table></div>
+          <p class="note">Each run, Guardian decides the copies from the number of devices the Orchestrator gives each agent, within these limits. Internet perimeter always runs once.</p>
           <h2 class="gap">The agents</h2>
           <div class="cgrid" id="agent-cards"></div>
           <div class="field"><label for="akey">Anthropic API key <span id="akey-state"></span></label>

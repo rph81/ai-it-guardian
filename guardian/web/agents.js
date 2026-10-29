@@ -244,6 +244,7 @@ const Agents = (() => {
       if (a.rounds) meta.append(el("span", {}, `${a.rounds}${a.max_rounds && a.status === "working" ? " / " + a.max_rounds : ""} rounds`));
       if (a.findings) meta.append(sevLine(a.by_severity));
       if (a.followups) meta.append(el("span", {}, `${a.followups} follow-up${a.followups > 1 ? "s" : ""}`));
+      if (a.copies > 1) meta.append(el("span", {}, `${a.copies} copies` + (a.status === "working" && a.running ? ` · ${a.running} running` : "")));
       if (n !== "collector") meta.append(el("span", {}, money(a.cost || 0)));
       const act = a.status === "queued" ? `Starts when a slot frees up (${S.ai.parallel || 3} at a time).`
                 : a.status === "waiting" ? (n === "report" ? "Runs after all specialists finish." : "Not started yet.")

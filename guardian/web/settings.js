@@ -248,6 +248,26 @@ const AGENT_INFO = {
     tools: "Public-IP data (Shodan InternetDB), CVE database"},
 };
 let agentsOff = new Set();
+let scaleMode = "auto", scale = {};
+function renderScale(c) {
+  scaleMode = c.scale_mode; scale = JSON.parse(JSON.stringify(c.scale));
+  $("per-copy").value = c.per_copy;
+  const paint = () => {
+    document.querySelectorAll("[data-scale]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.scale === scaleMode)));
+    $("per-copy-v").textContent = `· ${$("per-copy").value}`;
+    $("scale-note").textContent = scaleMode === "auto" ? "Guardian decides how many copies of each agent to run from how many devices it gets, within the limits below."
+                                                       : "Each agent runs the number of copies you set, within the limits below.";
+    document.querySelectorAll(".scale-manual").forEach(i => i.disabled = scaleMode !== "manual");
+  };
+  const num = (k, key, lo, hi, cls) => { const i = el("input", {type: "number", min: lo, max: hi, class: "wauto " + (cls || ""), "aria-label": `${c.agents[k]} ${key}`});
+    i.value = scale[k][key]; i.disabled = k === "wan" && key !== "min";
+    i.addEventListener("input", () => { scale[k][key] = Math.max(lo, Math.min(hi, +i.value || lo)); }); return i; };
+  $("scale-rows").replaceChildren(...Object.keys(c.agents).map(k => el("tr", {}, el("td", {}, c.agents[k]),
+    el("td", {}, num(k, "min", 1, 20)), el("td", {}, num(k, "max", 1, 20)), el("td", {}, num(k, "manual", 1, 20, "scale-manual")))));
+  document.querySelectorAll("[data-scale]").forEach(b => b.onclick = () => { scaleMode = b.dataset.scale; paint(); });
+  $("per-copy").oninput = paint;
+  paint();
+}
 function renderAgents(c) {
   agentsOff = new Set(c.agents_off);
   const box = $("agent-cards"); box.replaceChildren();
@@ -268,9 +288,9 @@ function renderConfig(c) {
   $("effort").replaceChildren(...c.efforts.map(v => el("option", {value: v}, v + (v === "medium" ? " (default)" : ""))));
   $("model").value = c.model; $("effort").value = c.effort;
   $("rounds").replaceChildren(...c.rounds.map(v => el("option", {value: v}, v + (v === 40 ? " (default)" : ""))));
-  $("parallel").replaceChildren(...c.parallels.map(v => el("option", {value: v}, v + (v === 3 ? " (default)" : ""))));
+  $("parallel").replaceChildren(...c.parallels.map(v => el("option", {value: v}, v + (v === 3 ? " (default)" : v > 6 ? " (needs a higher API tier)" : ""))));
   $("rounds").value = c.max_rounds; $("parallel").value = c.parallel;
-  renderAgents(c);
+  renderAgents(c); renderScale(c);
   $("akey-state").replaceChildren(c.anthropic_key_set ? el("span", {class: "ok"}, "✓ set") : el("span", {class: "c-high"}, "not set"));
   $("nkey-state").replaceChildren(c.nvd_key_set ? el("span", {class: "ok"}, "✓ set") : el("span", {}, "(optional)"));
 }
@@ -278,7 +298,8 @@ $("ai-form").addEventListener("submit", async e => {
   e.preventDefault(); $("ai-msg").textContent = "";
   try {
     renderConfig(await api("/api/settings", {model: $("model").value, effort: $("effort").value, max_rounds: +$("rounds").value,
-      parallel: +$("parallel").value, agents_off: [...agentsOff], anthropic_key: $("akey").value, nvd_key: $("nkey").value}));
+      parallel: +$("parallel").value, agents_off: [...agentsOff],
+      scale_mode: scaleMode, per_copy: +$("per-copy").value, scale, anthropic_key: $("akey").value, nvd_key: $("nkey").value}));
     $("akey").value = ""; $("nkey").value = ""; $("ai-msg").textContent = "Saved";
   } catch (err) { $("ai-msg").textContent = err.message; }
 });

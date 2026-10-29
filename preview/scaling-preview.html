@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en" data-theme="ember" data-scheme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Scaling</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Saira+Semi+Condensed:wght@400;500&display=swap">
+<style>
+:root{--bg:#121311;--bg2:#161815;--panel:#1a1c18;--panel2:#20231e;--line:#2d3029;--line2:#3a3e35;--text:#ecede6;--muted:#8e9286;--accent:#f07c3e;--ok:#a9c47c;--warn:#e6b450;
+  --head:"Chakra Petch",sans-serif;--body:"Saira Semi Condensed",sans-serif}
+@media (prefers-color-scheme:light){:root{--bg:#f2f1ea;--bg2:#ebe9e0;--panel:#f9f8f3;--panel2:#fff;--line:#dcd9cd;--line2:#c8c4b5;--text:#1c1d18;--muted:#686a5f;--accent:#d35f1f;--ok:#5a8429;--warn:#b7801a}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 var(--body)}
+.banner{background:var(--accent);color:#16120d;font:600 12px var(--head);letter-spacing:.06em;text-align:center;padding:7px;text-transform:uppercase}
+main{max-width:1100px;margin:0 auto;padding:24px 16px 60px}
+.crumb{font:600 11px var(--head);letter-spacing:.18em;color:var(--muted);text-transform:uppercase}.crumb b{color:var(--accent)}
+h1{font:700 clamp(26px,4vw,42px) var(--head);text-transform:uppercase;margin:10px 0 6px}
+h2{font:600 10.5px var(--head);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+p{color:var(--muted);margin:6px 0}
+.card{position:relative;border:1px solid var(--line);background:linear-gradient(180deg,var(--panel),var(--bg2));padding:20px;margin-top:18px}
+.card::before{content:"";position:absolute;left:-1px;top:-1px;width:16px;height:16px;border-left:2px solid var(--accent);border-top:2px solid var(--accent)}
+.seg{display:inline-flex;border:1px solid var(--line2);flex-wrap:wrap}
+.seg button{font:600 12px var(--head);letter-spacing:.08em;text-transform:uppercase;background:var(--panel);color:var(--muted);border:0;border-right:1px solid var(--line2);padding:11px 16px;cursor:pointer}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed=true]{color:var(--text);box-shadow:inset 0 -2px 0 var(--accent);background:color-mix(in srgb,var(--accent) 12%,var(--panel))}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:12px}
+.k{border:1px solid var(--line2);background:var(--panel2);padding:10px 12px}
+.k .l{font:600 10px var(--head);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.k .v{font:600 26px var(--head);margin-top:4px}.k .v small{font:500 12px var(--body);color:var(--muted)}
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13.5px;min-width:640px}
+th{font:600 10px var(--head);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);text-align:left;padding:8px;border-bottom:1px solid var(--line2)}
+td{padding:9px 8px;border-bottom:1px solid var(--line)}
+td b{font-family:var(--head)}
+input[type=number]{width:64px;border:1px solid var(--line2);background:var(--bg2);color:var(--text);padding:6px 8px;font:600 14px var(--head)}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.auto{font:600 13px var(--head);color:var(--ok)}
+.warn{color:var(--warn)}
+.est{display:flex;gap:24px;flex-wrap:wrap;margin-top:12px}
+.est div{font-size:13px;color:var(--muted)}.est b{display:block;font:600 22px var(--head);color:var(--text)}
+.lbl{font:600 10.5px var(--head);letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:16px 0 6px}
+</style>
+</head>
+<body>
+<div class="banner">Design preview · Settings → AI agents → Scaling · sample numbers</div>
+<main>
+  <div class="crumb"><b>//</b> Guardian / Settings / AI agents</div>
+  <h1>Agents / Scaling.</h1>
+  <p>For big environments: run several copies of a specialist in parallel, each on its own share of the devices.</p>
+
+  <div class="card">
+    <h2>Mode</h2>
+    <div class="seg" id="mode">
+      <button data-m="auto" aria-pressed="true">Automatic</button>
+      <button data-m="manual" aria-pressed="false">Manual per category</button>
+    </div>
+    <p id="mode-note">Guardian decides how many copies of each agent to run from the number of devices it assigns, within the limits below.</p>
+    <div class="lbl">Devices per agent copy (automatic mode)</div>
+    <input type="range" id="per" min="10" max="60" step="5" value="25" aria-label="Devices per agent copy"><p><b id="per-v">25</b> devices per copy: fewer means faster and more thorough, but more copies cost more.</p>
+    <div class="lbl">Total agents running at the same time</div>
+    <input type="range" id="par" min="1" max="12" value="6" aria-label="Agents at the same time"><p><b id="par-v">6</b> at once. Higher finishes sooner; the API rate limit of your plan is the ceiling.</p>
+  </div>
+
+  <div class="card">
+    <h2>Per category</h2>
+    <p>Example: an environment with 420 devices, including 310 VMs.</p>
+    <div class="tw"><table>
+      <thead><tr><th>Agent</th><th>Devices</th><th>Min</th><th>Max</th><th>Copies this run</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+    <div class="est" id="est"></div>
+  </div>
+</main>
+<script>
+const ROWS = [["Discovery", 420], ["Network", 140], ["OS & endpoints", 360], ["Web & APIs", 95], ["Firmware", 60], ["Internet perimeter", 1]];
+const st = ROWS.map(([n, d]) => ({n, d, min: 1, max: n === "Internet perimeter" ? 1 : 8, manual: 1}));
+let mode = "auto";
+const $ = id => document.getElementById(id);
+function copies(r) { return mode === "manual" ? r.manual : Math.min(r.max, Math.max(r.min, Math.ceil(r.d / +$("per").value))); }
+function render() {
+  $("per-v").textContent = $("per").value; $("par-v").textContent = $("par").value;
+  $("rows").replaceChildren(...st.map((r, i) => {
+    const tr = document.createElement("tr");
+    const num = (k, lo, hi) => { const inp = document.createElement("input"); inp.type = "number"; inp.min = lo; inp.max = hi; inp.value = r[k];
+      inp.setAttribute("aria-label", `${r.n} ${k}`); inp.oninput = () => { r[k] = Math.max(lo, Math.min(hi, +inp.value || lo)); render(); }; return inp; };
+    const c = copies(r), each = Math.ceil(r.d / c);
+    const td = (...k) => { const t = document.createElement("td"); t.append(...k); return t; };
+    const out = document.createElement("span"); out.className = mode === "auto" ? "auto" : "";
+    out.textContent = `${c} × ~${each} devices`;
+    tr.append(td(Object.assign(document.createElement("b"), {textContent: r.n})), td(String(r.d)), td(num("min", 1, 20)), td(num("max", 1, 20)),
+      td(mode === "manual" ? num("manual", 1, 20) : out));
+    return tr;
+  }));
+  const total = st.reduce((a, r) => a + copies(r), 0), par = +$("par").value;
+  const cost = st.reduce((a, r) => a + copies(r) * (0.35 + r.d / copies(r) * 0.045), 0) + 1.2;
+  const waves = Math.ceil(total / par);
+  $("est").innerHTML = "";
+  for (const [k, v] of [["Agent copies", total], ["Running at once", par], ["Estimated time", `~${waves * 9 + 10} min`], ["Estimated cost", `~$${cost.toFixed(0)}–${(cost * 1.4).toFixed(0)}`]]) {
+    const d = document.createElement("div"); const b = document.createElement("b"); b.textContent = v; d.append(b, k); $("est").append(d);
+  }
+}
+document.querySelectorAll("#mode button").forEach(b => b.onclick = () => {
+  mode = b.dataset.m; document.querySelectorAll("#mode button").forEach(x => x.setAttribute("aria-pressed", x === b));
+  $("mode-note").textContent = mode === "auto" ? "Guardian decides how many copies of each agent to run from the number of devices it assigns, within the limits below."
+    : "You set exactly how many copies of each agent run. The limits still apply.";
+  render();
+});
+$("per").oninput = render; $("par").oninput = render;
+render();
+</script>
+</body>
+</html>

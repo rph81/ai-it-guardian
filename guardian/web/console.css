@@ -421,3 +421,5 @@ footer.foot{margin-top:14px;display:flex;justify-content:space-between;gap:12px;
 .slayout h1::after{content:"."}
 .scontent{min-width:0}
 @media (max-width:560px){.section,.card{padding:16px 12px}.stage{padding:14px 10px}.page{padding:16px 12px 48px}}
+input[type=range].accent{accent-color:var(--accent);padding:0;border:0;background:none}
+input[type=number].wauto{width:80px}

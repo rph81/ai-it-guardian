@@ -6,6 +6,7 @@ as a follow-up run if it has already finished) and forwards instructions an oper
 Everything that happens is written to the run's event stream, which the console's agent map draws live.
 """
 import json
+import math
 import os
 import shutil
 import time
@@ -19,6 +20,36 @@ MODEL = os.environ.get("GUARDIAN_MODEL", "claude-opus-5-5")
 EFFORT = os.environ.get("GUARDIAN_EFFORT", "medium")
 MAX_TURNS = int(os.environ.get("GUARDIAN_MAX_TURNS", "40"))
 PARALLEL = int(os.environ.get("GUARDIAN_PARALLEL", "3"))
+# Scaling for big sites: a specialist's devices are split across several copies of it that run in parallel.
+SCALE_MODE = os.environ.get("GUARDIAN_SCALE_MODE", "auto")        # auto: copies from device count; manual: fixed
+PER_COPY = max(5, int(os.environ.get("GUARDIAN_PER_COPY", "25")))  # devices one copy handles in auto mode
+
+
+def _scale_table():
+    """GUARDIAN_SCALE="network:1:8:1,os:2:6:3" -> {layer: (min, max, manual)}."""
+    out = {}
+    for item in os.environ.get("GUARDIAN_SCALE", "").split(","):
+        parts = item.split(":")
+        if len(parts) == 4 and parts[1:] and all(x.isdigit() for x in parts[1:]):
+            out[parts[0]] = tuple(max(1, min(20, int(x))) for x in parts[1:])
+    return out
+
+
+SCALE = _scale_table()
+
+
+def copies_for(layer, devices):
+    """How many copies of an agent to run for this many devices, within its min/max limits."""
+    if layer == "wan" or devices <= 1:
+        return 1
+    lo, hi, manual = SCALE.get(layer, (1, 8, 1))
+    want = manual if SCALE_MODE == "manual" else math.ceil(devices / PER_COPY)
+    return max(1, min(devices, max(lo, min(hi, want))))
+
+
+def split(ips, n):
+    """Spread devices over n copies, round-robin so each gets a mix."""
+    return [ips[i::n] for i in range(n)]
 OFF = {x for x in os.environ.get("GUARDIAN_AGENTS_OFF", "").split(",") if x}
 FOLLOWUP_TURNS = 15
 MAX_FOLLOWUPS = 8
@@ -215,7 +246,7 @@ def note_tool(layer, active):
 
 
 # -- one agent ----------------------------------------------------------------------------------------------
-def run_layer(graph, layer, task, allowed_ips=None, max_turns=None, followup=False, active=None):
+def run_layer(graph, layer, task, allowed_ips=None, max_turns=None, followup=False, active=None, part=None):
     spec = LAYERS[layer]
     max_turns = max_turns or MAX_TURNS
     box = Toolbox(graph, layer, allowed_ips)
@@ -228,8 +259,11 @@ def run_layer(graph, layer, task, allowed_ips=None, max_turns=None, followup=Fal
         task += "\n\n" + notes_text(early)
     messages = [{"role": "user", "content": task}]
     graph.log(layer, "follow-up started" if followup else "started")
-    a = graph.agent(layer, status="working", activity="Reading its brief", max_rounds=max_turns,
-                    followups=graph.data.get("agents", {}).get(layer, {}).get("followups", 0) + (1 if followup else 0))
+    with graph.lock:                                  # copies of the same agent share one state; count them
+        prev = graph.data.get("agents", {}).get(layer, {})
+        a = graph.agent(layer, status="working", activity="Reading its brief", max_rounds=max_turns,
+                        running=prev.get("running", 0) + 1,
+                        followups=prev.get("followups", 0) + (1 if followup else 0))
     a.setdefault("started", time.time())
     graph.event("start", layer, layer, "follow-up" if followup else "started")
     unsettled = early
@@ -327,9 +361,13 @@ def run_layer(graph, layer, task, allowed_ips=None, max_turns=None, followup=Fal
         with graph.lock:
             prev = graph.data.setdefault("layer_summaries", {}).get(layer)
             graph.data["layer_summaries"][layer] = (prev + "\n\nFollow-up: " + final) if followup and prev else final
-    a = graph.agent(layer, status="done", activity=final[:240] or "Finished", ended=time.time())
+    with graph.lock:
+        left = max(0, graph.data["agents"][layer].get("running", 1) - 1)
+        a = graph.agent(layer, running=left, activity=final[:240] or "Finished",
+                        **({"status": "done", "ended": time.time()} if left == 0 else {}))
     nf = sum(1 for f in graph.data["findings"] if f.get("layer") == layer)
-    graph.event("done", layer, layer, f"{title(layer)} {'follow-up ' if followup else ''}done · {rounds} rounds · ${a['cost']:.2f}",
+    which = f" copy {part[0]} of {part[1]}" if part and part[1] > 1 else ""
+    graph.event("done", layer, layer, f"{title(layer)}{which} {'follow-up ' if followup else ''}done · {rounds} rounds · ${a['cost']:.2f}",
                 rounds=rounds, cost=round(a["cost"], 4), findings=nf)
     graph.save()
 
@@ -399,7 +437,7 @@ def _inbox(graph):
             post_note(graph, "user", m["to"], str(m.get("text", ""))[:800], by=str(m.get("by", ""))[:80])
 
 
-def _schedule(graph, jobs, active):
+def _schedule(graph, jobs, active, relay=True):
     """Run specialists PARALLEL at a time, and keep relaying: notes for agents that already finished
     (or were never assigned) become follow-up runs. Returns how many agent runs happened."""
     queue = list(jobs)
@@ -411,7 +449,7 @@ def _schedule(graph, jobs, active):
             busy = set(running.values()) | {j[0] for j in queue}
             with graph.lock:
                 waiting = sorted({n["to"] for n in graph.data.get("notes", []) if n["status"] == "pending"} - busy)
-            for layer in waiting:
+            for layer in (waiting if relay else []):
                 if followups >= MAX_FOLLOWUPS:
                     with graph.lock:
                         for n in graph.data["notes"]:
@@ -423,14 +461,14 @@ def _schedule(graph, jobs, active):
                 ips = next((a["assets"] for a in graph.data.get("plan", {}).get("assignments", []) if a["layer"] == layer), None)
                 queue.append((layer, "Follow-up for your layer. Earlier you (or nobody yet) assessed it; now handle only "
                                      "the notes or instructions below, then finish with a short summary of what changed.",
-                              ips or None, True))
+                              ips or None, True, None))
                 graph.event("order", "orchestrator", layer, f"Follow-up for {title(layer)}: new notes or instructions")
             while queue and len(running) < PARALLEL:
-                layer, task, ips, fu = queue.pop(0)
-                if layer in running.values():
-                    queue.append((layer, task, ips, fu))
+                layer, task, ips, fu, part = queue.pop(0)
+                if fu and layer in running.values():      # copies run side by side; a follow-up waits its turn
+                    queue.append((layer, task, ips, fu, part))
                     break
-                fut = ex.submit(run_layer, graph, layer, task, ips, FOLLOWUP_TURNS if fu else None, fu, active)
+                fut = ex.submit(run_layer, graph, layer, task, ips, FOLLOWUP_TURNS if fu else None, fu, active, part)
                 running[fut] = layer
                 ran += 1
             if not running:
@@ -472,21 +510,34 @@ def run_all(graph):
     graph.event("order", "collector", "orchestrator",
                 f'Scan finished: {len(graph.data["assets"])} devices', devices=len(graph.data["assets"]))
     graph.event("order", "orchestrator", "discovery", f'Identify all {len(graph.data["assets"])} devices')
-    run_layer(graph, "discovery", "Identify every asset in the inventory. Start with the inventory tool.")
+    everyone = sorted(graph.data["assets"], key=lambda ip: tuple(map(int, ip.split("."))))
+    n = copies_for("discovery", len(everyone))
+    graph.agent("discovery", copies=n, devices=len(everyone))
+    if n == 1:
+        run_layer(graph, "discovery", "Identify every asset in the inventory. Start with the inventory tool.")
+    else:
+        _schedule(graph, [("discovery", f"Identify these {len(part)} assets (you are copy {i + 1} of {n}; other copies "
+                                        f"identify the rest): {', '.join(part)}. Start with the inventory tool.",
+                           part, False, (i + 1, n)) for i, part in enumerate(split(everyone, n))], list(LAYERS), relay=False)
     plan = orchestrate(graph)
     active = [a["layer"] for a in plan["assignments"]]
     jobs = []
     for a in plan["assignments"]:
-        if a["layer"] == "wan" or a["assets"]:
-            task = (f"Assess your layer for these assets: {', '.join(a['assets']) or 'site-wide'}.\n"
+        if not (a["layer"] == "wan" or a["assets"]):
+            continue
+        ips = a["assets"]
+        n = copies_for(a["layer"], len(ips))
+        queued = len(jobs) >= PARALLEL
+        graph.agent(a["layer"], status="queued" if queued else "waiting", devices=len(ips), copies=n)
+        graph.event("order", "orchestrator", a["layer"],
+                    f"{title(a['layer'])}: {len(ips) if ips else 'site-wide'}{' devices' if ips else ''}"
+                    + (f" · {n} copies" if n > 1 else "") + (f" (queued: {PARALLEL} agents at a time)" if queued else ""),
+                    queued=queued, copies=n)
+        for i, part in enumerate(split(ips, n) if ips else [[]]):
+            share = f" You are copy {i + 1} of {n}; other copies cover the rest." if n > 1 else ""
+            task = (f"Assess your layer for these assets: {', '.join(part) or 'site-wide'}.{share}\n"
                     f"Orchestrator focus: {a['focus']}")
-            jobs.append((a["layer"], task, a["assets"] or None, False))
-    for i, (layer, _, ips, _) in enumerate(jobs):
-        queued = i >= PARALLEL
-        graph.agent(layer, status="queued" if queued else "waiting", devices=len(ips or []))
-        graph.event("order", "orchestrator", layer,
-                    f"{title(layer)}: {len(ips) if ips else 'site-wide'}{' devices' if ips else ''}"
-                    + (f" (queued: {PARALLEL} agents at a time)" if queued else ""), queued=queued)
+            jobs.append((a["layer"], task, part or None, False, (i + 1, n)))
     _schedule(graph, jobs, active)
     graph.agent("orchestrator", status="done", activity="All specialists finished", ended=time.time())
     graph.save()

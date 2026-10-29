@@ -64,7 +64,17 @@ MODES = {
     "report": {"label": "Rebuild report", "args": ["--report"], "steps": ["Rebuilding the report"]},
     "followup": {"label": "Follow-up from the chat", "args": ["--followup"], "steps": ["AI specialists", "Writing the report"]},
 }
-ROUNDS, PARALLELS = (20, 40, 60), (1, 2, 3)
+ROUNDS, PARALLELS = (20, 40, 60), tuple(range(1, 13))
+SCALE_MODES = ("auto", "manual")
+
+
+def parse_scale(text):
+    out = {}
+    for item in (text or "").split(","):
+        p = item.split(":")
+        if len(p) == 4 and p[0] in LAYERS and all(x.isdigit() for x in p[1:]):
+            out[p[0]] = {"min": int(p[1]), "max": int(p[2]), "manual": int(p[3])}
+    return out
 STEP_OF_AGENT = {"collector": "Scanning the network", "discovery": "Identifying devices", "report": "Writing the report"}
 
 
@@ -161,6 +171,10 @@ def public_config():
     return {"model": env.get("GUARDIAN_MODEL") or "claude-opus-5-5", "effort": env.get("GUARDIAN_EFFORT") or "medium",
             "max_rounds": int(env.get("GUARDIAN_MAX_TURNS") or 40), "parallel": int(env.get("GUARDIAN_PARALLEL") or 3),
             "agents_off": [x for x in (env.get("GUARDIAN_AGENTS_OFF") or "").split(",") if x in LAYERS],
+            "scale_mode": env.get("GUARDIAN_SCALE_MODE") if env.get("GUARDIAN_SCALE_MODE") in SCALE_MODES else "auto",
+            "per_copy": int(env.get("GUARDIAN_PER_COPY") or 25),
+            "scale": {k: parse_scale(env.get("GUARDIAN_SCALE")).get(k, {"min": 1, "max": 1 if k == "wan" else 8, "manual": 1})
+                      for k in LAYERS},
             "agents": {k: v["title"] for k, v in LAYERS.items()},
             "anthropic_key_set": bool(keys.get("anthropic")), "nvd_key_set": bool(keys.get("nvd")),
             "models": MODELS, "efforts": EFFORTS, "rounds": ROUNDS, "parallels": PARALLELS}
@@ -956,6 +970,9 @@ class Settings(BaseModel):
     max_rounds: int = 40
     parallel: int = 3
     agents_off: list[str] = []
+    scale_mode: str = "auto"
+    per_copy: int = 25
+    scale: dict = {}
     anthropic_key: Optional[str] = None
     nvd_key: Optional[str] = None
 
@@ -967,12 +984,24 @@ def save_settings(body: Settings, request: Request):
         raise HTTPException(400, "Unknown model or effort")
     if body.max_rounds not in ROUNDS or body.parallel not in PARALLELS:
         raise HTTPException(400, "Unknown engine setting")
+    if body.scale_mode not in SCALE_MODES or not 5 <= body.per_copy <= 200:
+        raise HTTPException(400, "Unknown scaling setting")
+    scale = []
+    for layer, v in (body.scale or {}).items():
+        try:
+            lo, hi, man = (int(v.get(k, 1)) for k in ("min", "max", "manual"))
+        except (TypeError, ValueError, AttributeError):
+            raise HTTPException(400, "Scaling limits must be numbers")
+        if layer not in LAYERS or not (1 <= lo <= hi <= 20 and 1 <= man <= 20):
+            raise HTTPException(400, f"Check the limits for {layer}: 1 ≤ min ≤ max ≤ 20")
+        scale.append(f"{layer}:{lo}:{1 if layer == 'wan' else hi}:{man}")
     off = sorted(set(body.agents_off))
     if any(a not in LAYERS or a == "discovery" for a in off):
         raise HTTPException(400, "Discovery can't be turned off: the other agents depend on it")
     before = public_config()
     write_env({"GUARDIAN_MODEL": body.model, "GUARDIAN_EFFORT": body.effort, "GUARDIAN_MAX_TURNS": body.max_rounds,
-               "GUARDIAN_PARALLEL": body.parallel, "GUARDIAN_AGENTS_OFF": ",".join(off)})
+               "GUARDIAN_PARALLEL": body.parallel, "GUARDIAN_AGENTS_OFF": ",".join(off),
+               "GUARDIAN_SCALE_MODE": body.scale_mode, "GUARDIAN_PER_COPY": body.per_copy, "GUARDIAN_SCALE": ",".join(sorted(scale))})
     if off != before["agents_off"]:
         vault.audit(user["email"], "agents-changed", "Turned off: " + (", ".join(off) or "none"))
     new = {k: (v or "").strip() for k, v in (("anthropic", body.anthropic_key), ("nvd", body.nvd_key)) if (v or "").strip()}
@@ -1079,7 +1108,7 @@ def run_live(run_id: str, request: Request, since: int = 0):
     agents = {}
     for name, a in (g.get("agents") or {}).items():
         agents[name] = {k: a.get(k) for k in ("status", "activity", "rounds", "max_rounds", "cost", "usage", "checks",
-                                               "started", "ended", "devices", "followups")}
+                                               "started", "ended", "devices", "followups", "copies", "running")}
         agents[name]["findings"] = per_layer.get(name, 0)
         agents[name]["by_severity"] = dict(by_sev.get(name, {}))
     return {"events": events, "agents": agents, "notes": g.get("notes", []), "cost_total": g.get("cost_total", 0),

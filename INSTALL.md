@@ -243,6 +243,11 @@ device never locks you out.
 3. Optional, **NVD API key**: free at nvd.nist.gov/developers/request-an-api-key; makes vulnerability lookups ~8× faster.
 4. Optional: model (Opus 5.5 is the default; Fable 5.1 is stronger and ~2.5× the cost), effort, rounds,
    how many agents work at the same time, and which specialists are on.
+5. Optional, for big sites, **Scaling**: a specialist's devices can be split across several copies of it that work in
+   parallel. **Automatic** decides the number of copies from the devices each agent gets (e.g. 25 devices per copy);
+   **Manual per agent** uses the number you set. Each agent has a minimum and a maximum number of copies. More copies
+   and more agents at once finish sooner, but each copy costs about as much as one agent; above 6 at once you need a
+   higher Anthropic API rate-limit tier.
 
 The vault locks itself after 30 minutes idle (Settings → Security & vault). Unlocking takes one Touch ID.
 
