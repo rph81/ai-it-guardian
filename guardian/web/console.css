@@ -182,3 +182,4 @@ tr.muted td{opacity:.55}
 .note.ok{color:var(--ok)}
 .row select{width:auto}
 .row label{display:inline;margin:0}
+.scard a,.note a{color:var(--accent)}
