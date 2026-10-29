@@ -43,8 +43,26 @@ From the console you can:
 It runs as the service `ai-guardian-console` and starts with the container.
 `systemctl status ai-guardian-console` shows its state; `journalctl -u ai-guardian-console` its errors.
 
-Sign-in is off: anyone on the LAN can use the console. To require a code, add `GUARDIAN_CONSOLE_AUTH=on`
-to `/opt/ai-guardian/.env`; the code is in `/opt/ai-guardian/console/access-code`.
+Sign-in is off: anyone on the LAN can use the console. Turn it on under **Settings → Access & sign-in**
+(or add `GUARDIAN_CONSOLE_AUTH=on` to `/opt/ai-guardian/.env`); the code is in `/opt/ai-guardian/console/access-code`.
+
+## Connectors (Settings → Connectors)
+
+A scan only sees devices from the outside. A connector gives Guardian a **read-only** account on a system
+so it can look inside. Each setup panel explains how to create that account, and **Test connection** warns
+if the account could change anything.
+
+- **Suggested from your last scan:** Guardian proposes connectors for what it found (Synology, Proxmox VE,
+  Proxmox Backup Server, Home Assistant, Linux servers, switches, and your e-mail domain). Devices that
+  appear in a later scan are flagged as new.
+- **Standard connectors** are always available, several of each if needed: Active Directory, e-mail domain
+  (DNS), Synology, Proxmox, Home Assistant, Linux (SSH, using Guardian's own key), SNMPv3.
+  Microsoft 365, Google Workspace, VMware, Docker, Windows and firewall APIs are listed as planned.
+- Passwords and tokens are encrypted in `/opt/ai-guardian/console/connectors.json` with a key in
+  `console/secret.key` (both readable by root only) and are never sent back to the browser.
+- Self-signed certificates are pinned on the first successful test; a changed certificate is refused.
+
+Connectors are tested and saved today; using them during an assessment is the next step.
 
 ## Running it from the command line
 

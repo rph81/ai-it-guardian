@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guardian Settings</title>
+<link rel="stylesheet" href="/console.css">
+<script src="/settings.js" defer></script>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><span class="dot"></span>AI IT Guardian <span class="meta">· settings</span></div>
+    <div class="row"><a class="btn" href="/">← Back to console</a><button class="btn sm" id="theme">Theme</button></div>
+  </header>
+
+  <div class="slayout">
+    <nav class="card snav" id="nav">
+      <a href="#connectors" data-s="connectors">Connectors <span class="count hidden" id="nav-count"></span></a>
+      <a href="#ai" data-s="ai">AI engine</a>
+      <a href="#access" data-s="access">Access &amp; sign-in</a>
+      <a href="#scope" data-s="scope">Scan scope</a>
+      <a href="#schedules" data-s="schedules">Schedules &amp; alerts</a>
+    </nav>
+
+    <main>
+      <!-- Connectors -->
+      <section class="stack" id="s-connectors">
+        <div>
+          <h1>Connectors</h1>
+          <p class="lede">A scan sees devices from the outside. A connector lets Guardian look inside with a <b>read-only</b> account you create, for checks like patch levels, backup status, user accounts and shares. Nothing is ever changed.</p>
+        </div>
+        <div class="card">
+          <div class="sechead"><h2>Suggested from your last scan</h2><span class="note" id="scan-note"></span></div>
+          <div id="new-callout"></div>
+          <div class="cgrid" id="suggestions"></div>
+          <p class="note" id="uncovered"></p>
+        </div>
+        <div class="card">
+          <div class="sechead"><h2>Your connectors</h2><button class="btn sm" id="add-btn">+ Add connector</button></div>
+          <div id="configured"></div>
+        </div>
+        <div class="card">
+          <div class="sechead"><h2>All connectors</h2><input class="search" id="search" type="search" placeholder="Search connectors"></div>
+          <div id="catalog"></div>
+        </div>
+      </section>
+
+      <!-- AI engine -->
+      <section class="stack hidden" id="s-ai">
+        <div><h1>AI engine</h1>
+          <p class="lede">The AI assessment uses Claude through an Anthropic API key. Without a key, Guardian can still scan, and the assessment can be done in a Claude Code session.</p></div>
+        <form class="card" id="ai-form">
+          <div class="f2">
+            <div><label for="model">Model</label><select id="model"></select></div>
+            <div><label for="effort">Effort</label><select id="effort"></select></div>
+          </div>
+          <div class="field"><label for="akey">Anthropic API key <span id="akey-state"></span></label>
+            <input id="akey" type="password" autocomplete="off" placeholder="Paste to set or replace"></div>
+          <div class="field"><label for="nkey">NVD API key <span id="nkey-state"></span></label>
+            <input id="nkey" type="password" autocomplete="off" placeholder="Optional; speeds up CVE lookups"></div>
+          <div class="row field"><button class="btn primary sm" type="submit">Save</button><span class="note" id="ai-msg"></span></div>
+          <p class="note">Keys are write-only: the console never shows or returns them.</p>
+        </form>
+      </section>
+
+      <!-- Access -->
+      <section class="stack hidden" id="s-access">
+        <div><h1>Access &amp; sign-in</h1>
+          <p class="lede">Choose whether the console asks for an access code. With sign-in off, anyone on your network who opens the console can use it.</p></div>
+        <div class="card">
+          <div class="toggle-row">
+            <div><b>Require an access code</b><p class="note" id="access-state"></p></div>
+            <button class="btn" id="access-btn"></button>
+          </div>
+          <div id="access-code" class="codebox hidden"></div>
+        </div>
+      </section>
+
+      <section class="stack hidden" id="s-scope">
+        <div><h1>Scan scope</h1><p class="lede">Choose which networks and addresses Guardian scans, and which to leave out.</p></div>
+        <div class="card"><span class="tag">Planned</span><p class="note">Today Guardian scans the network of its own interface (192.168.1.0/24).</p></div>
+      </section>
+      <section class="stack hidden" id="s-schedules">
+        <div><h1>Schedules &amp; alerts</h1><p class="lede">Run scans automatically and get told when something changes.</p></div>
+        <div class="card"><span class="tag">Planned</span><p class="note">Scans run when you start them from the console.</p></div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-modal="true" role="dialog">
+  <div class="sechead"><span id="d-tag"></span><button class="btn ghost sm" id="d-close" type="button">Close</button></div>
+  <h3 id="d-title"></h3>
+  <p class="note" id="d-checks"></p>
+  <ol class="steps" id="d-steps"></ol>
+  <div id="d-key"></div>
+  <form id="d-form" autocomplete="off">
+    <label for="d-name">Name</label><input id="d-name" maxlength="60" required>
+    <div id="d-fields"></div>
+    <div id="d-result"></div>
+    <div class="row" style="margin-top:16px">
+      <button class="btn" type="button" id="d-test">Test connection</button>
+      <button class="btn primary" type="submit" id="d-save">Save connector</button>
+      <button class="btn ghost danger hidden" type="button" id="d-delete">Remove</button>
+    </div>
+  </form>
+</aside>
+</body>
+</html>

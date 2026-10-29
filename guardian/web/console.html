@@ -25,6 +25,7 @@
     <div class="row">
       <button class="btn" id="go-collect">Scan only <span class="meta">~7 min · free</span></button>
       <button class="btn primary" id="go-full">Scan + AI assessment <span class="dim">~30 min</span></button>
+      <a class="btn sm" href="/settings">Settings <span class="count hidden" id="set-count"></span></a>
       <button class="btn sm" id="theme">Theme</button>
       <button class="btn sm hidden" id="signout">Sign out</button>
     </div>
@@ -37,19 +38,6 @@
         <div id="runs"></div>
       </div>
 
-      <form class="card" id="settings">
-        <h2>Settings</h2>
-        <div class="f2">
-          <div><label for="model">Model</label><select id="model"></select></div>
-          <div><label for="effort">Effort</label><select id="effort"></select></div>
-        </div>
-        <div class="field"><label for="akey">Anthropic API key <span id="akey-state"></span></label>
-          <input id="akey" type="password" autocomplete="off" placeholder="Paste to set or replace"></div>
-        <div class="field"><label for="nkey">NVD API key <span id="nkey-state"></span></label>
-          <input id="nkey" type="password" autocomplete="off" placeholder="Optional; speeds up CVE lookups"></div>
-        <div class="row field"><button class="btn primary sm" type="submit">Save</button><span class="note" id="settings-msg"></span></div>
-        <p class="note">Keys are write-only: the console never shows or returns them.</p>
-      </form>
     </div>
 
     <div class="card main">

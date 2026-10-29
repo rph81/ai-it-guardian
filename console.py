@@ -16,6 +16,7 @@ import secrets
 import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -23,6 +24,8 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
+
+from guardian import connectors as conn
 
 BASE = Path(__file__).resolve().parent
 RUNS = BASE / "runs"
@@ -67,6 +70,8 @@ def ensure_state():
 
 
 def access_code():
+    if not CODE_FILE.exists():
+        ensure_state()
     return CODE_FILE.read_text().strip()
 
 
@@ -229,7 +234,7 @@ PAGE_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 's
             "frame-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 REPORT_CSP = ("sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; "
               "style-src 'unsafe-inline'; img-src data:")
-OPEN_PATHS = {"/", "/console.css", "/console.js", "/api/login", "/api/session"}
+OPEN_PATHS = {"/", "/console.css", "/console.js", "/settings", "/settings.js", "/api/login", "/api/session"}
 
 
 @app.middleware("http")
@@ -406,6 +411,195 @@ def save_settings(body: Settings):
             updates[name] = value
     write_env(updates)
     return public_config()
+
+
+# -- settings page: connectors and access --------------------------------------------------
+_store = None
+store_lock = threading.Lock()
+
+
+def get_store():
+    global _store
+    if _store is None:
+        STATE.mkdir(mode=0o700, exist_ok=True)
+        _store = conn.Store(STATE)
+    return _store
+
+
+def latest_scan():
+    if not RUNS.exists():
+        return None, None
+    done = sorted(d for d in RUNS.iterdir() if RUN_ID.match(d.name) and (d / "graph.json").exists())
+    if not done:
+        return None, None
+    try:
+        return done[-1].name, json.loads((done[-1] / "graph.json").read_text())
+    except (OSError, ValueError):
+        return None, None
+
+
+@app.get("/settings")
+def settings_page():
+    return FileResponse(WEB / "settings.html", media_type="text/html")
+
+
+@app.get("/settings.js")
+def settings_js():
+    return FileResponse(WEB / "settings.js", media_type="text/javascript")
+
+
+@app.get("/api/connectors")
+def connectors_overview():
+    s = get_store()
+    run_id, g = latest_scan()
+    with store_lock:
+        s.update_inventory(run_id, g)
+        suggestions = conn.suggest(g, s)
+    covered = {h for x in suggestions for h in x["hosts"]} | {h for hs in s.configured_targets().values() for h in hs}
+    return {
+        "catalog": conn.CATALOG,
+        "connectors": [s.public(c) for c in s.data["connectors"]],
+        "suggestions": suggestions,
+        "dismissed": len(s.data["dismissed"]),
+        "scan": run_id,
+        "devices": len((g or {}).get("assets", {})),
+        "uncovered": sum(1 for ip in (g or {}).get("assets", {}) if ip not in covered),
+    }
+
+
+@app.get("/api/connectors/ssh-key")
+def ssh_key():
+    _, pub = conn.guardian_ssh_key(get_store().dir)
+    return {"public_key": pub}
+
+
+class ConnectorBody(BaseModel):
+    id: Optional[str] = None
+    type: str
+    name: str = ""
+    fields: dict = {}
+
+
+def merged_fields(body):
+    """Validated fields, with blank secret fields filled from the stored connector."""
+    try:
+        fields = conn.validate(body.type, body.fields)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    existing = get_store().get(body.id) if body.id else None
+    if body.id and (not existing or existing["type"] != body.type):
+        raise HTTPException(404, "Unknown connector")
+    stored = get_store().fields_with_secrets(existing) if existing else {}
+    for fd in conn.CATALOG[body.type]["fields"]:
+        if fd.get("secret") and not fields.get(fd["name"]):
+            fields[fd["name"]] = stored.get(fd["name"], "")
+    return fields, existing
+
+
+@app.post("/api/connectors/test")
+def connector_test(body: ConnectorBody):
+    fields, existing = merged_fields(body)
+    level, message, details, _ = conn.test(body.type, fields, (existing or {}).get("pin"), get_store().dir)
+    return {"level": level, "message": message, "details": details}
+
+
+@app.post("/api/connectors")
+def connector_save(body: ConnectorBody):
+    name = body.name.strip()
+    if not name or len(name) > 60 or re.search(r"[\r\n<>]", name):
+        raise HTTPException(400, "Give the connector a short name (up to 60 characters)")
+    fields, existing = merged_fields(body)
+    spec = conn.CATALOG[body.type]
+    missing = [fd["label"] for fd in spec["fields"] if fd.get("secret") and not fields.get(fd["name"])]
+    if missing:
+        raise HTTPException(400, f"{missing[0]} is required")
+    s = get_store()
+    level, message, details, pin = conn.test(body.type, fields, (existing or {}).get("pin"), s.dir)
+    with store_lock:
+        c = existing or {"id": conn.new_id(), "type": body.type, "created": time.time()}
+        c.update(name=name, status=level, message=message, details=details, last_check=time.time(),
+                 fields={k: v for k, v in fields.items() if not any(fd["name"] == k and fd.get("secret") for fd in spec["fields"])},
+                 secrets={fd["name"]: s.encrypt(fields[fd["name"]]) for fd in spec["fields"] if fd.get("secret")})
+        if pin:
+            c["pin"] = pin
+        if not existing:
+            s.data["connectors"].append(c)
+        s.save()
+    return s.public(c)
+
+
+@app.post("/api/connectors/{cid}/recheck")
+def connector_recheck(cid: str):
+    s = get_store()
+    c = s.get(cid)
+    if not c:
+        raise HTTPException(404, "Unknown connector")
+    level, message, details, pin = conn.test(c["type"], s.fields_with_secrets(c), c.get("pin"), s.dir)
+    with store_lock:
+        c.update(status=level, message=message, details=details, last_check=time.time())
+        if pin:
+            c["pin"] = pin
+        s.save()
+    return s.public(c)
+
+
+@app.post("/api/connectors/{cid}/delete")
+def connector_delete(cid: str):
+    s = get_store()
+    with store_lock:
+        before = len(s.data["connectors"])
+        s.data["connectors"] = [c for c in s.data["connectors"] if c["id"] != cid]
+        if len(s.data["connectors"]) == before:
+            raise HTTPException(404, "Unknown connector")
+        s.save()
+    return {"ok": True}
+
+
+class SuggestionBody(BaseModel):
+    key: str = ""
+
+
+@app.post("/api/suggestions/dismiss")
+def suggestion_dismiss(body: SuggestionBody):
+    if not re.match(r"^[a-z_]+:[A-Za-z0-9:._-]{1,100}$", body.key):
+        raise HTTPException(400, "Bad suggestion")
+    s = get_store()
+    with store_lock:
+        if body.key not in s.data["dismissed"]:
+            s.data["dismissed"].append(body.key)
+        s.save()
+    return {"ok": True}
+
+
+@app.post("/api/suggestions/restore")
+def suggestion_restore():
+    s = get_store()
+    with store_lock:
+        s.data["dismissed"] = []
+        s.save()
+    return {"ok": True}
+
+
+@app.get("/api/access")
+def access_get():
+    return {"auth": auth_on()}
+
+
+class AccessBody(BaseModel):
+    auth: bool
+
+
+@app.post("/api/access")
+def access_set(body: AccessBody, request: Request):
+    write_env({"GUARDIAN_CONSOLE_AUTH": "on" if body.auth else "off"})
+    if not body.auth:
+        return {"auth": False}
+    # Sign the person who switched it on in, and show the code once so they can use it elsewhere.
+    sid = secrets.token_urlsafe(32)
+    sessions[sid] = time.time() + SESSION_HOURS * 3600
+    resp = JSONResponse({"auth": True, "code": access_code()})
+    resp.set_cookie("gsid", sid, max_age=SESSION_HOURS * 3600, httponly=True, secure=True, samesite="strict")
+    return resp
 
 
 if __name__ == "__main__":

@@ -1,3 +1,6 @@
 anthropic>=0.116.0
 fastapi>=0.115
 uvicorn>=0.32
+cryptography>=42
+ldap3>=2.9
+dnspython>=2.6

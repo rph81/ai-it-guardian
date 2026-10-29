@@ -149,24 +149,6 @@ async function poll() {
   } catch (err) { polling = setTimeout(poll, 5000); }
 }
 
-// -- settings -----------------------------------------------------------------
-function renderConfig(c) {
-  $("model").replaceChildren(...Object.entries(c.models).map(([v, t]) => el("option", {value: v}, t)));
-  $("effort").replaceChildren(...c.efforts.map(v => el("option", {value: v}, v + (v === "medium" ? " (default)" : ""))));
-  $("model").value = c.model; $("effort").value = c.effort;
-  $("akey-state").replaceChildren(c.anthropic_key_set ? el("span", {class: "ok"}, "✓ set") : el("span", {class: "c-high"}, "needed for the AI step"));
-  $("nkey-state").replaceChildren(c.nvd_key_set ? el("span", {class: "ok"}, "✓ set") : el("span", {}, "(optional)"));
-}
-$("settings").addEventListener("submit", async e => {
-  e.preventDefault();
-  $("settings-msg").textContent = "";
-  try {
-    renderConfig(await api("/api/settings", {model: $("model").value, effort: $("effort").value, anthropic_key: $("akey").value, nvd_key: $("nkey").value}));
-    $("akey").value = ""; $("nkey").value = "";
-    $("settings-msg").textContent = "Saved";
-  } catch (err) { $("settings-msg").textContent = err.message; }
-});
-
 // -- tabs, theme, start-up ----------------------------------------------------------
 function showTab(t) {
   document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.t === t));
@@ -192,7 +174,6 @@ async function start() {
   $("signout").classList.toggle("hidden", !sess.auth);
   $("signin").classList.add("hidden"); $("app").classList.remove("hidden");
   const o = await api("/api/overview");
-  renderConfig(o.config);
   renderRuns(o.runs, o.job);
   const latest = o.runs.find(r => r.has_report);
   if (latest) openRun(latest.id, true);
@@ -202,3 +183,6 @@ async function start() {
   if (s.running) { showTab("log"); poll(); }
 }
 start();
+fetch("/api/connectors").then(r => r.ok ? r.json() : null).then(d => {
+  if (d && d.suggestions.length) { $("set-count").textContent = d.suggestions.length; $("set-count").classList.remove("hidden"); }
+}).catch(() => {});

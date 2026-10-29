@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guardian Settings</title>
+<style>
+:root{
+  --accent:#3b82f6;
+  --bg:#eef1f5; --card:#ffffff; --card2:#f6f8fb; --line:#dde3ea; --text:#0f172a; --muted:#64748b;
+  --ok:#16a34a; --warn:#d97706; --bad:#dc2626; --new:#7c3aed;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0b0f15; --card:#121821; --card2:#18202b; --line:#253041; --text:#e6ebf2; --muted:#8b98ab;
+  --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; --new:#a78bfa;}}
+:root[data-theme="dark"]{
+  --bg:#0b0f15; --card:#121821; --card2:#18202b; --line:#253041; --text:#e6ebf2; --muted:#8b98ab;
+  --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; --new:#a78bfa;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif}
+.banner{background:var(--accent);color:#fff;font-size:12.5px;text-align:center;padding:6px 16px}
+.wrap{max-width:1280px;margin:0 auto;padding:20px 16px 48px}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;font-weight:650;font-size:15px}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px color-mix(in srgb,var(--ok) 22%,transparent)}
+.meta{color:var(--muted);font-size:13px}
+.btn{border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:999px;padding:7px 14px;font:inherit;font-size:13px;cursor:pointer;white-space:nowrap}
+.btn:hover{background:var(--card2)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.sm{padding:3px 10px;font-size:12px}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--muted)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.layout{display:grid;grid-template-columns:220px minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:860px){.layout{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px}
+nav.card{padding:8px}
+nav a{display:flex;justify-content:space-between;align-items:center;padding:9px 12px;border-radius:10px;color:var(--text);text-decoration:none;font-size:13.5px}
+nav a:hover{background:var(--card2)}
+nav a.on{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);font-weight:600}
+.count{font-size:11px;border-radius:999px;padding:0 7px;background:var(--new);color:#fff;font-weight:600}
+@media (max-width:860px){nav.card{display:flex;overflow-x:auto;gap:4px}nav a{flex:none}}
+h1{font-size:20px;margin:0 0 4px}
+h2{font-size:13px;margin:0;font-weight:650;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.lede{color:var(--muted);margin:0 0 16px;max-width:760px}
+.stack>*+*{margin-top:16px}
+.sechead{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px}
+.conn{background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px}
+.conn .top{display:flex;gap:10px;align-items:flex-start}
+.ico{width:36px;height:36px;border-radius:10px;flex:none;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:#fff}
+.conn b{display:block;font-size:14px}
+.conn .why{font-size:12.5px;color:var(--muted)}
+.conn .gain{font-size:12.5px}
+.conn .row{margin-top:auto}
+.tag{display:inline-block;font-size:11px;border-radius:999px;padding:1px 8px;border:1px solid var(--line);color:var(--muted)}
+.tag.new{border-color:var(--new);color:var(--new)}
+.tag.ok{border-color:var(--ok);color:var(--ok)}
+.tag.warn{border-color:var(--warn);color:var(--warn)}
+.tag.bad{border-color:var(--bad);color:var(--bad)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;color:var(--muted);font-weight:500;padding:8px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+.tablewrap{overflow-x:auto}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.stat{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.sd{width:8px;height:8px;border-radius:50%}
+.search{border:1px solid var(--line);background:var(--card2);color:var(--text);border-radius:999px;padding:7px 14px;font:inherit;font-size:13px;min-width:220px}
+.cat{font-size:12px;color:var(--muted);margin:14px 0 8px;font-weight:600}
+.cat:first-child{margin-top:0}
+.note{font-size:12.5px;color:var(--muted)}
+.callout{display:flex;gap:12px;align-items:flex-start;background:color-mix(in srgb,var(--new) 10%,var(--card));border:1px solid color-mix(in srgb,var(--new) 35%,var(--line));border-radius:14px;padding:12px 14px;margin-bottom:12px;font-size:13px}
+/* drawer */
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none}
+.scrim.on{display:block}
+.drawer{position:fixed;top:0;right:0;height:100%;width:min(520px,100%);background:var(--card);border-left:1px solid var(--line);transform:translateX(100%);transition:transform .2s;overflow-y:auto;padding:22px}
+.drawer.on{transform:none}
+.drawer h3{margin:0 0 4px;font-size:18px}
+label{display:block;font-size:12px;color:var(--muted);margin:12px 0 4px}
+input,select{width:100%;border:1px solid var(--line);background:var(--card2);color:var(--text);border-radius:10px;padding:8px 10px;font:inherit;font-size:13px}
+.f2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.steps{background:var(--card2);border-radius:12px;padding:12px 14px 12px 32px;margin:14px 0;font-size:13px}
+.steps li+li{margin-top:6px}
+.test{display:flex;align-items:center;gap:8px;font-size:13px;margin-top:14px;padding:10px 12px;border-radius:10px;background:color-mix(in srgb,var(--ok) 10%,var(--card));border:1px solid color-mix(in srgb,var(--ok) 35%,var(--line))}
+.check{display:flex;gap:8px;align-items:flex-start;font-size:13px;margin-top:10px}
+.check input{width:auto;margin-top:3px}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<div class="banner">Design preview with sample data from your network. Buttons open the panels but don't save or connect anything.</div>
+<div class="wrap">
+  <header>
+    <div class="brand"><span class="dot"></span>AI IT Guardian <span class="meta">· settings</span></div>
+    <div class="row"><button class="btn">← Back to console</button><button class="btn sm" id="theme">Theme</button></div>
+  </header>
+
+  <div class="layout">
+    <nav class="card">
+      <a href="#" class="on">Connectors <span class="count">7</span></a>
+      <a href="#">Scan scope</a>
+      <a href="#">AI engine</a>
+      <a href="#">Schedules &amp; alerts</a>
+      <a href="#">Access &amp; sign-in</a>
+      <a href="#">About</a>
+    </nav>
+
+    <main class="stack">
+      <div>
+        <h1>Connectors</h1>
+        <p class="lede">A scan sees devices from the outside. A connector lets Guardian look inside with a <b>read-only</b> account you create, for checks like patch levels, backup status, user accounts and shares. Nothing is ever changed.</p>
+      </div>
+
+      <!-- Suggested -->
+      <section class="card">
+        <div class="sechead">
+          <h2>Suggested from your last scan</h2>
+          <span class="note">Scan of 29 Oct, 15:35 · 7 suggestions · 2 new</span>
+        </div>
+        <div class="callout"><b style="color:var(--new)">New</b><span>A second Synology NAS (<b>RPHNAS2</b>, 192.168.1.102) appeared since the 26 Oct scan. Connect it to confirm its DSM version and security settings.</span></div>
+        <div class="grid">
+          <div class="conn">
+            <div class="top"><span class="ico" style="background:#0ea5e9">DSM</span><div><b>Synology DSM · RPHNAS2</b><span class="mono meta">192.168.1.102 · DS1815+</span></div></div>
+            <div class="row"><span class="tag new">new device</span><span class="tag">2 findings</span></div>
+            <div class="gain">Checks: DSM version and update channel, 2-factor, admin accounts, open shares, snapshots, firewall, auto-block.</div>
+            <div class="row"><button class="btn primary sm" data-open="dsm">Connect</button><button class="btn ghost sm">Not now</button></div>
+          </div>
+          <div class="conn">
+            <div class="top"><span class="ico" style="background:#0ea5e9">DSM</span><div><b>Synology DSM · RPHNAS</b><span class="mono meta">192.168.1.100 · DS1823xs+</span></div></div>
+            <div class="row"><span class="tag">4 findings</span></div>
+            <div class="gain">Checks: installed packages, which services are really used, share permissions, Hyper Backup status.</div>
+            <div class="row"><button class="btn primary sm" data-open="dsm">Connect</button><button class="btn ghost sm">Not now</button></div>
+          </div>
+          <div class="conn">
+            <div class="top"><span class="ico" style="background:#e57000">PVE</span><div><b>Proxmox VE · lab</b><span class="mono meta">192.168.1.252</span></div></div>
+            <div class="gain">Checks: host and guest versions, which VMs and containers exist, backup jobs, exposed consoles, API tokens.</div>
+            <div class="row"><button class="btn primary sm" data-open="pve">Connect</button><button class="btn ghost sm">Not now</button></div>
+          </div>
+          <div class="conn">
+            <div class="top"><span class="ico" style="background:#e57000">PBS</span><div><b>Proxmox Backup Server · pbs</b><span class="mono meta">192.168.1.250</span></div></div>
+            <div class="gain">Checks: last successful backup per machine, verify jobs, retention, encryption.</div>
+            <div class="row"><button class="btn primary sm">Connect</button><button class="btn ghost sm">Not now</button></div>
+          </div>
+          <div class="conn">
+            <div class="top"><span class="ico" style="background:#18bcf2">HA</span><div><b>Home Assistant</b><span class="mono meta">192.168.1.89</span></div></div>
+            <div class="gain">Checks: version, users, integrations with cloud access, remote access settings.</div>
+            <div class="row"><button class="btn primary sm">Connect</button><button class="btn ghost sm">Not now</button></div>
+          </div>
+          <div class="conn">
+            <div class="top"><span class="ico" style="background:#475569">SSH</span><div><b>Linux servers (SSH)</b><span class="mono meta">5 hosts · .57 .64 .80 .250 .252</span></div></div>
+            <div class="gain">Checks: pending security updates, users with sudo, SSH settings, running services. One key can cover several hosts.</div>
+            <div class="row"><button class="btn primary sm">Connect</button><button class="btn ghost sm">Not now</button></div>
+          </div>
+          <div class="conn">
+            <div class="top"><span class="ico" style="background:#7c3aed">SNMP</span><div><b>Network switches (SNMP)</b><span class="mono meta">2 hosts · .251 .253</span></div></div>
+            <div class="gain">Checks: firmware versions, port configuration, which devices sit on which port.</div>
+            <div class="row"><button class="btn primary sm">Connect</button><button class="btn ghost sm">Not now</button></div>
+          </div>
+        </div>
+        <p class="note" style="margin:12px 0 0">No connector exists for 21 devices (TVs, phones, appliances, the ISP router). They're still covered by the network scan. <a href="#" style="color:var(--accent)">Show why</a></p>
+      </section>
+
+      <!-- Configured -->
+      <section class="card">
+        <div class="sechead"><h2>Your connectors</h2><button class="btn sm" data-open="ad">+ Add connector</button></div>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Name</th><th>Type</th><th>Target</th><th>Status</th><th>Last check</th><th></th></tr></thead>
+            <tbody>
+              <tr><td><b>Head office</b></td><td>Active Directory</td><td class="mono">corp.example.local</td><td><span class="stat"><span class="sd" style="background:var(--ok)"></span>Connected</span></td><td class="meta">today 15:42</td><td><button class="btn sm">Edit</button></td></tr>
+              <tr><td><b>Branch Zug</b></td><td>Active Directory</td><td class="mono">zug.example.local</td><td><span class="stat"><span class="sd" style="background:var(--warn)"></span>Password expires in 9 days</span></td><td class="meta">today 15:42</td><td><button class="btn sm">Edit</button></td></tr>
+              <tr><td><b>Company mail</b></td><td>Email domain (DNS)</td><td class="mono">example.com</td><td><span class="stat"><span class="sd" style="background:var(--ok)"></span>Connected</span></td><td class="meta">today 15:40</td><td><button class="btn sm">Edit</button></td></tr>
+              <tr><td><b>Microsoft 365</b></td><td>Entra ID / M365</td><td class="mono">example.onmicrosoft.com</td><td><span class="stat"><span class="sd" style="background:var(--bad)"></span>Consent revoked</span></td><td class="meta">27 Oct</td><td><button class="btn sm">Fix</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note" style="margin:10px 0 0">Example rows: two Active Directory instances side by side. You don't have these yet.</p>
+      </section>
+
+      <!-- Catalog -->
+      <section class="card">
+        <div class="sechead"><h2>All connectors</h2><input class="search" placeholder="Search connectors"></div>
+        <div class="cat">Identity &amp; productivity</div>
+        <div class="grid">
+          <div class="conn"><div class="top"><span class="ico" style="background:#2563eb">AD</span><div><b>Active Directory</b><span class="meta">LDAPS · several domains allowed</span></div></div><div class="gain">Stale and admin accounts, password policy, Kerberos settings, GPO hygiene.</div><div class="row"><button class="btn sm" data-open="ad">Add</button></div></div>
+          <div class="conn"><div class="top"><span class="ico" style="background:#0078d4">M365</span><div><b>Microsoft 365 / Entra ID</b><span class="meta">App consent, read-only</span></div></div><div class="gain">MFA coverage, admin roles, guest users, mail forwarding rules.</div><div class="row"><button class="btn sm">Add</button></div></div>
+          <div class="conn"><div class="top"><span class="ico" style="background:#34a853">GW</span><div><b>Google Workspace</b><span class="meta">Service account, read-only</span></div></div><div class="gain">2-step verification, admins, sharing settings, third-party apps.</div><div class="row"><button class="btn sm">Add</button></div></div>
+          <div class="conn"><div class="top"><span class="ico" style="background:#0f766e">@</span><div><b>Email domain (DNS)</b><span class="meta">No account needed</span></div></div><div class="gain">SPF, DKIM, DMARC, MX and TLS: protection against spoofed e-mail.</div><div class="row"><button class="btn sm">Add</button></div></div>
+        </div>
+        <div class="cat">Infrastructure &amp; storage</div>
+        <div class="grid">
+          <div class="conn"><div class="top"><span class="ico" style="background:#e57000">PVE</span><div><b>Proxmox VE / Backup Server</b></div></div><div class="row"><button class="btn sm" data-open="pve">Add</button></div></div>
+          <div class="conn"><div class="top"><span class="ico" style="background:#5b7f3a">VM</span><div><b>VMware vSphere / ESXi</b></div></div><div class="row"><button class="btn sm">Add</button></div></div>
+          <div class="conn"><div class="top"><span class="ico" style="background:#0ea5e9">DSM</span><div><b>Synology / QNAP NAS</b></div></div><div class="row"><button class="btn sm" data-open="dsm">Add</button></div></div>
+          <div class="conn"><div class="top"><span class="ico" style="background:#1d63ed">D</span><div><b>Docker / Kubernetes</b></div></div><div class="row"><button class="btn sm">Add</button></div></div>
+        </div>
+        <div class="cat">Endpoints &amp; network</div>
+        <div class="grid">
+          <div class="conn"><div class="top"><span class="ico" style="background:#475569">SSH</span><div><b>Linux (SSH)</b></div></div><div class="row"><button class="btn sm">Add</button></div></div>
+          <div class="conn"><div class="top"><span class="ico" style="background:#0284c7">WIN</span><div><b>Windows (WinRM)</b></div></div><div class="row"><button class="btn sm">Add</button></div></div>
+          <div class="conn"><div class="top"><span class="ico" style="background:#7c3aed">SNMP</span><div><b>Switches &amp; firewalls (SNMPv3)</b></div></div><div class="row"><button class="btn sm">Add</button></div></div>
+          <div class="conn"><div class="top"><span class="ico" style="background:#dc2626">FW</span><div><b>Firewall API (pfSense, OPNsense, FortiGate, UniFi)</b></div></div><div class="row"><button class="btn sm">Add</button></div></div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<div class="scrim" id="scrim"></div>
+
+<!-- Drawer: Synology -->
+<aside class="drawer" id="d-dsm">
+  <div class="sechead"><span class="tag new">Suggested · new device</span><button class="btn ghost sm" data-close>Close</button></div>
+  <h3>Connect Synology DSM</h3>
+  <p class="note" style="margin:0">Guardian signs in with a read-only account and only reads settings.</p>
+  <ol class="steps">
+    <li>On the NAS: <b>Control Panel → User &amp; Group → Create</b> a user called <span class="mono">guardian-ro</span>.</li>
+    <li>Don't add it to <i>administrators</i>. Give it no share access and deny all applications except <b>DSM</b>.</li>
+    <li>Paste its name and password below. Guardian checks it can't change anything before saving.</li>
+  </ol>
+  <label>Name</label><input value="RPHNAS2">
+  <div class="f2"><div><label>Address</label><input class="mono" value="192.168.1.102"></div><div><label>Port</label><input class="mono" value="5001"></div></div>
+  <div class="f2"><div><label>Username</label><input class="mono" value="guardian-ro"></div><div><label>Password</label><input type="password" placeholder="Stored encrypted, never shown again"></div></div>
+  <div class="check"><input type="checkbox" checked><span>Verify the certificate (turn off for the self-signed certificate on this NAS)</span></div>
+  <div class="test"><span class="sd" style="background:var(--ok)"></span>Test passed: DSM 7.1-42962 · account is read-only · 2-factor status readable</div>
+  <div class="row" style="margin-top:16px"><button class="btn">Test connection</button><button class="btn primary">Save connector</button></div>
+</aside>
+
+<!-- Drawer: Proxmox -->
+<aside class="drawer" id="d-pve">
+  <div class="sechead"><span class="tag">Suggested</span><button class="btn ghost sm" data-close>Close</button></div>
+  <h3>Connect Proxmox VE</h3>
+  <ol class="steps">
+    <li><b>Datacenter → Permissions → API Tokens → Add</b>: user <span class="mono">guardian@pve</span>, token <span class="mono">read</span>, privilege separation on.</li>
+    <li>Give the token the built-in <b>PVEAuditor</b> role on <span class="mono">/</span>. That role can only read.</li>
+    <li>Paste the token ID and secret below.</li>
+  </ol>
+  <label>Name</label><input value="lab">
+  <div class="f2"><div><label>Address</label><input class="mono" value="192.168.1.252"></div><div><label>Port</label><input class="mono" value="8006"></div></div>
+  <label>Token ID</label><input class="mono" value="guardian@pve!read">
+  <label>Token secret</label><input type="password" placeholder="Stored encrypted, never shown again">
+  <div class="row" style="margin-top:16px"><button class="btn">Test connection</button><button class="btn primary">Save connector</button></div>
+</aside>
+
+<!-- Drawer: Active Directory -->
+<aside class="drawer" id="d-ad">
+  <div class="sechead"><span class="tag">Standard connector · you can add several</span><button class="btn ghost sm" data-close>Close</button></div>
+  <h3>Add Active Directory</h3>
+  <ol class="steps">
+    <li>Create a normal domain user, e.g. <span class="mono">svc-guardian</span>. Domain Users membership is enough to read the directory.</li>
+    <li>Set its password to never expire, or note the date: Guardian warns you before it expires.</li>
+    <li>Use LDAPS (port 636) so the password is encrypted on the network.</li>
+  </ol>
+  <label>Name</label><input placeholder="e.g. Head office">
+  <div class="f2"><div><label>Domain</label><input class="mono" placeholder="corp.example.local"></div><div><label>Domain controller(s)</label><input class="mono" placeholder="dc1, dc2 or auto-discover"></div></div>
+  <div class="f2"><div><label>Username</label><input class="mono" placeholder="svc-guardian"></div><div><label>Password</label><input type="password" placeholder="Stored encrypted"></div></div>
+  <label>Connection</label><select><option>LDAPS (636), recommended</option><option>LDAP + StartTLS (389)</option></select>
+  <div class="row" style="margin-top:16px"><button class="btn">Test connection</button><button class="btn primary">Save connector</button></div>
+</aside>
+
+<script>
+const scrim=document.getElementById('scrim');
+function close(){document.querySelectorAll('.drawer').forEach(d=>d.classList.remove('on'));scrim.classList.remove('on');}
+document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{close();document.getElementById('d-'+b.dataset.open).classList.add('on');scrim.classList.add('on');});
+document.querySelectorAll('[data-close]').forEach(b=>b.onclick=close);
+scrim.onclick=close;
+document.getElementById('theme').onclick=()=>{const r=document.documentElement,d=r.dataset.theme?r.dataset.theme==='dark':matchMedia('(prefers-color-scheme: dark)').matches;r.dataset.theme=d?'light':'dark';};
+</script>
+</body>
+</html>
