@@ -86,7 +86,7 @@ def context(run_dir):
         "plan": g.get("plan"),
         "layer_summaries": g.get("layer_summaries"),
         "assets": assets,
-        "wan": {k: g.get("wan", {}).get(k) for k in ("public_ip", "internetdb", "upnp_mappings") if g.get("wan", {}).get(k)},
+        "wan": {k: g.get("wan", {}).get(k) for k in ("public_ip", "internetdb", "upnp_port_mappings") if g.get("wan", {}).get(k)},
         "recent_events": events,
         "total_cost": round(g.get("cost_total", 0), 2),
     }

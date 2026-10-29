@@ -1,56 +1,149 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="ember" data-scheme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Guardian Console</title>
+<script src="/theme.js"></script>
 <link rel="stylesheet" href="/console.css">
 <script src="/passkey.js" defer></script>
 <script src="/console.js" defer></script>
 <script src="/agents.js" defer></script>
 </head>
 <body>
-<div class="wrap" id="app">
-  <header>
-    <div class="brand"><span class="dot" id="dot"></span>AI IT Guardian <span class="meta">· console</span></div>
-    <div class="row">
-      <button class="btn op-only" id="go-collect">Scan only <span class="meta">~7 min · free</span></button>
-      <button class="btn primary op-only" id="go-full">Scan + AI assessment <span class="dim">~30 min</span></button>
-      <span class="vchip" id="vault-chip"></span>
-      <button class="btn sm hidden" id="unlock">Unlock</button>
-      <button class="btn sm hidden" id="lock">Lock</button>
-      <a class="btn sm op-only" href="/settings">Settings <span class="count hidden" id="set-count"></span></a>
-      <button class="btn sm" id="theme">Theme</button>
-      <span class="who"><span class="avatar" id="avatar"></span><span class="meta" id="me"></span></span>
-      <button class="btn sm" id="signout">Sign out</button>
-    </div>
-  </header>
+<div class="shell">
+  <nav class="rail" aria-label="Main">
+    <a class="logo" href="/" aria-label="Guardian home">G</a>
+    <button class="ri on" data-go="overview"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Overview</button>
+    <button class="ri" data-go="agents"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7"/><rect x="13" y="13" width="7" height="7"/><path d="M11 7.5h5.5V13M13 16.5H7.5V11"/></svg>Agents</button>
+    <button class="ri" data-go="map"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="4" cy="5" r="2"/><circle cx="20" cy="5" r="2"/><circle cx="4" cy="19" r="2"/><circle cx="20" cy="19" r="2"/><path d="M6 6l4 4M18 6l-4 4M6 18l4-4M18 18l-4-4"/></svg>Map</button>
+    <button class="ri" data-go="report"><svg viewBox="0 0 24 24"><path d="M5 3h14v18H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>Report</button>
+    <button class="ri" data-go="log"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="M7 9l3 3-3 3M12 15h5"/></svg>Log</button>
+    <div class="sp"></div>
+    <a class="ri op-only" href="/settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>Settings<span class="count hidden" id="set-count"></span></a>
+    <a class="ri" href="/settings#appearance"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4v16a8 8 0 000-16z" fill="currentColor"/></svg>Theme</a>
+  </nav>
 
-  <div class="callout warn hidden" id="note"></div>
-  <div class="grid">
-    <div class="stack">
-      <div class="card">
-        <div class="cardhead"><h2>Runs</h2><button class="btn sm" id="refresh">Refresh</button></div>
-        <div id="runs"></div>
+  <main class="page">
+    <div class="topbar">
+      <div>
+        <div class="crumb"><b>//</b>Guardian / Security operations — <span id="site-name">Site-01</span></div>
+        <h1 class="ptitle">Site / Overview.</h1>
+        <p class="sub">Network, devices, AI agents and findings.</p>
       </div>
-
+      <div class="who">
+        <span class="vchip" id="vault-chip"></span>
+        <button class="btn sm hidden" id="unlock">Unlock</button>
+        <button class="btn sm hidden" id="lock">Lock</button>
+        <button class="chip" id="mode-toggle">Dark</button>
+        <span class="avatar" id="avatar" aria-hidden="true"></span>
+        <span class="meta" id="me"></span>
+        <button class="btn sm" id="signout">Sign out</button>
+      </div>
     </div>
 
-    <div class="card main">
-      <div class="job hidden" id="job">
-        <span class="dot" id="job-dot"></span>
-        <div class="grow"><b id="job-title"></b> <span id="job-detail" class="meta"></span>
-          <div class="prog"><i id="job-bar"></i></div></div>
-        <button class="btn sm danger hidden" id="stop">Stop</button>
+    <div class="callout warn hidden" id="note"></div>
+
+    <div class="tools">
+      <button class="btn op-only" id="go-collect">Scan only<small>~7 min · free</small></button>
+      <button class="btn primary op-only" id="go-full">Scan + AI assessment<small>~30 min · ~$4–7</small></button>
+      <button class="btn" id="go-report">Open<small>latest report</small></button>
+      <button class="btn" id="go-replay">Replay<small>agent map</small></button>
+    </div>
+
+    <div class="job hidden" id="job">
+      <span class="dot" id="job-dot"></span>
+      <div class="grow"><b id="job-title"></b> <span id="job-detail" class="meta"></span>
+        <div class="prog"><i id="job-bar"></i></div></div>
+      <button class="btn sm danger hidden" id="stop">Stop</button>
+    </div>
+
+    <!-- posture -->
+    <section class="section" aria-labelledby="posture-title">
+      <div class="hero">
+        <div class="stage">
+          <div class="grid"></div>
+          <div class="ttl">
+            <div class="kicker">Guardian / your network</div>
+            <h2 class="stitle" id="posture-title">Posture / Status.</h2>
+            <div class="micro" id="o-run">No run selected</div>
+            <p class="note" id="o-headline"></p>
+          </div>
+          <div class="kpis">
+            <div class="box"><div class="lbl o">Score</div><div class="val" id="k-score">—</div><div class="note" id="k-grade">No AI run yet</div></div>
+            <div class="box"><div class="lbl">Devices</div><div class="val" id="k-devices">—</div><div class="note" id="k-unid"></div></div>
+            <div class="box"><div class="lbl v">Internet</div><div class="val" id="k-forwards">—</div><div class="note">Router port forwards</div></div>
+            <div class="box"><div class="lbl">Services</div><div class="val" id="k-services">—</div><div class="note">Open ports, all devices</div></div>
+            <div class="box wide">
+              <div><div class="lbl g">Findings / open</div>
+                <div class="sevbar" id="k-sev"></div>
+                <div class="note" id="k-open"></div></div>
+              <div class="pie" id="k-pie" aria-hidden="true"></div>
+            </div>
+          </div>
+          <div class="box bl">
+            <div class="lbl">Findings / trend</div>
+            <div class="val" id="t-now">—<small>open now</small></div>
+            <svg class="spark" id="t-spark" viewBox="0 0 300 96" preserveAspectRatio="none" role="img" aria-label="Open findings per run"></svg>
+            <div class="axis" id="t-axis"></div>
+          </div>
+          <div class="box br">
+            <div class="lbl">Run / cost</div>
+            <div class="cost">
+              <div><div class="note">AI cost</div><div class="num" id="c-cost">—</div><hr class="thin"><div id="c-by"></div></div>
+              <div><div class="note">Work</div><div class="num g" id="c-min">—</div><hr class="thin"><div id="c-work"></div></div>
+            </div>
+          </div>
+        </div>
+
+        <aside class="side" aria-label="Current run">
+          <div class="kicker">Run / now</div>
+          <div class="big">
+            <svg class="ring" viewBox="0 0 66 66" aria-hidden="true"><circle class="rbg" cx="33" cy="33" r="28"/><circle class="rfg" id="r-ring" cx="33" cy="33" r="28" stroke-dasharray="176" stroke-dashoffset="176" transform="rotate(-90 33 33)"/></svg>
+            <div><div class="val" id="r-pct">Idle</div><div class="note" id="r-step">Nothing running</div></div>
+          </div>
+          <div class="srow"><div class="k">Run</div><div class="v" id="r-label">—</div></div>
+          <div class="srow"><div class="k">Elapsed</div><div class="v" id="r-elapsed">—</div></div>
+          <div class="srow"><div class="k">Started by</div><div class="v" id="r-by">—</div></div>
+          <div class="srow"><div class="k">Vault</div><div class="v" id="r-vault">—</div></div>
+          <button class="btn danger hidden" id="r-stop">Stop run</button>
+          <div class="foot">Read-only · nothing on the network is changed</div>
+        </aside>
       </div>
+      <footer class="foot"><span class="micro">Score and findings come from the AI assessment · scan-only runs show devices and services</span><span class="micro" id="o-sampled"></span></footer>
+    </section>
+
+    <div class="two">
+      <section class="section" aria-labelledby="fix-title">
+        <div class="kicker">Guardian / findings</div>
+        <h2 class="stitle" id="fix-title">Fix / First.</h2>
+        <div id="f-list"><p class="note">Findings appear after an AI assessment.</p></div>
+      </section>
+      <section class="section" aria-labelledby="inv-title">
+        <div class="kicker">Guardian / devices</div>
+        <h2 class="stitle" id="inv-title">Inventory.</h2>
+        <div class="tw"><table><thead><tr><th>Device</th><th>Type</th><th>IP</th><th>Risk</th></tr></thead><tbody id="i-body"></tbody></table></div>
+        <div class="micro mt16" id="i-note"></div>
+      </section>
+    </div>
+
+    <section class="section" aria-labelledby="runs-title">
+      <div class="sechead"><div><div class="kicker">Guardian / history</div><h2 class="stitle" id="runs-title">Runs.</h2></div><button class="btn sm" id="refresh">Refresh</button></div>
+      <div class="runs" id="runs"></div>
+    </section>
+
+    <!-- workspace -->
+    <section class="section" id="workspace" aria-labelledby="ws-title">
+      <div class="kicker">Guardian / workspace</div>
+      <h2 class="stitle" id="ws-title">Run / Detail.</h2>
       <div class="tabs">
         <div class="row"><button class="tab on" data-t="report">Report</button><button class="tab" data-t="agents">Agents</button><button class="tab" data-t="map">Map &amp; chat</button><button class="tab" data-t="log">Live log</button></div>
         <span class="row"><span class="meta mono" id="current"></span><a class="btn sm hidden" id="newtab" target="_blank" rel="noopener">Open in new tab</a></span>
       </div>
       <div class="panel" id="p-report"><iframe id="frame" sandbox="allow-scripts" title="Report"></iframe>
-        <div class="empty" id="frame-empty">Choose a run with a report on the left.</div></div>
+        <div class="empty" id="frame-empty">Choose a run with a report.</div></div>
       <div class="panel scroll hidden" id="p-agents">
-        <div class="cardhead"><h2>Agents</h2><span class="meta" id="a-cost"></span></div>
+        <div class="cardhead"><h2>Agents / live</h2><span class="meta" id="a-cost"></span></div>
         <p class="note hidden" id="a-empty">No AI agents have worked on this run yet. Start "Scan + AI assessment", or "Run AI" on a scan.</p>
         <div class="acards" id="a-cards"></div>
         <div id="a-table" class="hidden"></div>
@@ -58,14 +151,14 @@
       </div>
       <div class="panel scroll hidden" id="p-map">
         <div class="mapbar">
-          <span class="totals"><span>Time <b id="m-clock">0:00</b></span><span>Findings <b id="m-find">0</b></span><span>Notes <b id="m-note">0</b></span><span>AI cost <b id="m-cost">$0.00</b></span></span>
+          <span class="totals"><span>Time<b id="m-clock">0:00</b></span><span>Findings<b id="m-find">0</b></span><span>Notes<b id="m-note">0</b></span><span>AI cost<b id="m-cost">$0.00</b></span></span>
           <span class="row"><span class="tag ok hidden" id="m-live">Live</span>
             <button class="btn sm hidden" id="m-replay">Replay run</button><button class="btn sm hidden" id="m-play">Pause</button>
             <button class="btn sm" data-speed="1">1×</button><button class="btn sm on" data-speed="3">3×</button><button class="btn sm" data-speed="8">8×</button></span>
         </div>
         <div class="maplayout">
           <div>
-            <svg id="map" viewBox="0 0 800 640" role="img" aria-label="Agents around the orchestrator, with their orders, checks, findings and notes"></svg>
+            <div class="mapstage"><svg id="map" viewBox="0 0 800 640" role="img" aria-label="Agents around the orchestrator, with their orders, checks, findings and notes"></svg></div>
             <p class="note hidden" id="m-empty">The map fills in when AI agents work on this run.</p>
             <div class="legend">
               <span><i class="lg-order"></i>Order</span><span><i class="lg-tool"></i>Check on the network</span>
@@ -76,7 +169,8 @@
           <div><div class="lp" id="lp" hidden></div><div class="feed" id="feed"></div></div>
         </div>
         <div class="chat">
-          <h2>Talk to the Orchestrator</h2>
+          <div class="kicker">Guardian / orchestrator</div>
+          <h2 class="stitle">Talk / Orchestrator.</h2>
           <p class="note">Ask about this run, or ask for more checks: it proposes orders, and nothing goes to an agent until an operator clicks Send. Everything stays read-only.</p>
           <div class="callout warn hidden" id="c-locked">The chat uses the API key, so the vault has to be unlocked (by an operator or admin).</div>
           <div class="callout hidden" id="c-waiting">An instruction arrived after the run had finished reading them. <button class="btn sm primary" id="c-run">Run it now</button></div>
@@ -85,8 +179,8 @@
         </div>
       </div>
       <div class="panel console hidden" id="p-log"></div>
-    </div>
-  </div>
+    </section>
+  </main>
 </div>
 </body>
 </html>

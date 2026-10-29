@@ -403,7 +403,7 @@ PAGE_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 's
             "frame-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 REPORT_CSP = ("sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; "
               "style-src 'unsafe-inline'; img-src data:")
-STATIC = {"/console.css": ("console.css", "text/css"), "/console.js": ("console.js", "text/javascript"),
+STATIC = {"/console.css": ("console.css", "text/css"), "/theme.js": ("theme.js", "text/javascript"), "/console.js": ("console.js", "text/javascript"),
           "/settings.js": ("settings.js", "text/javascript"), "/signin.js": ("signin.js", "text/javascript"),
           "/passkey.js": ("passkey.js", "text/javascript"), "/agents.js": ("agents.js", "text/javascript")}
 PAGES = {"/": "console.html", "/settings": "settings.html", "/signin": "signin.html"}
@@ -435,7 +435,7 @@ async def guard(request: Request, call_next):
         del resp.headers["X-Frame-Options"]
     else:
         resp.headers.setdefault("X-Frame-Options", "DENY")
-    resp.headers["Cache-Control"] = "no-store"
+    resp.headers.setdefault("Cache-Control", "no-store")
     return resp
 
 
@@ -470,6 +470,16 @@ def _static(file, media_type):
 
 for _path, (_file, _type) in STATIC.items():
     app.add_api_route(_path, _static(_file, _type), methods=["GET"])
+
+FONT = re.compile(r"^[a-z0-9-]{1,40}\.woff2$")
+
+
+@app.get("/fonts/{name}")
+def font(name: str):
+    path = WEB / "fonts" / name
+    if not FONT.match(name) or not path.is_file():
+        raise HTTPException(404, "Not found")
+    return FileResponse(path, media_type="font/woff2", headers={"Cache-Control": "public, max-age=604800"})
 
 
 # -- sign-in: state ----------------------------------------------------------------------------
@@ -818,7 +828,26 @@ def me(request: Request):
             "passkeys": [{"id": c["id"], "name": c["name"], "created": c["created"], "last_used": c["last_used"],
                           "unlock": bool(c["wrapped_private_key"])} for c in vault.credentials(user["id"])],
             "recovery": bool(s.get("recovery")), "can_add_passkey": bool(s.get("priv") and s["priv"][1] > time.time()),
-            "providers": {k: auth.PROVIDERS[k]["label"] for k in providers()}}
+            "providers": {k: auth.PROVIDERS[k]["label"] for k in providers()},
+            "prefs": vault.get(f"prefs:{user['id']}", {})}
+
+
+THEMES, THEME_MODES = ("ember", "arctic", "volt", "crimson", "mono"), ("light", "dark", "system")
+
+
+class Prefs(BaseModel):
+    mode: str
+    theme: str
+
+
+@app.post("/api/me/prefs")
+def my_prefs(body: Prefs, request: Request):
+    """Appearance is per person and follows them to every device; it's not a secret, so it lives outside the vault."""
+    sid, s, user = require(request)
+    if body.mode not in THEME_MODES or body.theme not in THEMES:
+        raise HTTPException(400, "Unknown mode or theme")
+    vault.put(f"prefs:{user['id']}", {"mode": body.mode, "theme": body.theme})
+    return {"ok": True}
 
 
 # -- console --------------------------------------------------------------------------------------------
@@ -967,6 +996,61 @@ def _read_graph(d):
         return json.loads((d / "graph.json").read_text())
     except (OSError, ValueError):
         return {}
+
+
+SEV_ORDER = ["critical", "high", "medium", "low", "info"]
+
+
+@app.get("/api/runs/{run_id}/summary")
+def run_overview(run_id: str, request: Request):
+    """The numbers for the overview panel: posture, exposure, top findings, riskiest devices, run cost."""
+    require(request)
+    g = _read_graph(run_dir(run_id))
+    if not g:
+        raise HTTPException(404, "No data for this run")
+    assets = g.get("assets") or {}
+    findings = [f for f in g.get("findings") or [] if f.get("status") != "resolved"]
+    sev = collections.Counter(f.get("severity", "info") for f in findings)
+    risk = {}
+    for f in findings:
+        ip = f.get("asset")
+        if ip in assets:
+            cur = risk.get(ip)
+            if cur is None or SEV_ORDER.index(f.get("severity", "info")) < SEV_ORDER.index(cur):
+                risk[ip] = f.get("severity", "info")
+    def name(ip, a):
+        return a.get("hostname") or " ".join(x for x in (a.get("vendor"), a.get("model")) if x) or a.get("mac_vendor") or ip
+    inv = [{"ip": ip, "name": name(ip, a)[:40], "type": a.get("device_type") or "unknown", "risk": risk.get(ip, "ok")}
+           for ip, a in assets.items()]
+    inv.sort(key=lambda r: (SEV_ORDER.index(r["risk"]) if r["risk"] in SEV_ORDER else 9, tuple(map(int, r["ip"].split(".")))))
+    top = sorted(findings, key=lambda f: (SEV_ORDER.index(f.get("severity", "info")), f.get("id", "")))[:6]
+    agents = g.get("agents") or {}
+    times = [a.get(k) for a in agents.values() for k in ("started", "ended") if a.get(k)]
+    usage = collections.Counter()
+    for a in agents.values():
+        usage.update(a.get("usage") or {})
+    wan = g.get("wan") or {}
+    s = g.get("summary") or {}
+    return {
+        "score": s.get("score"), "grade": s.get("grade"), "headline": s.get("headline"),
+        "devices": len(assets),
+        "unidentified": sum(1 for a in assets.values() if (a.get("device_type") or "unknown") == "unknown"),
+        "forwards": len(wan.get("upnp_port_mappings") or []),
+        "services": sum(1 for a in assets.values() for p in a.get("ports", []) if p.get("state") == "open"),
+        "severity": {k: sev.get(k, 0) for k in SEV_ORDER}, "open": len(findings),
+        "resolved": sum(1 for f in g.get("findings") or [] if f.get("status") == "resolved"),
+        "top": [{k: f.get(k) for k in ("id", "title", "severity", "asset", "layer")} for f in top],
+        "inventory": inv[:8],
+        "cost": round(g.get("cost_total") or 0, 2),
+        "cost_by": {k: round(a.get("cost", 0), 2) for k, a in agents.items() if a.get("cost")},
+        "minutes": round((max(times) - min(times)) / 60) if len(times) > 1 else None,
+        "rounds": sum(a.get("rounds", 0) for a in agents.values()),
+        "checks": sum(sum((a.get("checks") or {}).values()) for a in agents.values()),
+        "notes": len(g.get("notes") or []),
+        "tokens": sum(usage.values()) - usage.get("searches", 0),
+        "cache_read": usage.get("cache_read", 0),
+        "started": g.get("started"),
+    }
 
 
 @app.get("/api/runs/{run_id}/live")

@@ -1,6 +1,5 @@
 "use strict";
 const $ = id => document.getElementById(id);
-const store = {get(k){try{return localStorage.getItem(k)}catch(e){return null}}, set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 let data = null;           // /api/connectors
 let editing = null;        // {type, id, suggestion}
 
@@ -17,7 +16,10 @@ function el(tag, attrs = {}, ...kids) {
   const e = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
     if (v === undefined || v === null || v === false) continue;
-    if (k === "class") e.className = v; else if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v === true ? "" : v);
+    if (k === "class") e.className = v; else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (k === "style") {                    // CSSOM: style="" attributes are blocked by the page's CSP
+      for (const d of String(v).split(";")) { const i = d.indexOf(":"); if (i > 0) e.style.setProperty(d.slice(0, i).trim(), d.slice(i + 1).trim()); }
+    } else e.setAttribute(k, v === true ? "" : v);
   }
   for (const k of kids) if (k != null && k !== false) e.append(k);
   return e;
@@ -37,8 +39,9 @@ function showSection() {
   if (s === "users") loadUsers();
   if (s === "security") loadSecurity();
   if (s === "account") loadAccount();
+  if (s === "appearance") renderAppearance();
 }
-const SECTIONS = ["connectors", "users", "security", "account", "ai", "scope", "schedules"];
+const SECTIONS = ["connectors", "users", "security", "account", "ai", "scope", "schedules", "appearance"];
 window.addEventListener("hashchange", showSection);
 
 // -- connectors -----------------------------------------------------------------------
@@ -283,7 +286,7 @@ $("ai-form").addEventListener("submit", async e => {
 // -- me, vault --------------------------------------------------------------------------
 let me = null;
 const ADMIN_ONLY = ["users", "security", "ai"];
-const allowed = s => me.role === "admin" || (me.role === "operator" ? !ADMIN_ONLY.includes(s) : s === "account");
+const allowed = s => s === "appearance" || me.role === "admin" || (me.role === "operator" ? !ADMIN_ONLY.includes(s) : s === "account");
 function renderMe() {
   $("me").textContent = `${me.name} · ${me.role}`;
   $("vault-chip").className = "vchip " + (me.unlocked ? "open" : "shut");
@@ -291,7 +294,7 @@ function renderMe() {
   $("unlock").classList.toggle("hidden", me.unlocked || !me.can_unlock);
   document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("hidden", !allowed(a.dataset.s)));
 }
-async function refreshMe() { me = await api("/api/me"); renderMe(); }
+async function refreshMe() { me = await api("/api/me"); if (me.prefs && me.prefs.theme) Theme.set(me.prefs); renderMe(); }
 async function unlock() {
   try { const r = await Passkey.authenticate(true); if (r.note) alert(r.note); await refreshMe(); await loadConnectors(); showSection(); }
   catch (e) { alert(Passkey.explain(e)); }
@@ -428,14 +431,35 @@ $("pk-add").addEventListener("click", async () => {
   loadAccount();
 });
 
-// -- theme and start-up -----------------------------------------------------------------
-const theme = store.get("guardian-theme");
-if (theme) document.documentElement.dataset.theme = theme;
-$("theme").addEventListener("click", () => {
-  const r = document.documentElement;
-  const dark = r.dataset.theme ? r.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
-  r.dataset.theme = dark ? "light" : "dark"; store.set("guardian-theme", r.dataset.theme);
-});
+// -- appearance ---------------------------------------------------------------------------
+function renderAppearance() {
+  const box = $("themes");
+  if (!box.childElementCount) {
+    for (const [id, [name, desc]] of Object.entries(Theme.THEMES)) {
+      const mini = el("div", {class: "mini"}, el("div", {class: "mp"}, el("div", {class: "k"}, "Score"), el("div", {class: "n"}, "64 ", el("small", {}, "/ 100")),
+        el("div", {class: "bar"}, el("i"))), el("div", {class: "row2"}, el("span"), el("span"), el("span")));
+      box.append(el("button", {type: "button", class: "tcard", role: "radio", "data-theme": id, onclick: () => Theme.set({theme: id}, true)},
+        mini, el("div", {class: "meta2"}, el("b", {}, name, el("span", {class: "on"}, "Active")), el("span", {class: "d"}, desc))));
+    }
+    box.addEventListener("keydown", e => {
+      const keys = {ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1};
+      if (!keys[e.key]) return;
+      e.preventDefault();
+      const ids = Object.keys(Theme.THEMES), i = ids.indexOf(Theme.get().theme);
+      const next = ids[(i + keys[e.key] + ids.length) % ids.length];
+      Theme.set({theme: next}, true); box.querySelector(`[data-theme="${next}"]`).focus();
+    });
+    document.querySelectorAll("#s-appearance .seg button").forEach(b => b.addEventListener("click", () => Theme.set({mode: b.dataset.mode}, true)));
+    Theme.onChange(paintAppearance);
+  }
+  paintAppearance();
+}
+function paintAppearance() {
+  const t = Theme.get();
+  document.querySelectorAll("#s-appearance .seg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === t.mode)));
+  document.querySelectorAll(".tcard").forEach(c => { c.dataset.scheme = t.scheme; c.setAttribute("aria-checked", String(c.dataset.theme === t.theme)); c.tabIndex = c.dataset.theme === t.theme ? 0 : -1; });
+  $("theme-saved").textContent = `${Theme.THEMES[t.theme][0]} · ${t.mode === "system" ? `follows your system (now ${t.scheme})` : t.mode}`;
+}
 
 (async () => {
   await refreshMe();

@@ -43,11 +43,11 @@ const Agents = (() => {
     for (const [id, n] of Object.entries(NODES)) {
       const g = mk("g", {class: "node " + (n.center ? "center" : "waiting"), transform: `translate(${n.x},${n.y})`, tabindex: 0, role: "button",
                          "aria-label": `${SHORT[id]}: show what it did`});
-      const r = n.center ? 60 : n.small ? 38 : 46;
-      mk("circle", {class: "ring", r}, g); mk("circle", {class: "body", r}, g);
-      mk("text", {class: "label", y: n.center ? -2 : 0}, g).textContent = SHORT[id];
-      mk("text", {class: "sub", y: 15}, g).textContent = n.sub;
-      const badge = mk("text", {class: "badge", y: r + 16}, g);
+      const w = Math.max(n.center ? 156 : 124, SHORT[id].length * 9.4 + 30), h = n.center ? 62 : 50;
+      mk("rect", {class: "ring", x: -w / 2, y: -h / 2, width: w, height: h}, g); mk("rect", {class: "body", x: -w / 2, y: -h / 2, width: w, height: h}, g);
+      mk("text", {class: "label", y: -1}, g).textContent = SHORT[id];
+      mk("text", {class: "sub", y: 14}, g).textContent = n.sub;
+      const badge = mk("text", {class: "badge", y: h / 2 + 16}, g);
       g.addEventListener("click", () => openDrill(id));
       g.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDrill(id); } });
       nodeEls[id] = {g, badge, finds: 0};
@@ -87,7 +87,7 @@ const Agents = (() => {
     const a = NODES[from], b = NODES[to], dx = b.x - a.x, dy = b.y - a.y;
     const mx = (a.x + b.x) / 2 - dy * 0.22, my = (a.y + b.y) / 2 + dx * 0.22;
     const edge = (p, r) => { const l = Math.hypot(mx - p.x, my - p.y); return [p.x + (mx - p.x) / l * r, p.y + (my - p.y) / l * r]; };
-    const [sx, sy] = edge(a, 50), [ex, ey] = edge(b, NODES[to].small ? 42 : 52);
+    const [sx, sy] = edge(a, 44), [ex, ey] = edge(b, 46);
     return `M${sx},${sy} Q${mx},${my} ${ex},${ey}`;
   }
   function getLink(from, to) {
@@ -99,7 +99,7 @@ const Agents = (() => {
     const line = mk("path", {class: "line", d, "marker-end": "url(#arr)", "stroke-width": 2}, g);
     const m = line.getPointAtLength(line.getTotalLength() / 2);
     const count = mk("g", {class: "count", transform: `translate(${m.x},${m.y})`}, g);
-    mk("circle", {r: 10}, count); const ct = mk("text", {y: 4}, count);
+    mk("rect", {x: -10, y: -10, width: 20, height: 20}, count); const ct = mk("text", {y: 4}, count);
     const title = mk("title", {}, g);
     const link = {key, from, to, g, line, ct, title, msgs: []};
     g.addEventListener("click", () => selectLink(link));

@@ -1,6 +1,5 @@
 "use strict";
 const $ = id => document.getElementById(id);
-const store = {get(k){try{return localStorage.getItem(k)}catch(e){return null}}, set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 const SEVS = ["critical", "high", "medium", "low"];
 let current = null;       // run id shown in the report tab
 let seq = 0;              // last log line received
@@ -18,12 +17,21 @@ async function api(path, body) {
 function el(tag, attrs = {}, ...kids) {
   const e = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
-    if (k === "class") e.className = v; else if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v);
+    if (k === "class") e.className = v; else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (k === "style") setStyle(e, v);       // CSSOM: style="" attributes are blocked by the page's CSP
+    else e.setAttribute(k, v);
   }
   for (const k of kids) if (k != null) e.append(k);
   return e;
 }
 
+function setStyle(e, css) {
+  for (const decl of String(css).split(";")) { const i = decl.indexOf(":"); if (i > 0) e.style.setProperty(decl.slice(0, i).trim(), decl.slice(i + 1).trim()); }
+}
+const AGENT_NAMES = {orchestrator: "Orchestrator", discovery: "Discovery", network: "Network", os: "OS & endpoints", web: "Web & APIs",
+                     firmware: "Firmware", wan: "Internet perimeter", report: "Report writer", collector: "Scanner"};
+const SEVS_ALL = ["critical", "high", "medium", "low", "info"];
+const money = v => v == null ? "—" : `$${Number(v).toFixed(2)}`;
 const fmtRun = id => `${id.slice(0,4)}-${id.slice(4,6)}-${id.slice(6,8)} ${id.slice(9,11)}:${id.slice(11,13)}`;
 const mins = s => Math.max(0, Math.round(s / 60));
 
@@ -31,6 +39,8 @@ const mins = s => Math.max(0, Math.round(s / 60));
 let me = null;
 function renderMe() {
   $("me").textContent = `${me.name} · ${me.role[0].toUpperCase()}${me.role.slice(1)}`;
+  if (me.prefs && me.prefs.theme) Theme.set(me.prefs);
+  $("r-vault").textContent = me.unlocked ? "Unlocked" : me.can_unlock ? "Locked" : "Read-only";
   $("avatar").textContent = me.name.split(/\s+/).map(w => w[0]).slice(0, 2).join("").toUpperCase();
   const vaultRole = me.role !== "viewer";
   document.querySelectorAll(".op-only").forEach(e => e.classList.toggle("hidden", !vaultRole));
@@ -51,7 +61,23 @@ $("lock").addEventListener("click", async () => { await api("/api/vault/lock", {
 $("signout").addEventListener("click", async () => { await api("/api/auth/signout", {}); location.replace("/signin"); });
 
 // -- runs ---------------------------------------------------------------------
+function renderTrend(runs) {
+  const pts = runs.filter(r => r.analysed).slice(0, 12).reverse().map(r => ({id: r.id, n: SEVS_ALL.reduce((a, s) => a + (r.counts[s] || 0), 0)}));
+  const svg = $("t-spark"); svg.replaceChildren();
+  const NS = "http://www.w3.org/2000/svg";
+  if (!pts.length) { $("t-axis").replaceChildren(el("span", {}, "No AI runs yet")); return; }
+  const max = Math.max(...pts.map(p => p.n), 1), W = 300, H = 96;
+  const xy = pts.map((p, i) => [pts.length === 1 ? W / 2 : i * W / (pts.length - 1), H - 8 - (p.n / max) * (H - 20)]);
+  const path = document.createElementNS(NS, "path");
+  path.setAttribute("d", xy.map((c, i) => (i ? "L" : "M") + c[0].toFixed(1) + " " + c[1].toFixed(1)).join(" "));
+  path.setAttribute("class", "tline"); svg.append(path);
+  const last = xy[xy.length - 1], dot = document.createElementNS(NS, "circle");
+  dot.setAttribute("cx", last[0]); dot.setAttribute("cy", last[1]); dot.setAttribute("r", 3.5); dot.setAttribute("class", "tdot"); svg.append(dot);
+  $("t-axis").replaceChildren(el("span", {}, fmtRun(pts[0].id).slice(5, 10)), el("span", {}, `${pts.length} AI run${pts.length > 1 ? "s" : ""}`), el("span", {}, "Now"));
+}
+
 function renderRuns(runs, job) {
+  renderTrend(runs);
   const box = $("runs");
   box.replaceChildren();
   if (job.running && job.mode !== "report" && job.mode !== "resume")
@@ -82,8 +108,46 @@ function renderRuns(runs, job) {
   }
 }
 
+// -- overview panels --------------------------------------------------------------------
+async function loadOverview(id) {
+  let d;
+  try { d = await api(`/api/runs/${id}/summary`); } catch (e) { return; }
+  if (current !== id) return;
+  $("o-run").textContent = `Run ${fmtRun(id)}`;
+  $("o-headline").textContent = d.headline || "";
+  $("o-sampled").textContent = d.started ? `Sampled ${d.started.replace("T", " ").slice(0, 16)}` : "";
+  $("k-score").replaceChildren(d.score != null ? String(d.score) : "—", el("small", {}, d.score != null ? "/100" : ""));
+  $("k-grade").textContent = d.score != null ? `Grade ${d.grade} · AI assessment` : "No AI assessment on this run";
+  $("k-devices").textContent = d.devices;
+  $("k-unid").textContent = d.unidentified ? `${d.unidentified} unidentified` : "All identified";
+  $("k-forwards").replaceChildren(String(d.forwards), el("small", {}, "forwards"));
+  $("k-services").replaceChildren(String(d.services), el("small", {}, "open"));
+  $("k-sev").replaceChildren(...["critical", "high", "medium", "low"].map(s => el("span", {}, el("b", {class: d.severity[s] ? `c-${s}` : ""}, String(d.severity[s])), s === "critical" ? "crit" : s === "medium" ? "med" : s)));
+  $("k-open").textContent = `${d.open} open · ${d.resolved} resolved`;
+  let acc = 0; const stops = [];
+  const tot = Math.max(1, ["critical", "high", "medium", "low"].reduce((a, s) => a + d.severity[s], 0));
+  for (const s of ["critical", "high", "medium", "low"]) { const from = acc; acc += d.severity[s] / tot * 100; stops.push(`var(--${{critical: "crit", high: "high", medium: "med", low: "low"}[s]}) ${from}% ${acc}%`); }
+  $("k-pie").style.setProperty("background", d.open ? `conic-gradient(${stops.join(",")})` : "var(--line)");
+  $("t-now").replaceChildren(String(d.open), el("small", {}, "open now"));
+  $("c-cost").textContent = d.cost ? money(d.cost) : "$0.00";
+  const by = Object.entries(d.cost_by).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  $("c-by").replaceChildren(...(by.length ? by.map(([k, v]) => el("div", {class: "kv"}, el("span", {}, AGENT_NAMES[k] || k), el("span", {}, money(v))))
+                                         : [el("div", {class: "kv"}, el("span", {}, "No AI work on this run"), el("span", {}, ""))]));
+  $("c-min").replaceChildren(d.minutes != null ? String(d.minutes) : "—", el("small", {}, d.minutes != null ? " min" : ""));
+  const tk = d.tokens >= 1e6 ? (d.tokens / 1e6).toFixed(1) + "M" : d.tokens >= 1e3 ? Math.round(d.tokens / 1e3) + "k" : String(d.tokens);
+  $("c-work").replaceChildren(...[["Rounds", d.rounds], ["Checks", d.checks], ["Notes", d.notes], ["Tokens", tk]].map(([k, v]) => el("div", {class: "kv"}, el("span", {}, k), el("span", {}, String(v)))));
+  $("f-list").replaceChildren(...(d.top.length ? d.top.map(f => el("div", {class: "frow"},
+      el("span", {class: `sev ${f.severity}`}, f.severity === "medium" ? "Med" : f.severity === "critical" ? "Crit" : f.severity),
+      el("div", {}, el("b", {}, f.title), el("span", {}, `${f.asset} · ${f.layer || ""}`)), el("span", {class: "id"}, f.id || "")))
+    : [el("p", {class: "note"}, d.score != null ? "Nothing open. Well done." : "Findings appear after an AI assessment.")]));
+  $("i-body").replaceChildren(...d.inventory.map(r => el("tr", {}, el("td", {}, r.name), el("td", {class: "m"}, r.type), el("td", {class: "m"}, "." + r.ip.split(".").pop()),
+    el("td", {}, el("span", {class: `dotc bg-${r.risk}`}), r.risk === "ok" ? "OK" : r.risk[0].toUpperCase() + r.risk.slice(1)))));
+  $("i-note").textContent = `${d.devices} devices · riskiest ${d.inventory.length} shown`;
+}
+
 function openRun(id, hasReport) {
   current = id;
+  loadOverview(id);
   document.querySelectorAll(".run").forEach(n => n.classList.toggle("on", n.querySelector(".mono")?.textContent === fmtRun(id)));
   $("current").textContent = `run ${fmtRun(id)}`;
   if (typeof Agents !== "undefined") Agents.show(id);
@@ -137,10 +201,22 @@ function appendLog(lines) {
   if (atEnd) box.scrollTop = box.scrollHeight;
 }
 
+function renderSide(s) {
+  const busy = s.running;
+  const pct = !s.mode ? 0 : busy ? Math.round((s.step - 0.5) / s.steps.length * 100) : 100;
+  $("r-ring").setAttribute("stroke-dashoffset", String(176 - 176 * pct / 100));
+  $("r-pct").replaceChildren(busy ? String(pct) : s.mode ? "Done" : "Idle", busy ? el("small", {}, "%") : "");
+  $("r-step").textContent = busy ? `Step ${s.step} of ${s.steps.length} · ${s.steps[s.step - 1]}` : s.mode ? `${s.label} ${s.stopped ? "stopped" : s.exit_code === 0 ? "finished" : "failed"}` : "Nothing running";
+  $("r-label").textContent = s.label || "—";
+  $("r-elapsed").replaceChildren(s.started ? String(mins(((busy ? Date.now() / 1000 : s.ended) || s.started) - s.started)) : "—", s.started ? el("small", {}, " min") : "");
+  $("r-by").textContent = s.by || "—";
+  $("r-stop").classList.toggle("hidden", !busy || !me || me.role === "viewer");
+}
+
 function renderJob(s) {
   const busy = s.running;
+  renderSide(s);
   if (typeof Agents !== "undefined") Agents.follow(s);
-  $("dot").className = "dot" + (busy ? " busy" : "");
   for (const b of ["go-collect", "go-full"]) $(b).disabled = busy;
   document.querySelectorAll(".run .btn").forEach(b => { if (b.tagName === "BUTTON" && !["Report", "Agent map"].includes(b.textContent)) b.disabled = busy; });
   if (!s.mode) { $("job").classList.add("hidden"); return; }
@@ -181,14 +257,21 @@ function showTab(t) {
 document.querySelectorAll(".tab").forEach(b => b.addEventListener("click", () => showTab(b.dataset.t)));
 $("refresh").addEventListener("click", () => poll());
 
-const theme = store.get("guardian-theme");
-if (theme) document.documentElement.dataset.theme = theme;
-$("theme").addEventListener("click", () => {
-  const r = document.documentElement;
-  const dark = r.dataset.theme ? r.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
-  r.dataset.theme = dark ? "light" : "dark";
-  store.set("guardian-theme", r.dataset.theme);
+// -- rail and shortcuts -------------------------------------------------------------------
+function go(where) {
+  document.querySelectorAll(".rail .ri[data-go]").forEach(b => b.classList.toggle("on", b.dataset.go === where));
+  if (where === "overview") { scrollTo({top: 0, behavior: "smooth"}); return; }
+  showTab(where);
+  $("workspace").scrollIntoView({behavior: "smooth", block: "start"});
+}
+document.querySelectorAll(".rail .ri[data-go]").forEach(b => b.addEventListener("click", () => go(b.dataset.go)));
+$("go-report").addEventListener("click", async () => {
+  const o = await api("/api/overview"); const r = o.runs.find(x => x.has_report);
+  if (!r) { alert("No report yet. Run an AI assessment first."); return; }
+  openRun(r.id, true); go("report");
 });
+$("go-replay").addEventListener("click", () => { go("map"); setTimeout(() => { const b = $("m-replay"); if (!b.classList.contains("hidden")) b.click(); }, 400); });
+$("r-stop").addEventListener("click", () => $("stop").click());
 
 async function start() {
   await refreshMe();

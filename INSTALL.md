@@ -250,6 +250,16 @@ The vault locks itself after 30 minutes idle (Settings → Security & vault). Un
 
 ## 8. First assessment (browser)
 
+**Finding your way around.** The menu on the left (a bar across the top on a phone) has **Overview**, **Agents**,
+**Map**, **Report**, **Log**, **Settings** and **Theme**. The overview page shows, for the selected run:
+- **Posture / Status**: score, devices, internet exposure, open services, open findings by severity, the findings
+  trend across runs, and what the run cost;
+- **Run / Now**: what is running, its progress and who started it;
+- **Fix / First**: the most important open findings;
+- **Inventory**: the riskiest devices;
+- **Runs**: every run so far (click one to show it);
+- **Run / Detail**: the Report, Agents, Map & chat and Live log tabs.
+
 1. In the console, click **Scan only** first (about 7 minutes, free). Follow it in **Live log**.
 2. When it's done, open **Settings → Connectors**: Guardian suggests read-only connectors for what it found
    (Synology, Proxmox, Linux servers, …). Optional for now.
@@ -264,6 +274,11 @@ The vault locks itself after 30 minutes idle (Settings → Security & vault). Un
      you click **Send order**.
 5. When it finishes, the **Report** tab opens: score, executive summary, fix-first list, every finding with evidence.
    After the run, **Replay run** on the map plays the whole run again.
+
+**Appearance.** **Settings → Appearance** (or **Theme** in the left menu): **Light**, **Dark** or **System** (follows
+your computer or phone), and five colour themes (**Ember**, **Arctic**, **Volt**, **Crimson**, **Mono**), each with a
+light and a dark version. Your choice is saved to your account, so it follows you to every device. The **Dark/Light**
+button at the top of every page switches quickly.
 
 ---
 

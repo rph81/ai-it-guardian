@@ -17,7 +17,8 @@ credentials, and public vulnerability lookups (NVD, CISA KEV, endoflife.date).
 | **Scanner** (`guardian/collector.py`) | ARP, ports, services, OS guesses, web titles, TLS, UPnP, mDNS, router forwards, what the internet sees on the public IP. No AI, free, ~7 min. |
 | **Agents** (`guardian/agents.py`) | Discovery → Orchestrator → specialists (Network, OS & endpoints, Web & APIs, Firmware, Internet perimeter), a few at a time → Report writer. |
 | **Agent notes** | A specialist that finds something in another's area sends it a note (`send_note`). The Orchestrator delivers it on the receiver's next round, adds it to its brief if it hasn't started, or runs a follow-up if it has finished. |
-| **Console** (`console.py`, `guardian/web/`) | HTTPS web app: start/stop runs, reports, live **Agents** cards, the live **agent map** (with replay), the **Orchestrator chat**, settings. |
+| **Console** (`console.py`, `guardian/web/`) | HTTPS web app: an overview of the selected run (posture, exposure, fix-first findings, riskiest devices, trend, cost), start/stop runs, reports, live **Agents** cards, the live **agent map** (with replay), the **Orchestrator chat**, settings. |
+| **Themes** (`guardian/web/theme.js`, `console.css`) | Light / dark / system, and five colour themes (Ember, Arctic, Volt, Crimson, Mono), saved per account. Fonts are served locally (`guardian/web/fonts/`, SIL OFL), so the console never contacts a third party. |
 | **Orchestrator chat** (`guardian/chat.py`) | Ask about a run; ask for re-checks. It proposes orders; an operator confirms each one before an agent gets it. |
 | **Vault** (`guardian/vault.py`) | Users, passkeys (with PRF), encrypted secrets (API keys, connector passwords, SSH key), tamper-evident audit log. |
 | **Sign-in** (`guardian/auth.py`) | Passkeys (Touch ID, Face ID, Windows Hello, security keys); optionally Google / Microsoft accounts. Roles: viewer, operator, admin. |

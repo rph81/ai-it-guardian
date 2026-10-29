@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="en" data-theme="ember" data-scheme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guardian Redesign</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Saira+Semi+Condensed:wght@400;500;600&display=swap">
+<style>
+:root{
+  --warn:#e6b450; --crit:#ef5a4c; --high:#f07c3e; --med:#e6b450; --low:#7fb7c9;
+  --head:"Chakra Petch",ui-sans-serif,system-ui,sans-serif; --body:"Saira Semi Condensed",ui-sans-serif,system-ui,sans-serif;
+}
+/* themes: colours only; every theme has a dark and a light set */
+[data-theme="ember"][data-scheme="dark"]{--bg:#121311;--bg2:#161815;--panel:#1a1c18;--panel2:#20231e;--line:#2d3029;--line2:#3a3e35;--text:#ecede6;--muted:#8e9286;--dim:#62665c;--accent:#f07c3e;--ok:#a9c47c;--info:#a993e6;--stage1:#252a20;--on-accent:#16120d}
+[data-theme="ember"][data-scheme="light"]{--bg:#f2f1ea;--bg2:#ebe9e0;--panel:#f9f8f3;--panel2:#ffffff;--line:#dcd9cd;--line2:#c8c4b5;--text:#1c1d18;--muted:#686a5f;--dim:#9a9b8f;--accent:#d35f1f;--ok:#5a8429;--info:#7458cc;--stage1:#e3e4d5;--on-accent:#ffffff}
+[data-theme="arctic"][data-scheme="dark"]{--bg:#0e1215;--bg2:#12171b;--panel:#161c21;--panel2:#1b232a;--line:#253039;--line2:#334049;--text:#e7eef3;--muted:#8796a2;--dim:#5a6873;--accent:#56c6ff;--ok:#6ee0b6;--info:#b39dff;--stage1:#1b2a33;--on-accent:#06141c}
+[data-theme="arctic"][data-scheme="light"]{--bg:#eef3f6;--bg2:#e6ecf0;--panel:#f7fafc;--panel2:#ffffff;--line:#d5dee4;--line2:#c0ccd4;--text:#121a20;--muted:#5d6b75;--dim:#94a1aa;--accent:#0a7fbf;--ok:#11845f;--info:#6a50c9;--stage1:#dbe7ee;--on-accent:#ffffff}
+[data-theme="volt"][data-scheme="dark"]{--bg:#101110;--bg2:#141514;--panel:#191a18;--panel2:#1f201e;--line:#2c2d2a;--line2:#3a3b37;--text:#eeefe9;--muted:#8f9189;--dim:#61635c;--accent:#cdf33a;--ok:#5fd3a6;--info:#8fb3ff;--stage1:#22261a;--on-accent:#141a00}
+[data-theme="volt"][data-scheme="light"]{--bg:#f1f2ee;--bg2:#e9eae4;--panel:#f9faf6;--panel2:#ffffff;--line:#d9dbd2;--line2:#c4c7bb;--text:#191a17;--muted:#62655b;--dim:#979a8f;--accent:#5f7f00;--ok:#16805c;--info:#3f63c9;--stage1:#e2e8cf;--on-accent:#ffffff}
+[data-theme="crimson"][data-scheme="dark"]{--bg:#131111;--bg2:#171414;--panel:#1c1818;--panel2:#221d1d;--line:#302929;--line2:#3e3535;--text:#efe9e7;--muted:#948a87;--dim:#665d5a;--accent:#ff4f5e;--ok:#c9b38a;--info:#9fb8d6;--stage1:#2a1d1d;--on-accent:#1c0508}
+[data-theme="crimson"][data-scheme="light"]{--bg:#f4f0ee;--bg2:#ede8e5;--panel:#faf8f6;--panel2:#ffffff;--line:#e0d7d3;--line2:#cdc1bc;--text:#1e1817;--muted:#6d625f;--dim:#a19693;--accent:#c8233a;--ok:#86683a;--info:#3e6593;--stage1:#ecdcd8;--on-accent:#ffffff}
+[data-theme="mono"][data-scheme="dark"]{--bg:#0d0d0d;--bg2:#111111;--panel:#161616;--panel2:#1c1c1c;--line:#2a2a2a;--line2:#3a3a3a;--text:#f2f2f2;--muted:#8f8f8f;--dim:#5f5f5f;--accent:#f2f2f2;--ok:#9ad0a0;--info:#b8b8b8;--stage1:#1f1f1f;--on-accent:#0d0d0d}
+[data-theme="mono"][data-scheme="light"]{--bg:#f4f4f4;--bg2:#ececec;--panel:#fafafa;--panel2:#ffffff;--line:#dcdcdc;--line2:#c4c4c4;--text:#111111;--muted:#666666;--dim:#9a9a9a;--accent:#111111;--ok:#2f7d3a;--info:#555555;--stage1:#e6e6e6;--on-accent:#ffffff}
+[data-scheme="light"]{--warn:#b7801a;--crit:#cf3a2c;--high:#d35f1f;--med:#b7801a;--low:#2c7f99}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);transition:background .25s,color .25s;color:var(--text);font:15px/1.45 var(--body);-webkit-font-smoothing:antialiased}
+.banner{background:var(--accent);color:var(--on-accent);font:600 12px/1 var(--head);letter-spacing:.06em;text-align:center;padding:7px 16px;text-transform:uppercase}
+.shell{display:grid;grid-template-columns:76px minmax(0,1fr);min-height:100vh}
+@media (max-width:760px){.shell{grid-template-columns:1fr}}
+
+/* left rail */
+.rail{border-right:1px solid var(--line);background:var(--bg2);display:flex;flex-direction:column;align-items:center;padding:18px 0;gap:6px;position:sticky;top:0;height:100vh}
+.logo{width:38px;height:38px;border:1px solid var(--accent);display:grid;place-items:center;font:700 15px var(--head);color:var(--accent);margin-bottom:18px}
+.rail a{width:56px;padding:9px 0 7px;display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--muted);text-decoration:none;font:500 9.5px var(--head);letter-spacing:.08em;text-transform:uppercase;border:1px solid transparent}
+.rail a svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.6}
+.rail a.on{color:var(--text);border-color:var(--line2);background:var(--panel)}
+.rail a.on svg{stroke:var(--accent)}
+.rail .sp{flex:1}
+
+main{padding:22px clamp(16px,3vw,44px) 60px;min-width:0}
+.crumb{font:600 11.5px var(--head);letter-spacing:.18em;color:var(--muted);text-transform:uppercase}
+.crumb b{color:var(--accent);margin-right:8px}
+h1{font:700 clamp(30px,4.4vw,52px)/1.05 var(--head);letter-spacing:.02em;text-transform:uppercase;margin:14px 0 8px}
+.sub{color:var(--muted);margin:0}
+.top{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.who{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.chip{font:600 11px var(--head);letter-spacing:.1em;text-transform:uppercase;border:1px solid var(--line2);padding:7px 10px;color:var(--muted);display:inline-flex;align-items:center;gap:8px;background:var(--panel)}
+.chip i{width:7px;height:7px;background:var(--ok);display:inline-block}
+.chip.warn i{background:var(--warn)}
+.avatar{width:34px;height:34px;border:1px solid var(--line2);display:grid;place-items:center;font:600 12px var(--head);background:var(--panel)}
+
+.tools{display:flex;gap:10px;flex-wrap:wrap;margin:26px 0 18px}
+.btn{font:600 12.5px/1.25 var(--head);letter-spacing:.04em;color:var(--text);background:var(--panel);border:1px solid var(--line2);padding:10px 16px;cursor:pointer;text-align:center}
+.btn:hover{border-color:var(--muted)}
+.btn small{display:block;font:500 10.5px var(--body);color:var(--muted);letter-spacing:0}
+.btn.primary{border-color:var(--accent);color:var(--accent)}
+.btn.primary:hover{background:color-mix(in srgb,var(--accent) 10%,var(--panel))}
+
+/* sections */
+.section{position:relative;border:1px solid var(--line);background:linear-gradient(180deg,var(--panel) 0,var(--bg2) 100%);padding:22px 24px 20px;margin-top:22px}
+.section::before{content:"";position:absolute;left:-1px;top:-1px;width:16px;height:16px;border-left:2px solid var(--accent);border-top:2px solid var(--accent)}
+.kicker{font:600 10.5px var(--head);letter-spacing:.2em;color:var(--muted);text-transform:uppercase}
+h2{font:600 clamp(20px,2.2vw,27px)/1.1 var(--head);letter-spacing:.03em;text-transform:uppercase;margin:6px 0 4px}
+.micro{font:600 9.5px var(--head);letter-spacing:.16em;color:var(--dim);text-transform:uppercase}
+
+/* boxes */
+.box{position:relative;background:color-mix(in srgb,var(--panel2) 88%,transparent);border:1px solid var(--line2);padding:12px 14px 11px;backdrop-filter:blur(6px)}
+.box::after{content:"";position:absolute;right:9px;top:8px;width:9px;height:2px;background:var(--accent)}
+.box .lbl{font:600 10.5px var(--head);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.box .lbl.o{color:var(--accent)} .box .lbl.v{color:var(--info)} .box .lbl.g{color:var(--ok)}
+.val{font:600 30px/1.05 var(--head);margin-top:6px;font-variant-numeric:tabular-nums}
+.val small{font:500 13px var(--body);color:var(--muted);margin-left:4px}
+.note{font-size:11.5px;color:var(--muted);margin-top:3px}
+
+/* hero */
+.hero{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:16px;margin-top:14px}
+@media (max-width:1100px){.hero{grid-template-columns:1fr}}
+.stage{position:relative;border:1px solid var(--line);overflow:hidden;padding:20px 18px 18px;
+  display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);grid-template-areas:"ttl tr" "map map" "bl br";gap:14px 18px;align-items:start;
+  background:radial-gradient(ellipse at 50% 55%,var(--stage1) 0,var(--bg2) 55%,var(--bg) 100%)}
+.stage .grid{position:absolute;inset:0;background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);background-size:40px 40px;opacity:.35;mask-image:radial-gradient(ellipse at 50% 55%,#000 30%,transparent 75%)}
+.stage svg.map{grid-area:map;width:100%;max-width:780px;height:auto;justify-self:center;position:relative;z-index:1;margin:-6px 0}
+.stage .ttl{grid-area:ttl;position:relative;z-index:2}
+.overlay{position:relative;z-index:3}
+.o-tr{grid-area:tr;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.o-tr .wide{grid-column:span 4;display:flex;justify-content:space-between;gap:12px;align-items:center}
+.o-bl{grid-area:bl}
+.o-br{grid-area:br}
+@media (max-width:1000px){
+  .stage{grid-template-columns:1fr;grid-template-areas:"ttl" "tr" "map" "bl" "br"}
+}
+@media (max-width:560px){.o-tr{grid-template-columns:repeat(2,minmax(0,1fr))}.o-tr .wide{grid-column:span 2}}
+.sevbar{display:flex;gap:14px;flex-wrap:wrap;margin-top:6px;font-size:12px;color:var(--muted)}
+.sevbar b{font:600 18px var(--head);color:var(--text);margin-right:3px}
+.pie{width:52px;height:52px;border-radius:50%;background:conic-gradient(var(--crit) 0 0%,var(--high) 0 11%,var(--med) 0 50%,var(--low) 0 100%);flex:none;position:relative}
+.pie::after{content:"";position:absolute;inset:13px;border-radius:50%;background:var(--panel2)}
+
+/* map svg */
+.map .edge{stroke:var(--line2);stroke-width:1.2}
+.map .edge.flow{stroke:var(--accent);stroke-dasharray:3 9;animation:dash 1.6s linear infinite;opacity:.8}
+.map .note{stroke:var(--info);stroke-width:1.6;fill:none;stroke-dasharray:5 5}
+@keyframes dash{to{stroke-dashoffset:-24}}
+.map .node rect{fill:var(--panel2);stroke:var(--line2);stroke-width:1.2}
+.map .node.work rect{stroke:var(--warn)}
+.map .node.done rect{stroke:var(--ok)}
+.map .node text{font-family:var(--head);fill:var(--text);font-size:12px;font-weight:600;letter-spacing:.06em;text-anchor:middle;text-transform:uppercase}
+.map .node .s{fill:var(--muted);font-size:10px;font-weight:500;letter-spacing:.08em}
+.map .core rect{fill:color-mix(in srgb,var(--accent) 12%,var(--panel2));stroke:var(--accent);stroke-width:1.6}
+.map .pulse{fill:none;stroke:var(--warn);animation:pulse 1.8s ease-out infinite;transform-box:fill-box;transform-origin:center}
+@keyframes pulse{from{opacity:.8;transform:scale(1)}to{opacity:0;transform:scale(1.35)}}
+.map .dot{fill:var(--accent)}
+.map .lbl2{font-family:var(--head);font-size:10px;fill:var(--muted);letter-spacing:.18em;text-transform:uppercase}
+
+/* side card (like weather) */
+.side{border:1px solid var(--line);background:var(--panel);padding:18px 18px 14px;display:flex;flex-direction:column}
+.side .big{display:flex;align-items:center;gap:14px;margin:12px 0 4px}
+.ring{width:66px;height:66px;flex:none}
+.side .row{border-top:1px solid var(--line);padding:11px 0 9px}
+.side .row .k{font-size:12px;color:var(--muted)}
+.side .row .v{font:600 19px var(--head);margin-top:2px}
+.side .row .v small{font:500 12px var(--body);color:var(--muted)}
+.side .foot{margin-top:auto;padding-top:10px;font-size:11px;color:var(--dim)}
+
+/* spark */
+.spark{width:100%;height:110px;display:block;margin-top:6px}
+.axis{display:flex;justify-content:space-between;font:500 11px var(--head);color:var(--muted);margin-top:4px}
+.lowhigh{display:flex;justify-content:space-between;font:600 11.5px var(--head);margin-top:6px}
+
+/* cost */
+.cost{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.cost .num{font:600 30px var(--head);color:var(--accent)}
+.cost .num.g{color:var(--ok)}
+.kv{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);padding:2px 0}
+.kv span:last-child{color:var(--text);font-family:var(--head);font-weight:600}
+hr.thin{border:0;border-top:1px solid var(--line);margin:8px 0}
+
+/* agents */
+.agents{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-top:16px}
+.agent .st{display:flex;justify-content:space-between;align-items:center}
+.state{font:600 10px var(--head);letter-spacing:.14em;text-transform:uppercase;padding:3px 7px;border:1px solid var(--line2);color:var(--muted)}
+.state.work{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 55%,var(--line))}
+.state.done{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 55%,var(--line))}
+.agent .act{font-size:13px;color:var(--muted);margin:8px 0 10px;min-height:38px}
+.meter{height:4px;background:var(--line);position:relative}
+.meter i{position:absolute;left:0;top:0;bottom:0;background:var(--accent)}
+.agent .meta{display:flex;justify-content:space-between;font:500 11.5px var(--head);color:var(--muted);margin-top:8px}
+.agent .meta b{color:var(--text)}
+
+/* findings */
+.two{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:22px}
+@media (max-width:1000px){.two{grid-template-columns:1fr}}
+.find{display:grid;grid-template-columns:70px minmax(0,1fr) auto;gap:14px;align-items:center;border-top:1px solid var(--line);padding:12px 0}
+.find:first-of-type{border-top:0}
+.sev{font:700 10px var(--head);letter-spacing:.14em;text-transform:uppercase;padding:4px 0;text-align:center;border:1px solid}
+.sev.high{color:var(--high);border-color:var(--high)} .sev.med{color:var(--med);border-color:var(--med)} .sev.low{color:var(--low);border-color:var(--low)}
+.find b{font:600 14.5px var(--head);letter-spacing:.02em;display:block}
+.find span{font-size:12.5px;color:var(--muted)}
+.find .id{font:600 11px var(--head);color:var(--dim)}
+
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{font:600 10px var(--head);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);text-align:left;padding:8px 8px;border-bottom:1px solid var(--line2)}
+td{padding:9px 8px;border-bottom:1px solid var(--line)}
+td.m{font-family:var(--head);color:var(--muted)}
+.tw{overflow-x:auto}
+.dotc{display:inline-block;width:7px;height:7px;margin-right:7px}
+/* appearance settings */
+.seg{display:inline-flex;border:1px solid var(--line2);margin-top:10px}
+.seg button{font:600 12px var(--head);letter-spacing:.08em;text-transform:uppercase;background:var(--panel);color:var(--muted);border:0;border-right:1px solid var(--line2);padding:11px 18px;cursor:pointer;display:flex;align-items:center;gap:8px}
+.seg button:last-child{border-right:0}
+.seg button svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6}
+.seg button[aria-pressed="true"]{background:color-mix(in srgb,var(--accent) 14%,var(--panel));color:var(--text);box-shadow:inset 0 -2px 0 var(--accent)}
+.seg button:focus-visible,.tcard:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.field{margin-top:24px}
+.field>.lbl{font:600 10.5px var(--head);letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.themes{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-top:10px}
+.tcard{all:unset;cursor:pointer;display:block;border:1px solid var(--line2);background:var(--bg);color:var(--text);position:relative;transition:border-color .15s,transform .15s}
+.tcard:hover{transform:translateY(-1px)}
+.tcard[aria-checked="true"]{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.tcard .mini{padding:12px;background:radial-gradient(ellipse at 60% 40%,var(--stage1),var(--bg) 80%);border-bottom:1px solid var(--line)}
+.tcard .mini .mp{background:var(--panel2);border:1px solid var(--line2);padding:8px 9px;position:relative}
+.tcard .mini .mp::after{content:"";position:absolute;right:6px;top:6px;width:7px;height:2px;background:var(--accent)}
+.tcard .mini .k{font:600 8.5px var(--head);letter-spacing:.14em;color:var(--accent);text-transform:uppercase}
+.tcard .mini .n{font:600 22px var(--head);line-height:1.1;margin-top:2px}
+.tcard .mini .n small{font:500 10px var(--body);color:var(--muted)}
+.tcard .mini .bar{height:3px;background:var(--line);margin-top:7px;position:relative}
+.tcard .mini .bar i{position:absolute;inset:0 40% 0 0;background:var(--accent)}
+.tcard .mini .row2{display:flex;gap:6px;margin-top:8px}
+.tcard .mini .row2 span{flex:1;height:18px;border:1px solid var(--line2);background:var(--panel)}
+.tcard .mini .row2 span:nth-child(2){border-color:color-mix(in srgb,var(--ok) 60%,var(--line2))}
+.tcard .meta2{padding:10px 12px 11px;background:var(--panel)}
+.tcard .meta2 b{font:600 14px var(--head);letter-spacing:.06em;text-transform:uppercase;display:flex;justify-content:space-between;align-items:center}
+.tcard .meta2 span{font-size:12px;color:var(--muted)}
+.sw{display:flex;gap:4px}.sw i{width:12px;height:12px;display:inline-block;border:1px solid var(--line2)}
+.tcard .meta2 .on{display:none;font:600 9.5px var(--head);letter-spacing:.14em;color:var(--on-accent);background:var(--accent);padding:2px 6px}
+.tcard[aria-checked="true"] .meta2 .on{display:inline-block}
+.saved{font-size:12px;color:var(--muted);margin-top:14px}
+.chip.mode{cursor:pointer}
+footer{margin-top:16px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+@media (max-width:760px){
+  .rail{display:flex;flex-direction:row;position:sticky;top:0;z-index:10;height:auto;width:100%;overflow-x:auto;padding:6px 10px;border-right:0;border-bottom:1px solid var(--line);justify-content:flex-start}
+  .rail .logo{margin:0 6px 0 0;flex:none}.rail .sp{display:none}.rail a{flex:none}
+}
+</style>
+</head>
+<body>
+<div class="banner">Design preview · sample data from your last scan · nothing here is live</div>
+<div class="shell">
+  <nav class="rail" aria-label="Main">
+    <div class="logo">G</div>
+    <a class="on" href="#"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Overview</a>
+    <a href="#"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="4" cy="5" r="2"/><circle cx="20" cy="5" r="2"/><circle cx="4" cy="19" r="2"/><circle cx="20" cy="19" r="2"/><path d="M6 6l4 4M18 6l-4 4M6 18l4-4M18 18l-4-4"/></svg>Agents</a>
+    <a href="#"><svg viewBox="0 0 24 24"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17v.5"/></svg>Findings</a>
+    <a href="#"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6"/><rect x="3" y="14" width="18" height="6"/><path d="M7 7h.5M7 17h.5"/></svg>Devices</a>
+    <a href="#"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>Reports</a>
+    <div class="sp"></div>
+    <a href="#"><svg viewBox="0 0 24 24"><path d="M9 7V3M15 7V3M7 7h10v5a5 5 0 01-10 0zM12 17v4"/></svg>Connect</a>
+    <a href="#appearance"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>Settings</a>
+  </nav>
+
+  <main>
+    <div class="top">
+      <div>
+        <div class="crumb"><b>//</b>Guardian / Security operations — Site-01</div>
+        <h1>Site / Overview.</h1>
+        <p class="sub">Network, devices, AI agents and findings.</p>
+      </div>
+      <div class="who">
+        <span class="chip"><i></i>Vault unlocked</span>
+        <span class="chip warn"><i></i>AI key not set</span>
+        <button class="chip mode" id="quick-mode" title="Switch light / dark">Dark</button>
+        <span class="avatar">RH</span>
+      </div>
+    </div>
+
+    <div class="tools">
+      <button class="btn">Scan only<small>~7 min · free</small></button>
+      <button class="btn primary">Scan + AI assessment<small>~30 min · ~$4–7</small></button>
+      <button class="btn">Open<small>latest report</small></button>
+      <button class="btn">Replay<small>agent map</small></button>
+    </div>
+
+    <!-- HERO -->
+    <section class="section" aria-label="Posture">
+      <div class="hero">
+        <div class="stage">
+          <div class="grid"></div>
+          <div class="ttl">
+            <div class="kicker">Guardian / your network</div>
+            <h2>Posture / Status.</h2>
+            <div class="micro">Live telemetry · run 2026-10-29 15:35</div>
+          </div>
+
+          <svg class="map" viewBox="0 0 760 520" role="img" aria-label="Orchestrator and agents">
+            <g>
+              <line class="edge" x1="380" y1="270" x2="380" y2="80"/>
+              <line class="edge flow" x1="380" y1="270" x2="600" y2="150"/>
+              <line class="edge flow" x1="380" y1="270" x2="640" y2="330"/>
+              <line class="edge flow" x1="380" y1="270" x2="510" y2="450"/>
+              <line class="edge" x1="380" y1="270" x2="250" y2="450"/>
+              <line class="edge" x1="380" y1="270" x2="120" y2="330"/>
+              <line class="edge" x1="380" y1="270" x2="160" y2="150"/>
+              <path class="note" d="M510 425 Q610 410 625 352"/>
+              <circle class="dot" r="4"><animateMotion dur="2.4s" repeatCount="indefinite" path="M380 270 L600 150"/></circle>
+              <circle class="dot" r="4" style="fill:var(--info)"><animateMotion dur="3s" repeatCount="indefinite" path="M510 425 Q610 410 625 352"/></circle>
+              <circle class="dot" r="4" style="fill:var(--warn)"><animateMotion dur="2.8s" repeatCount="indefinite" path="M640 330 L380 270"/></circle>
+            </g>
+            <g class="node core" transform="translate(380 270)"><rect x="-74" y="-30" width="148" height="60"/><text y="-2">Orchestrator</text><text class="s" y="15">assigns · relays</text></g>
+            <g class="node done" transform="translate(380 80)"><rect x="-58" y="-24" width="116" height="48"/><text y="-2">Scanner</text><text class="s" y="13">34 devices</text></g>
+            <g class="node done" transform="translate(600 150)"><rect x="-62" y="-24" width="124" height="48"/><text y="-2">Discovery</text><text class="s" y="13">29 / 34 identified</text></g>
+            <g class="node work" transform="translate(640 330)"><rect class="pulse" x="-62" y="-24" width="124" height="48"/><rect x="-62" y="-24" width="124" height="48"/><text y="-2">Network</text><text class="s" y="13">probing .18 snmp</text></g>
+            <g class="node work" transform="translate(510 450)"><rect x="-70" y="-24" width="140" height="48"/><text y="-2">OS &amp; endpoints</text><text class="s" y="13">cve lookup</text></g>
+            <g class="node" transform="translate(250 450)"><rect x="-62" y="-24" width="124" height="48"/><text y="-2">Web &amp; APIs</text><text class="s" y="13">queued</text></g>
+            <g class="node" transform="translate(120 330)"><rect x="-56" y="-24" width="112" height="48"/><text y="-2">Firmware</text><text class="s" y="13">queued</text></g>
+            <g class="node" transform="translate(160 150)"><rect x="-66" y="-24" width="132" height="48"/><text y="-2">Perimeter</text><text class="s" y="13">queued</text></g>
+            <text class="lbl2" x="560" y="402">note · os → network</text>
+          </svg>
+
+          <div class="overlay o-tr">
+            <div class="box"><div class="lbl o">Score</div><div class="val">64<small>/100</small></div><div class="note">Grade C · last AI run</div></div>
+            <div class="box"><div class="lbl">Devices</div><div class="val">34</div><div class="note">5 unidentified</div></div>
+            <div class="box"><div class="lbl v">Internet</div><div class="val">8<small>forwards</small></div><div class="note">UPnP on router</div></div>
+            <div class="box"><div class="lbl">Services</div><div class="val">31<small>open</small></div><div class="note">UDP no-reply excluded</div></div>
+            <div class="box wide">
+              <div><div class="lbl g">Findings / open</div>
+                <div class="sevbar"><span><b>0</b>crit</span><span><b>2</b>high</span><span><b>7</b>med</span><span><b>9</b>low</span></div>
+                <div class="note">18 open · 0 resolved since last run</div></div>
+              <div class="pie" aria-hidden="true"></div>
+            </div>
+          </div>
+
+
+          <div class="overlay o-bl box">
+            <div class="lbl">Findings / trend</div>
+            <div class="val">18<small>open now</small></div>
+            <svg class="spark" viewBox="0 0 300 110" preserveAspectRatio="none" aria-label="Open findings over the last 8 runs">
+              <path d="M0 30 L42 38 L84 34 L126 52 L168 48 L210 70 L252 66 L300 78" fill="none" stroke="var(--ok)" stroke-width="2"/>
+              <path d="M210 70 L252 66 L300 78" fill="none" stroke="var(--accent)" stroke-width="2"/>
+              <line x1="210" y1="0" x2="210" y2="110" stroke="var(--muted)" stroke-dasharray="2 4"/>
+              <circle cx="210" cy="70" r="3.5" fill="var(--text)"/>
+            </svg>
+            <div class="axis"><span>Aug</span><span>Sep</span><span>Oct</span><span>Now</span></div>
+            <div class="lowhigh"><span style="color:var(--ok)">Best 14</span><span style="color:var(--accent)">Worst 27</span></div>
+          </div>
+
+          <div class="overlay o-br box">
+            <div class="lbl">Run / estimated</div>
+            <div class="cost">
+              <div><div class="note">AI cost</div><div class="num">$5.40</div>
+                <hr class="thin">
+                <div class="kv"><span>Discovery</span><span>$0.71</span></div>
+                <div class="kv"><span>Specialists</span><span>$3.81</span></div>
+                <div class="kv"><span>Report</span><span>$0.82</span></div>
+                <div class="kv"><span>Cache saved</span><span>−$6.10</span></div>
+              </div>
+              <div><div class="note">Time</div><div class="num g">31<small style="font-size:13px;color:var(--muted)"> min</small></div>
+                <hr class="thin">
+                <div class="kv"><span>Rounds</span><span>103</span></div>
+                <div class="kv"><span>Checks</span><span>214</span></div>
+                <div class="kv"><span>Notes</span><span>3</span></div>
+                <div class="kv"><span>Tokens</span><span>3.3M</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <aside class="side">
+          <div class="kicker">Run / now</div>
+          <div class="big">
+            <svg class="ring" viewBox="0 0 66 66"><circle cx="33" cy="33" r="28" fill="none" stroke="var(--line2)" stroke-width="5"/><circle cx="33" cy="33" r="28" fill="none" stroke="var(--accent)" stroke-width="5" stroke-dasharray="176" stroke-dashoffset="70" transform="rotate(-90 33 33)"/></svg>
+            <div><div class="val" style="font-size:38px;margin:0">60<small>%</small></div><div class="note">Step 3 of 4 · specialists</div></div>
+          </div>
+          <div class="row"><div class="k">Agents working</div><div class="v">2 <small>of 3 slots</small></div></div>
+          <div class="row"><div class="k">Elapsed</div><div class="v">14 <small>min</small></div></div>
+          <div class="row"><div class="k">Cost so far</div><div class="v">$2.10</div></div>
+          <div class="row"><div class="k">Next scheduled</div><div class="v">Sun 02:00</div></div>
+          <div class="row"><div class="k">Vault</div><div class="v">Unlocked <small>· locks in 26 min</small></div></div>
+          <button class="btn" style="margin-top:8px">Stop run</button>
+          <div class="foot">Read-only · nothing on the network is changed</div>
+        </aside>
+      </div>
+      <footer><span class="micro">Agent links are logical · not network topology</span><span class="micro">Sampled 15:49 · Zurich</span></footer>
+    </section>
+
+    <!-- AGENTS -->
+    <section class="section">
+      <div class="kicker">Guardian / AI agents</div>
+      <h2>Agents / Live.</h2>
+      <p class="sub">Click an agent for every step it took.</p>
+      <div class="agents">
+        <div class="box agent"><div class="st"><span class="lbl">Discovery</span><span class="state done">Done</span></div><div class="act">Identified 29 of 34 devices; 5 marked unknown.</div><div class="meter"><i style="width:100%;background:var(--ok)"></i></div><div class="meta"><span><b>18</b> rounds</span><span><b>1</b> finding</span><span><b>$0.71</b></span></div></div>
+        <div class="box agent"><div class="st"><span class="lbl">Network</span><span class="state work">Working</span></div><div class="act">Checking SNMP on the printer (192.168.1.18)…</div><div class="meter"><i style="width:28%"></i></div><div class="meta"><span><b>11</b>/40 rounds</span><span><b>5</b> findings</span><span><b>$0.42</b></span></div></div>
+        <div class="box agent"><div class="st"><span class="lbl">OS &amp; endpoints</span><span class="state work">Working</span></div><div class="act">CVE lookup: OpenSSH 10.0p2 · sent a note to Network</div><div class="meter"><i style="width:40%"></i></div><div class="meta"><span><b>16</b>/40 rounds</span><span><b>4</b> findings</span><span><b>$0.62</b></span></div></div>
+        <div class="box agent"><div class="st"><span class="lbl">Web &amp; APIs</span><span class="state">Queued</span></div><div class="act">Starts when a slot frees up.</div><div class="meter"><i style="width:0"></i></div><div class="meta"><span><b>0</b> rounds</span><span>—</span><span><b>$0.00</b></span></div></div>
+      </div>
+    </section>
+
+    <!-- FINDINGS + DEVICES -->
+    <div class="two">
+      <section class="section">
+        <div class="kicker">Guardian / findings</div>
+        <h2>Fix / First.</h2>
+        <div style="margin-top:10px">
+          <div class="find"><span class="sev high">High</span><div><b>UPnP opened 8 doors in the router</b><span>Router 192.168.1.254 · Internet perimeter</span></div><span class="id">F004</span></div>
+          <div class="find"><span class="sev high">High</span><div><b>Range extender on 2015-era OpenWrt</b><span>TP-Link RE450 · 192.168.1.40 · Firmware</span></div><span class="id">F014</span></div>
+          <div class="find"><span class="sev med">Med</span><div><b>Backup NAS on its final DSM version (7.1)</b><span>RPHNAS2 · 192.168.1.102 · isolate it</span></div><span class="id">F002</span></div>
+          <div class="find"><span class="sev med">Med</span><div><b>SSH password login on the VPN server</b><span>192.168.1.80 · OS &amp; endpoints</span></div><span class="id">F009</span></div>
+          <div class="find"><span class="sev low">Low</span><div><b>Printer answers SNMPv1 "public"</b><span>192.168.1.18 · Network</span></div><span class="id">F011</span></div>
+        </div>
+      </section>
+      <section class="section">
+        <div class="kicker">Guardian / devices</div>
+        <h2>Inventory.</h2>
+        <div class="tw" style="margin-top:10px"><table>
+          <thead><tr><th>Device</th><th>Type</th><th>IP</th><th>Risk</th></tr></thead>
+          <tbody>
+            <tr><td>Router</td><td class="m">gateway</td><td class="m">.254</td><td><span class="dotc" style="background:var(--high)"></span>High</td></tr>
+            <tr><td>RPHNAS</td><td class="m">nas</td><td class="m">.101</td><td><span class="dotc" style="background:var(--med)"></span>Med</td></tr>
+            <tr><td>RPHNAS2</td><td class="m">nas</td><td class="m">.102</td><td><span class="dotc" style="background:var(--med)"></span>Med</td></tr>
+            <tr><td>Proxmox lab</td><td class="m">hypervisor</td><td class="m">.252</td><td><span class="dotc" style="background:var(--ok)"></span>OK</td></tr>
+            <tr><td>VPN server</td><td class="m">server</td><td class="m">.80</td><td><span class="dotc" style="background:var(--med)"></span>Med</td></tr>
+            <tr><td>RE450</td><td class="m">extender</td><td class="m">.40</td><td><span class="dotc" style="background:var(--high)"></span>High</td></tr>
+          </tbody></table></div>
+        <div class="micro" style="margin-top:12px">34 devices · showing 6</div>
+      </section>
+    </div>
+    <!-- SETTINGS / APPEARANCE -->
+    <section class="section" id="appearance">
+      <div class="kicker">Guardian / settings</div>
+      <h2>Appearance / Theme.</h2>
+      <p class="sub">Saved to your account, so it follows you to every device you sign in on.</p>
+
+      <div class="field">
+        <div class="lbl">Mode</div>
+        <div class="seg" role="group" aria-label="Mode">
+          <button data-mode="light" aria-pressed="false"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>Light</button>
+          <button data-mode="dark" aria-pressed="true"><svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 019.5 4a8 8 0 1010.5 10.5z"/></svg>Dark</button>
+          <button data-mode="system" aria-pressed="false"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12"/><path d="M8 20h8M12 16v4"/></svg>System</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="lbl">Colour</div>
+        <div class="themes" id="themes" role="radiogroup" aria-label="Colour theme"></div>
+      </div>
+      <p class="saved" id="saved">Ember · Dark</p>
+    </section>
+  </main>
+</div>
+<script>
+const THEMES = [
+  ["ember", "Ember", "Orange and sage on olive charcoal. The default."],
+  ["arctic", "Arctic", "Ice blue and mint on blue graphite."],
+  ["volt", "Volt", "Signal lime on near-black. High contrast."],
+  ["crimson", "Crimson", "Red and sand on warm charcoal."],
+  ["mono", "Mono", "Pure black and white. Colour only for severity."],
+];
+const root = document.documentElement;
+const store = {get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } },
+               set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} }};
+const mq = matchMedia("(prefers-color-scheme: dark)");
+let mode = store.get("g-mode") || "dark", theme = store.get("g-theme") || "ember";
+const scheme = () => mode === "system" ? (mq.matches ? "dark" : "light") : mode;
+
+function apply() {
+  root.dataset.theme = theme; root.dataset.scheme = scheme();
+  document.querySelectorAll(".seg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.mode === mode));
+  document.querySelectorAll(".tcard").forEach(c => { c.dataset.scheme = scheme(); c.setAttribute("aria-checked", c.dataset.theme === theme); c.tabIndex = c.dataset.theme === theme ? 0 : -1; });
+  const t = THEMES.find(x => x[0] === theme);
+  document.getElementById("saved").textContent = `${t[1]} · ${mode === "system" ? "Follows system (now " + scheme() + ")" : mode[0].toUpperCase() + mode.slice(1)}`;
+  document.getElementById("quick-mode").textContent = scheme() === "dark" ? "Dark" : "Light";
+  store.set("g-mode", mode); store.set("g-theme", theme);
+}
+const box = document.getElementById("themes");
+for (const [id, name, desc] of THEMES) {
+  const c = document.createElement("button");
+  c.className = "tcard"; c.dataset.theme = id; c.setAttribute("role", "radio");
+  c.innerHTML = `<div class="mini"><div class="mp"><div class="k">Score</div><div class="n">64 <small>/ 100</small></div><div class="bar"><i></i></div></div><div class="row2"><span></span><span></span><span></span></div></div>
+    <div class="meta2"><b>${name}<span class="on">Active</span></b><span>${desc}</span></div>`;
+  c.addEventListener("click", () => { theme = id; apply(); });
+  box.append(c);
+}
+box.addEventListener("keydown", e => {
+  if (!["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"].includes(e.key)) return;
+  e.preventDefault();
+  const i = THEMES.findIndex(x => x[0] === theme), d = ["ArrowRight", "ArrowDown"].includes(e.key) ? 1 : -1;
+  theme = THEMES[(i + d + THEMES.length) % THEMES.length][0]; apply(); box.querySelector(`[data-theme="${theme}"]`).focus();
+});
+document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => { mode = b.dataset.mode; apply(); }));
+document.getElementById("quick-mode").addEventListener("click", () => { mode = scheme() === "dark" ? "light" : "dark"; apply(); });
+mq.addEventListener("change", () => mode === "system" && apply());
+apply();
+</script>
+</body>
+</html>

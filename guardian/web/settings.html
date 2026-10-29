@@ -1,21 +1,35 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="ember" data-scheme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Guardian Settings</title>
+<script src="/theme.js"></script>
 <link rel="stylesheet" href="/console.css">
 <script src="/passkey.js" defer></script>
 <script src="/settings.js" defer></script>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <div class="brand"><span class="dot"></span>AI IT Guardian <span class="meta">· settings</span></div>
-    <div class="row"><span class="vchip" id="vault-chip"></span><button class="btn sm hidden" id="unlock">Unlock</button>
-      <a class="btn" href="/">← Back to console</a><button class="btn sm" id="theme">Theme</button>
+<div class="shell">
+  <nav class="rail" aria-label="Main">
+    <a class="logo" href="/" aria-label="Guardian home">G</a>
+    <a class="ri" href="/"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Overview</a>
+    <a class="ri" href="/#workspace"><svg viewBox="0 0 24 24"><path d="M5 3h14v18H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>Report</a>
+    <div class="sp"></div>
+    <a class="ri on" href="/settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>Settings</a>
+    <a class="ri" href="#appearance"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4v16a8 8 0 000-16z" fill="currentColor"/></svg>Theme</a>
+  </nav>
+<main class="page">
+  <div class="topbar">
+    <div>
+      <div class="crumb"><b>//</b>Guardian / Configuration</div>
+      <div class="ptitle">Settings.</div>
+      <p class="sub">Connectors, people, security, AI agents and appearance.</p>
+    </div>
+    <div class="who"><span class="vchip" id="vault-chip"></span><button class="btn sm hidden" id="unlock">Unlock</button>
+      <button class="chip" id="mode-toggle">Dark</button>
       <span class="meta" id="me"></span><button class="btn sm" id="signout">Sign out</button></div>
-  </header>
+  </div>
 
   <div class="slayout">
     <nav class="card snav" id="nav">
@@ -26,9 +40,10 @@
       <a href="#ai" data-s="ai" class="admin-only">AI agents</a>
       <a href="#scope" data-s="scope">Scan scope</a>
       <a href="#schedules" data-s="schedules">Schedules &amp; alerts</a>
+      <a href="#appearance" data-s="appearance">Appearance</a>
     </nav>
 
-    <main>
+    <div class="scontent">
       <!-- Connectors -->
       <section class="stack" id="s-connectors">
         <div>
@@ -160,12 +175,27 @@
         <div><h1>Scan scope</h1><p class="lede">Choose which networks and addresses Guardian scans, and which to leave out.</p></div>
         <div class="card"><span class="tag">Planned</span><p class="note">Today Guardian scans the network of its own interface (192.168.1.0/24).</p></div>
       </section>
+      <section class="stack hidden" id="s-appearance">
+        <div><h1>Appearance</h1><p class="lede">Saved to your account, so it follows you to every device you sign in on.</p></div>
+        <div class="card mark">
+          <h2>Mode</h2>
+          <div class="seg" role="group" aria-label="Mode">
+            <button type="button" data-mode="light" aria-pressed="false"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>Light</button>
+            <button type="button" data-mode="dark" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 019.5 4a8 8 0 1010.5 10.5z"/></svg>Dark</button>
+            <button type="button" data-mode="system" aria-pressed="false"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12"/><path d="M8 20h8M12 16v4"/></svg>System</button>
+          </div>
+          <h2 class="gap">Colour</h2>
+          <div class="themes" id="themes" role="radiogroup" aria-label="Colour theme"></div>
+          <p class="note" id="theme-saved"></p>
+        </div>
+      </section>
       <section class="stack hidden" id="s-schedules">
         <div><h1>Schedules &amp; alerts</h1><p class="lede">Run scans automatically and get told when something changes.</p></div>
         <div class="card"><span class="tag">Planned</span><p class="note">Scans run when you start them from the console.</p></div>
       </section>
-    </main>
+    </div>
   </div>
+</main>
 </div>
 
 <div class="scrim" id="scrim"></div>
