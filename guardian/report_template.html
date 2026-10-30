@@ -113,6 +113,18 @@ footer{margin-top:24px;color:var(--muted);font-size:12px;text-align:center}
     <div class="actions"><ol id="actions"></ol></div>
   </section>
 
+  <section class="card" id="paths-card" hidden>
+    <h2>Attack paths</h2>
+    <p class="muted">How an attacker could chain these findings to reach what matters most. Reasoned from the evidence; nothing was exploited.</p>
+    <div id="paths"></div>
+  </section>
+
+  <section class="card" id="comp-card" hidden>
+    <h2>Compliance</h2>
+    <p class="muted">"Not assessed" means a technical assessment can't see it (policies, training, physical security). Gaps are listed with the findings behind them.</p>
+    <div id="comp"></div>
+  </section>
+
   <section class="card">
     <h2>By layer</h2>
     <div class="grid layers" id="layers"></div>
@@ -154,6 +166,7 @@ footer{margin-top:24px;color:var(--muted);font-size:12px;text-align:center}
 <script>
 const D = /*__DATA__*/null;
 const SEV = ["critical","high","medium","low","info"];
+const PRI = f => (f.risk && f.risk.priority) || ({critical:1,high:2,medium:3}[f.severity] || 4);
 const LAYER_NAMES = {discovery:"Discovery",network:"Network",os:"OS & endpoints",web:"Web & APIs",firmware:"Firmware",wan:"Internet perimeter"};
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const $ = id => document.getElementById(id);
@@ -208,12 +221,13 @@ function init(){
   function drawFindings(){
     const q = $("q").value.toLowerCase();
     const list = F.filter(f=>sevF.has(f.severity) && layF.has(f.layer) && (!q || JSON.stringify(f).toLowerCase().includes(q) || JSON.stringify(A[f.asset]||{}).toLowerCase().includes(q)))
-      .sort((a,b)=>SEV.indexOf(a.severity)-SEV.indexOf(b.severity));
+      .sort((a,b)=>PRI(a)-PRI(b) || SEV.indexOf(a.severity)-SEV.indexOf(b.severity));
     $("fcount").textContent = `${list.length} of ${F.length}`;
     $("findings").innerHTML = list.map(f=>{
       const a = A[f.asset]; const who = a ? `${f.asset} · ${a.device_type||""} ${a.vendor||a.mac_vendor||""} ${a.model||""}` : f.asset;
-      return `<details class="finding" id="${f.id}"><summary><span class="badge b-${f.severity}">${f.severity}</span><span class="ft">${esc(f.title)}</span><span class="fa">${esc(who)}</span></summary>
+      return `<details class="finding" id="${f.id}"><summary>${f.risk?`<span class="badge b-${["","critical","high","medium","low"][f.risk.priority]}">P${f.risk.priority}</span>`:""}<span class="badge b-${f.severity}">${f.severity}</span><span class="ft">${esc(f.title)}</span><span class="fa">${esc(who)}</span></summary>
       <dl class="fd"><dt>ID</dt><dd>${esc(f.id)} · ${esc(LAYER_NAMES[f.layer]||f.layer)} · ${esc(f.confidence)}</dd>
+      ${f.risk?`<dt>Priority</dt><dd>P${f.risk.priority}${f.risk.kev?" · actively exploited (CISA KEV)":""}${f.risk.ransomware?" · used by ransomware":""}${f.risk.epss!=null?` · EPSS ${(f.risk.epss*100).toFixed(1)}%`:""} · ${esc(f.risk.reason)}</dd>`:""}
       <dt>Impact</dt><dd>${esc(f.impact)}</dd><dt>Fix</dt><dd>${esc(f.recommendation)}</dd>
       <dt>Evidence</dt><dd class="mono">${esc(f.evidence)}</dd>
       ${(f.references||[]).length?`<dt>References</dt><dd>${f.references.map(esc).join("<br>")}</dd>`:""}</dl></details>`}).join("") || `<p class="muted">No findings match.</p>`;
@@ -232,6 +246,21 @@ function init(){
       <td>${esc(a.os||a.os_guess||"")}<br><span class="muted">${esc(a.firmware_version?("fw "+a.firmware_version):"")}</span></td>
       <td class="mono">${esc(svcs.slice(0,6).join(", "))}${svcs.length>6?` <span class="muted">+${svcs.length-6}</span>`:""}</td>
       <td><div class="dots">${fs.sort((x,y)=>SEV.indexOf(x.severity)-SEV.indexOf(y.severity)).map(f=>`<i title="${esc(f.title)}" style="background:var(--${{critical:"crit",high:"high",medium:"med",low:"low",info:"info"}[f.severity]})"></i>`).join("")}</div></td></tr>`}).join("");
+
+  const P = D.attack_paths || [];
+  if (P.length) {
+    $("paths-card").hidden = false;
+    $("paths").innerHTML = P.map(p=>`<details class="finding"><summary><span class="badge b-${p.likelihood==="high"?"critical":p.likelihood==="medium"?"medium":"low"}">${esc(p.likelihood)}</span><span class="ft">${esc(p.title)}</span><span class="fa">→ ${esc(p.target)}</span></summary>
+      <dl class="fd">${p.steps.map((st,i)=>`<dt>${i+1}. ${esc(st.stage)}</dt><dd>${esc(st.text)}${st.finding?` <a href="#${esc(st.finding)}">${esc(st.finding)}</a>`:""}</dd>`).join("")}
+      ${(p.choke_points||[]).length?`<dt>Choke points</dt><dd>${p.choke_points.map(c=>esc(c.fix)+(c.finding?` (${esc(c.finding)})`:"")).join("<br>")}</dd>`:""}
+      <dt>Summary</dt><dd>${esc(p.summary)}</dd></dl></details>`).join("");
+  }
+  const C = D.compliance || [];
+  if (C.length) {
+    $("comp-card").hidden = false;
+    $("comp").innerHTML = C.map(c=>`<details class="finding"><summary><span class="ft">${esc(c.title)}</span><span class="fa">${c.counts.met} met · ${c.counts.partial} partly · ${c.counts.gap} gaps · ${c.counts.not_assessed} not assessed</span></summary>
+      <dl class="fd">${c.gaps.map(g=>`<dt>${esc(g.id)}</dt><dd><b>${esc(g.title)}</b><br>${esc(g.note)}${g.findings.length?` <span class="muted">(${g.findings.map(esc).join(", ")})</span>`:""}</dd>`).join("")||"<dd>No gaps found.</dd>"}</dl></details>`).join("");
+  }
 
   const w = D.wan || {}, idb = w.internetdb || {};
   $("wan").innerHTML = `<table><tr><th>Public IP</th><td class="mono">${esc(w.public_ip||"–")}</td></tr>

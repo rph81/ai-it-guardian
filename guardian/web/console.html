@@ -9,6 +9,7 @@
 <script src="/passkey.js" defer></script>
 <script src="/console.js" defer></script>
 <script src="/agents.js" defer></script>
+<script src="/plan.js" defer></script>
 </head>
 <body>
 <div class="shell">
@@ -17,6 +18,9 @@
     <button class="ri on" data-go="overview"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Overview</button>
     <button class="ri" data-go="agents"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7"/><rect x="13" y="13" width="7" height="7"/><path d="M11 7.5h5.5V13M13 16.5H7.5V11"/></svg>Agents</button>
     <button class="ri" data-go="map"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="4" cy="5" r="2"/><circle cx="20" cy="5" r="2"/><circle cx="4" cy="19" r="2"/><circle cx="20" cy="19" r="2"/><path d="M6 6l4 4M18 6l-4 4M6 18l4-4M18 18l-4-4"/></svg>Map</button>
+    <button class="ri" data-go="plan"><svg viewBox="0 0 24 24"><path d="M9 5h11M9 12h11M9 19h11"/><path d="M4 5l1 1 2-2M4 12l1 1 2-2M4 19l1 1 2-2"/></svg>Plan</button>
+    <button class="ri" data-go="paths"><svg viewBox="0 0 24 24"><circle cx="5" cy="18" r="2"/><circle cx="12" cy="7" r="2"/><circle cx="19" cy="16" r="2"/><path d="M6.5 16.5l4.3-7.8M13.5 8.5l4.4 5.8"/></svg>Paths</button>
+    <button class="ri" data-go="comp"><svg viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg>Comply</button>
     <button class="ri" data-go="report"><svg viewBox="0 0 24 24"><path d="M5 3h14v18H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>Report</button>
     <button class="ri" data-go="log"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="M7 9l3 3-3 3M12 15h5"/></svg>Log</button>
     <a class="ri op-only" href="/fix"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 00-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 005.4-5.4l-2.5 2.5-2.5-.5-.5-2.5z"/></svg>Fix</a>
@@ -70,6 +74,7 @@
             <h2 class="stitle" id="posture-title">Posture / Status.</h2>
             <div class="micro" id="o-run">No run selected</div>
             <p class="note" id="o-headline"></p>
+            <p class="note" id="o-changes"></p>
           </div>
           <div class="kpis">
             <div class="box"><div class="lbl o">Score</div><div class="val" id="k-score">—</div><div class="note" id="k-grade">No AI run yet</div></div>
@@ -139,7 +144,7 @@
       <div class="kicker">Guardian / workspace</div>
       <h2 class="stitle" id="ws-title">Run / Detail.</h2>
       <div class="tabs">
-        <div class="row"><button class="tab on" data-t="report">Report</button><button class="tab" data-t="agents">Agents</button><button class="tab" data-t="map">Map &amp; chat</button><button class="tab" data-t="log">Live log</button></div>
+        <div class="row"><button class="tab on" data-t="report">Report</button><button class="tab" data-t="plan">Fix plan</button><button class="tab" data-t="paths">Attack paths</button><button class="tab" data-t="comp">Compliance</button><button class="tab" data-t="agents">Agents</button><button class="tab" data-t="map">Map &amp; chat</button><button class="tab" data-t="log">Live log</button></div>
         <span class="row"><span class="meta mono" id="current"></span><a class="btn sm hidden" id="newtab" target="_blank" rel="noopener">Open in new tab</a></span>
       </div>
       <div class="panel" id="p-report"><iframe id="frame" sandbox="allow-scripts" title="Report"></iframe>
@@ -179,6 +184,25 @@
           <div class="msgs" id="c-msgs"></div>
           <div class="compose"><input id="c-input" maxlength="2000" placeholder="Ask the Orchestrator…" aria-label="Message to the Orchestrator"><button class="btn primary" id="c-send">Send</button></div>
         </div>
+      </div>
+      <div class="panel scroll hidden" id="p-plan">
+        <div class="cardhead"><h2>Fix / Plan</h2><span class="meta" id="pl-meta"></span></div>
+        <p class="note">Every open finding, ranked by the Risk analyst by how likely it is to be used against you (actively exploited, chance of exploitation, internet exposure, how important the device is). Give each an owner; the due date comes from the priority. "Re-check" sends one finding back to the agent that found it.</p>
+        <div class="row mt16" id="pl-filter"></div>
+        <div id="pl-rows"></div>
+      </div>
+      <div class="panel scroll hidden" id="p-paths">
+        <div class="cardhead"><h2>Attack / Paths</h2><span class="meta" id="ap-meta"></span></div>
+        <p class="note">How an attacker could chain what Guardian found to reach what matters most. Reasoned from the evidence; nothing was exploited. Choke points are the fixes that break a path.</p>
+        <div id="ap-list"></div>
+      </div>
+      <div class="panel scroll hidden" id="p-comp">
+        <div class="cardhead"><h2>Compliance / Map</h2><span class="meta" id="co-meta"></span></div>
+        <p class="note">What this assessment shows for each control. "Not assessed" means a technical assessment can't see it (policies, training, physical security): it isn't a gap, it needs your own evidence.</p>
+        <div class="row mt16" id="co-tabs"></div>
+        <div class="co-bar" id="co-bar"></div>
+        <div class="row mt16" id="co-filter"></div>
+        <div id="co-list"></div>
       </div>
       <div class="panel console hidden" id="p-log"></div>
     </section>

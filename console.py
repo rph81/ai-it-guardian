@@ -35,8 +35,12 @@ from pydantic import BaseModel
 from guardian import auth
 from guardian import chat
 from guardian import remediate
+from guardian import notify
 from guardian import connectors as conn
-from guardian.agents import LAYERS
+from guardian.agents import ANALYSTS, LAYERS
+from guardian.controls import FRAMEWORKS, STATUSES as CONTROL_STATUSES
+from guardian.graph import is_open
+from guardian.tools import PRIORITY_DAYS
 from guardian.vault import ROLES, VAULT_ROLES, Vault, VaultLocked
 
 BASE = Path(__file__).resolve().parent
@@ -59,11 +63,11 @@ MAX_FAILS, FAIL_WINDOW = 5, 900
 MODES = {
     "collect": {"label": "Scan only", "args": ["--collect-only"], "steps": ["Scanning the network"]},
     "full": {"label": "Scan + AI assessment", "args": [],
-             "steps": ["Scanning the network", "Identifying devices", "AI specialists", "Writing the report"]},
+             "steps": ["Scanning the network", "Identifying devices", "AI specialists", "Analysts", "Writing the report"]},
     "resume": {"label": "Re-run AI on a scan", "args": ["--resume"],
-               "steps": ["Identifying devices", "AI specialists", "Writing the report"]},
+               "steps": ["Identifying devices", "AI specialists", "Analysts", "Writing the report"]},
     "report": {"label": "Rebuild report", "args": ["--report"], "steps": ["Rebuilding the report"]},
-    "followup": {"label": "Follow-up from the chat", "args": ["--followup"], "steps": ["AI specialists", "Writing the report"]},
+    "followup": {"label": "Follow-up from the chat", "args": ["--followup"], "steps": ["AI specialists", "Analysts", "Writing the report"]},
 }
 ROUNDS, PARALLELS = (20, 40, 60), tuple(range(1, 13))
 SCALE_MODES = ("auto", "manual")
@@ -76,7 +80,8 @@ def parse_scale(text):
         if len(p) == 4 and p[0] in LAYERS and all(x.isdigit() for x in p[1:]):
             out[p[0]] = {"min": int(p[1]), "max": int(p[2]), "manual": int(p[3])}
     return out
-STEP_OF_AGENT = {"collector": "Scanning the network", "discovery": "Identifying devices", "report": "Writing the report"}
+STEP_OF_AGENT = {"collector": "Scanning the network", "discovery": "Identifying devices", "report": "Writing the report",
+                 **{a: "Analysts" for a in ANALYSTS}}
 
 
 def harden_process():
@@ -175,8 +180,8 @@ def public_config():
             "scale_mode": env.get("GUARDIAN_SCALE_MODE") if env.get("GUARDIAN_SCALE_MODE") in SCALE_MODES else "auto",
             "per_copy": int(env.get("GUARDIAN_PER_COPY") or 25),
             "scale": {k: parse_scale(env.get("GUARDIAN_SCALE")).get(k, {"min": 1, "max": 1 if k == "wan" else 8, "manual": 1})
-                      for k in LAYERS},
-            "agents": {k: v["title"] for k, v in LAYERS.items()},
+                      for k in LAYERS if k not in ANALYSTS},
+            "agents": {k: v["title"] for k, v in LAYERS.items()}, "analysts": ANALYSTS,
             "anthropic_key_set": bool(keys.get("anthropic")), "nvd_key_set": bool(keys.get("nvd")),
             "models": MODELS, "efforts": EFFORTS, "rounds": ROUNDS, "parallels": PARALLELS}
 
@@ -321,6 +326,7 @@ class Job:
         self.stopped = False
         self.step = None
         self.by = None
+        self.note = None                       # e.g. why a scheduled AI run fell back to a scan
         self.lines = collections.deque(maxlen=3000)
         self.seq = 0                           # number of lines ever written, for incremental reads
 
@@ -332,7 +338,7 @@ class Job:
         self.seq += 1
         self.lines.append((self.seq, time.strftime("%H:%M:%S"), text))
         m = re.match(r"^\[(\w+)\]", text)
-        if m and m.group(1) != "console" and self.mode in ("full", "resume"):
+        if m and m.group(1) != "console" and self.mode in ("full", "resume", "followup"):
             self.step = STEP_OF_AGENT.get(m.group(1), "AI specialists")
         if self.mode in ("full", "collect") and not self.run_id:
             m = re.search(r"runs/(\d{8}-\d{6})", text)
@@ -365,6 +371,11 @@ async def run_job(cmd, extra_env):
         job.exit_code = -1
     job.ended = time.time()
     job.add("[console] stopped by user" if job.stopped else f"[console] finished, exit code {job.exit_code}")
+    if not job.stopped and job.exit_code == 0 and job.run_id and job.mode in ("collect", "full", "resume", "followup"):
+        try:
+            await asyncio.to_thread(after_run, job.run_id, job.mode, job.note)
+        except Exception as e:                                      # noqa: BLE001 - never breaks the job record
+            job.add(f"[console] after-run steps failed: {e}")
 
 
 # -- run listing --------------------------------------------------------------------------------
@@ -381,7 +392,7 @@ def run_summary(d):
             info["has_agents"] = bool(g.get("agents"))
             info["analysed"] = bool(s)
             for f in g.get("findings") or []:
-                if f.get("status") == "resolved":
+                if not is_open(f):
                     continue
                 sev = f.get("severity", "info")
                 info["counts"][sev] = info["counts"].get(sev, 0) + 1
@@ -421,7 +432,8 @@ REPORT_CSP = ("sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inl
 STATIC = {"/console.css": ("console.css", "text/css"), "/theme.js": ("theme.js", "text/javascript"), "/console.js": ("console.js", "text/javascript"),
           "/settings.js": ("settings.js", "text/javascript"), "/signin.js": ("signin.js", "text/javascript"),
           "/passkey.js": ("passkey.js", "text/javascript"), "/agents.js": ("agents.js", "text/javascript"),
-          "/remediate.js": ("remediate.js", "text/javascript"), "/code.js": ("code.js", "text/javascript")}
+          "/remediate.js": ("remediate.js", "text/javascript"), "/code.js": ("code.js", "text/javascript"),
+          "/plan.js": ("plan.js", "text/javascript"), "/schedule.js": ("schedule.js", "text/javascript")}
 PAGES = {"/": "console.html", "/settings": "settings.html", "/signin": "signin.html"}
 
 
@@ -430,6 +442,7 @@ async def _startup():
     harden_process()
     setup_code()
     asyncio.create_task(autolock_loop())
+    asyncio.create_task(scheduler_loop())
 
 
 @app.middleware("http")
@@ -883,6 +896,417 @@ def my_prefs(body: Prefs, request: Request):
     return {"ok": True}
 
 
+# -- remediation tracking: owner, due date, status per finding; kept beside the run, written only by the console ----
+TRACK_STATUSES = ("open", "in_progress", "fixed", "accepted")
+SEV_PRIORITY = {"critical": 1, "high": 2, "medium": 3}
+
+
+def priority_of(f):
+    """The Risk analyst's priority, or one derived from severity when it hasn't ranked the finding."""
+    return (f.get("risk") or {}).get("priority") or SEV_PRIORITY.get(f.get("severity"), 4)
+
+
+def _tracking(d):
+    try:
+        return json.loads((d / "tracking.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_tracking(d, data):
+    tmp = d / "tracking.json.tmp"
+    tmp.write_text(json.dumps(data, indent=1))
+    os.replace(tmp, d / "tracking.json")
+
+
+def carry_tracking(run_id):
+    """Copy owner, due date and status from the previous assessment onto findings the Risk analyst linked to it."""
+    d = run_dir(run_id)
+    g = _read_graph(d)
+    own = _tracking(d)
+    prev_cache = {}
+    changed = False
+    for f in g.get("findings") or []:
+        link = f.get("previous")
+        if not link or f["id"] in own or not RUN_ID.match(link.get("run", "")):
+            continue
+        if link["run"] not in prev_cache:
+            prev_cache[link["run"]] = _tracking(RUNS / link["run"]) if (RUNS / link["run"]).is_dir() else {}
+        old = prev_cache[link["run"]].get(link["id"])
+        if old:
+            own[f["id"]] = {**old, "carried_from": f"{link['run']}/{link['id']}"}
+            changed = True
+    if changed:
+        _save_tracking(d, own)
+
+
+def tracking_rows(d, g):
+    own = _tracking(d)
+    started = g.get("started") or ""
+    rows = []
+    for f in g.get("findings") or []:
+        if f.get("status") == "duplicate":
+            continue
+        t = own.get(f["id"], {})
+        pr = priority_of(f)
+        first = (f.get("first_seen") or started)[:10]
+        try:
+            due_default = time.strftime("%Y-%m-%d", time.localtime(time.mktime(time.strptime(first, "%Y-%m-%d")) + PRIORITY_DAYS[pr] * 86400))
+        except ValueError:
+            due_default = None
+        due = t.get("due") or due_default
+        verified = f.get("status") == "resolved"
+        status = "verified" if verified else t.get("status", "open")
+        r = f.get("risk") or {}
+        rows.append({"id": f["id"], "title": f.get("title"), "asset": f.get("asset"), "layer": f.get("layer"),
+                     "severity": f.get("severity"), "priority": pr, "ranked": bool(r), "reason": r.get("reason"),
+                     "kev": r.get("kev"), "ransomware": r.get("ransomware"), "epss": r.get("epss"), "exposure": r.get("exposure"),
+                     "recommendation": f.get("recommendation"), "first_seen": first, "due": due,
+                     "overdue": bool(due and not verified and status not in ("fixed", "accepted") and due < time.strftime("%Y-%m-%d")),
+                     "owner": t.get("owner", ""), "status": status, "note": t.get("note", ""), "updated_by": t.get("updated_by"),
+                     "recheck": t.get("recheck"), "carried_from": t.get("carried_from")})
+    rows.sort(key=lambda r: (r["status"] == "verified", r["priority"], SEV_ORDER.index(r["severity"] or "info"), r["id"]))
+    return rows
+
+
+@app.get("/api/runs/{run_id}/tracking")
+def run_tracking(run_id: str, request: Request):
+    require(request)
+    d = run_dir(run_id)
+    g = _read_graph(d)
+    rows = tracking_rows(d, g)
+    return {"rows": rows, "ranked": any(r["ranked"] for r in rows), "sla": PRIORITY_DAYS,
+            "counts": {"open": sum(1 for r in rows if r["status"] in ("open", "in_progress")),
+                       "overdue": sum(1 for r in rows if r["overdue"]), "verified": sum(1 for r in rows if r["status"] == "verified")}}
+
+
+class TrackBody(BaseModel):
+    owner: Optional[str] = None
+    due: Optional[str] = None
+    status: Optional[str] = None
+    note: Optional[str] = None
+
+
+@app.post("/api/runs/{run_id}/tracking/{fid}")
+def run_tracking_set(run_id: str, fid: str, body: TrackBody, request: Request):
+    sid, s, user = require(request, "operator")
+    d = run_dir(run_id)
+    if not any(f["id"] == fid for f in _read_graph(d).get("findings") or []):
+        raise HTTPException(404, "No such finding")
+    if body.status is not None and body.status not in TRACK_STATUSES:
+        raise HTTPException(400, "Unknown status")
+    if body.due and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", body.due):
+        raise HTTPException(400, "Due date must be YYYY-MM-DD")
+    data = _tracking(d)
+    t = data.setdefault(fid, {})
+    for k in ("owner", "due", "status", "note"):
+        v = getattr(body, k)
+        if v is not None:
+            t[k] = v.strip()[:300 if k == "note" else 80]
+    t.update(updated_by=user["name"], updated=time.time())
+    _save_tracking(d, data)
+    vault.audit(user["email"], "finding-tracked", f"{run_id} {fid}: " + ", ".join(f"{k}={getattr(body, k)}" for k in ("owner", "due", "status") if getattr(body, k) is not None))
+    return {"ok": True}
+
+
+@app.post("/api/runs/{run_id}/findings/{fid}/recheck")
+async def run_recheck(run_id: str, fid: str, request: Request):
+    """Send one finding back to the agent that found it; it re-checks read-only and marks it resolved if it's gone."""
+    sid, s, user = require(request, "operator")
+    d = run_dir(run_id)
+    f = next((x for x in _read_graph(d).get("findings") or [] if x["id"] == fid), None)
+    if not f:
+        raise HTTPException(404, "No such finding")
+    layer = f.get("layer")
+    if layer not in LAYERS or layer in ANALYSTS or layer == "discovery":
+        raise HTTPException(400, "This finding can't be re-checked automatically")
+    if job.running:
+        raise HTTPException(409, "A run is already in progress")
+    order = {"agent": layer, "id": "RC-" + secrets.token_hex(3),
+             "instruction": f"Re-check finding {fid} \"{f.get('title')}\" on {f.get('asset')}. Repeat the read-only checks "
+                            f"that found it. If the issue is gone, call update_finding with status resolved and quote what you "
+                            f"observed; if it is still there, call update_finding with status open and the new evidence."}
+    status = launch("followup", run_id, sid, user, inbox=order)
+    data = _tracking(d)
+    data.setdefault(fid, {})["recheck"] = {"by": user["name"], "at": time.time()}
+    _save_tracking(d, data)
+    vault.audit(user["email"], "finding-recheck", f"{run_id} {fid} by {layer}")
+    return status
+
+
+# -- attack paths and compliance from the analyst agents ---------------------------------------------------
+@app.get("/api/runs/{run_id}/paths")
+def run_paths(run_id: str, request: Request):
+    require(request)
+    g = _read_graph(run_dir(run_id))
+    titles = {f["id"]: {"title": f.get("title"), "severity": f.get("severity"), "priority": priority_of(f), "asset": f.get("asset")}
+              for f in g.get("findings") or []}
+    return {"paths": g.get("attack_paths") or [], "findings": titles, "analysed": "paths" in (g.get("agents") or {})}
+
+
+@app.get("/api/runs/{run_id}/compliance")
+def run_compliance(run_id: str, request: Request):
+    require(request)
+    g = _read_graph(run_dir(run_id))
+    done = g.get("compliance") or {}
+    titles = {f["id"]: f.get("title") for f in g.get("findings") or []}
+    out = {}
+    for key, fw in FRAMEWORKS.items():
+        got = done.get(key, {})
+        controls = [{"id": c, "title": t, **got.get(c, {"status": "not_assessed", "findings": [], "note": "Not mapped by the Compliance agent."})}
+                    for c, t in fw["controls"]]
+        out[key] = {"title": fw["title"], "controls": controls, "mapped": bool(got),
+                    "counts": {st: sum(1 for c in controls if c["status"] == st) for st in CONTROL_STATUSES}}
+    return {"frameworks": out, "findings": titles, "analysed": "compliance" in (g.get("agents") or {})}
+
+
+# -- schedules, unattended AI runs and alerts -----------------------------------------------------------
+UNATTENDED = STATE / "unattended.key"
+EVERY = {"quick": ("off", "daily", "weekly"), "full": ("off", "weekly", "monthly")}
+DEFAULT_SCHEDULE = {"quick": {"every": "off", "time": "02:00", "day": 0, "mday": 1},
+                    "full": {"every": "off", "time": "03:00", "day": 6, "mday": 1}}
+DEFAULT_NOTIFY = {"threshold": "p2", "changes": True, "email": {"on": False, "host": "", "port": 587, "username": "",
+                  "sender": "", "to": []}, "teams": {"on": False}, "slack": {"on": False}, "webhook": {"on": False}}
+SECRET_FIELDS = {"email": "password", "teams": "url", "slack": "url", "webhook": "url"}
+
+
+def schedule_cfg():
+    cfg = vault.get("schedule", {})
+    return {k: {**DEFAULT_SCHEDULE[k], **cfg.get(k, {})} for k in DEFAULT_SCHEDULE} | {"last": cfg.get("last", {})}
+
+
+def notify_cfg():
+    cfg = vault.get("notify", {})
+    return {**DEFAULT_NOTIFY, **cfg, **{k: {**DEFAULT_NOTIFY[k], **cfg.get(k, {})} for k in ("email", "teams", "slack", "webhook")}}
+
+
+def _target(c, now):
+    """Today's scheduled time for this entry, or None when it doesn't fall on today."""
+    lt = time.localtime(now)
+    if c["every"] == "off" or (c["every"] == "weekly" and lt.tm_wday != int(c["day"])) or \
+            (c["every"] == "monthly" and lt.tm_mday != int(c["mday"])):
+        return None
+    hh, mm = map(int, c["time"].split(":"))
+    return time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, hh, mm, 0, 0, 0, -1))
+
+
+def next_runs(cfg, now=None):
+    now = now or time.time()
+    out = {}
+    for k in ("quick", "full"):
+        if cfg[k]["every"] == "off":
+            continue
+        for day in range(0, 32):
+            t = _target(cfg[k], now + day * 86400)
+            if t and t > now:
+                out[k] = t
+                break
+    return out
+
+
+def unattended_key():
+    try:
+        return UNATTENDED.read_text().strip() or None
+    except OSError:
+        return None
+
+
+async def scheduler_loop():
+    while True:
+        await asyncio.sleep(60)
+        try:
+            scheduled_tick()
+        except Exception as e:                                      # noqa: BLE001 - keep the scheduler alive
+            print(f"[scheduler] {e}", flush=True)
+
+
+def scheduled_tick(now=None):
+    now = now or time.time()
+    cfg = schedule_cfg()
+    due = None
+    for kind in ("full", "quick"):                 # a full run includes the scan, so it wins when both are due
+        t = _target(cfg[kind], now)
+        if t and t <= now < t + 3600 and cfg["last"].get(kind, 0) < t:
+            due = due or kind
+            cfg["last"][kind] = now                 # both count as done when the full run goes
+    if not due or job.running:
+        return None
+    note, extra, mode = None, {}, "full" if due == "full" else "collect"
+    if mode == "full":
+        key = api_keys().get("anthropic") if vault.unlocked else None
+        key = key or unattended_key()
+        if key:
+            extra["ANTHROPIC_API_KEY"] = key
+            nvd = api_keys().get("nvd") if vault.unlocked else None
+            if nvd:
+                extra["NVD_API_KEY"] = nvd
+        else:
+            mode, note = "collect", "The scheduled AI run was skipped: the vault was locked and unattended AI runs are off. A scan ran instead."
+    stored = vault.get("schedule", {})
+    stored["last"] = cfg["last"]
+    vault.put("schedule", stored)
+    start_job(mode, None, "Schedule", extra, note=note)
+    vault.audit("system", "scheduled-run", MODES[mode]["label"] + (f" ({note})" if note else ""))
+    return mode
+
+
+def after_run(run_id, mode, note=None):
+    """Runs in the console once a run has finished: carry tracking over, then send alerts."""
+    if mode in ("full", "resume", "followup"):
+        carry_tracking(run_id)
+    cfg = notify_cfg()
+    if not any(cfg[c].get("on") for c in ("email", "teams", "slack", "webhook")):
+        return
+    g = _read_graph(run_dir(run_id))
+    alert = notify.build_alert(g, run_id, site()[1], cfg.get("threshold", "p2"), cfg.get("changes", True))
+    if note:
+        alert = alert or {"subject": f"Guardian: scheduled run {run_id}", "body": "", "lines": []}
+        alert["lines"].insert(0, note)
+        alert["body"] = note + "\n\n" + alert["body"]
+    if not alert:
+        return
+    result = notify.send(_notify_secrets(cfg), alert)
+    vault.put("notify_last", {"t": time.time(), "run": run_id, "result": result, "subject": alert["subject"]})
+    vault.audit("system", "alert-sent", f"{run_id}: " + ", ".join(f"{k} {v if v == 'ok' else 'failed'}" for k, v in result.items()))
+
+
+def _notify_secrets(cfg):
+    sec = vault.get("notify_secrets", {})
+    return {**cfg, **{k: {**cfg[k], SECRET_FIELDS[k]: sec.get(k, "")} for k in SECRET_FIELDS}}
+
+
+@app.get("/api/schedule")
+def schedule_get(request: Request):
+    require(request, "admin")
+    cfg, n = schedule_cfg(), notify_cfg()
+    sec = vault.get("notify_secrets", {})
+    return {"schedule": {k: cfg[k] for k in ("quick", "full")}, "last": cfg["last"], "next": next_runs(cfg),
+            "unattended": bool(unattended_key()), "unattended_info": vault.get("unattended", {}),
+            "notify": {**n, **{k: {**n[k], "secret_set": bool(sec.get(k))} for k in SECRET_FIELDS}},
+            "notify_last": vault.get("notify_last", {}), "anthropic_key_set": bool(vault.get("api_keys_set", {}).get("anthropic"))}
+
+
+class ScheduleEntry(BaseModel):
+    every: str
+    time: str
+    day: int = 0
+    mday: int = 1
+
+
+class ScheduleBody(BaseModel):
+    quick: ScheduleEntry
+    full: ScheduleEntry
+
+
+@app.post("/api/schedule")
+def schedule_set(body: ScheduleBody, request: Request):
+    sid, s, user = require(request, "admin")
+    out = {}
+    for k in ("quick", "full"):
+        e = getattr(body, k)
+        if e.every not in EVERY[k] or not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", e.time) or not 0 <= e.day <= 6 or not 1 <= e.mday <= 28:
+            raise HTTPException(400, f"Check the {k} schedule")
+        out[k] = e.model_dump()
+    stored = vault.get("schedule", {})
+    stored.update(out)
+    vault.put("schedule", stored)
+    vault.audit(user["email"], "schedule-changed", f"scan {out['quick']['every']} {out['quick']['time']}, AI {out['full']['every']} {out['full']['time']}")
+    return {"ok": True, "next": next_runs(schedule_cfg())}
+
+
+class UnattendedBody(BaseModel):
+    on: bool
+
+
+@app.post("/api/schedule/unattended")
+def schedule_unattended(body: UnattendedBody, request: Request):
+    """Scheduled AI runs while the vault is locked need a copy of the Anthropic key outside the vault (root-only file)."""
+    if not body.on:
+        sid, s, user = require(request, "admin")
+        try:
+            UNATTENDED.unlink()
+        except FileNotFoundError:
+            pass
+        vault.put("unattended", {})
+        vault.audit(user["email"], "unattended-off", "Removed the unattended copy of the Anthropic key")
+        return {"ok": True}
+    sid, s, user = require_fresh(request)
+    key = api_keys().get("anthropic")
+    if not key:
+        raise HTTPException(400, "Add the Anthropic API key in Settings first")
+    fd = os.open(UNATTENDED, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(key)
+    vault.put("unattended", {"by": user["name"], "at": time.time()})
+    vault.audit(user["email"], "unattended-on", "Stored a copy of the Anthropic key for scheduled AI runs (file permissions)")
+    return {"ok": True}
+
+
+class ChannelBody(BaseModel):
+    on: bool = False
+    url: Optional[str] = None
+
+
+class EmailBody(BaseModel):
+    on: bool = False
+    host: str = ""
+    port: int = 587
+    username: str = ""
+    password: Optional[str] = None
+    sender: str = ""
+    to: list[str] = []
+
+
+class NotifyBody(BaseModel):
+    threshold: str = "p2"
+    changes: bool = True
+    email: EmailBody
+    teams: ChannelBody
+    slack: ChannelBody
+    webhook: ChannelBody
+
+
+@app.post("/api/notify")
+def notify_set(body: NotifyBody, request: Request):
+    sid, s, user = require(request, "admin")
+    if body.threshold not in notify.THRESHOLDS:
+        raise HTTPException(400, "Unknown threshold")
+    sec = vault.get("notify_secrets", {})
+    for ch in ("teams", "slack", "webhook"):
+        c = getattr(body, ch)
+        if c.url:
+            if not c.url.startswith("https://") or len(c.url) > 2000:
+                raise HTTPException(400, f"The {ch} address must start with https://")
+            sec[ch] = c.url.strip()
+        if c.on and not sec.get(ch):
+            raise HTTPException(400, f"Paste the {ch} address first")
+    e = body.email
+    if e.password:
+        sec["email"] = e.password
+    to = [x.strip() for x in e.to if x.strip()]
+    if e.on and (not e.host or not e.sender or not to or any(not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", x) for x in to + [e.sender])):
+        raise HTTPException(400, "E-mail needs a server, a sender and valid recipient addresses")
+    vault.put("notify_secrets", sec)
+    vault.put("notify", {"threshold": body.threshold, "changes": body.changes,
+                         "email": {"on": e.on, "host": e.host.strip(), "port": e.port, "username": e.username.strip(), "sender": e.sender.strip(), "to": to},
+                         **{ch: {"on": getattr(body, ch).on} for ch in ("teams", "slack", "webhook")}})
+    vault.audit(user["email"], "alerts-changed", ", ".join(ch for ch in ("email", "teams", "slack", "webhook") if getattr(body, ch).on) or "all off")
+    return {"ok": True}
+
+
+@app.post("/api/notify/test")
+def notify_test(request: Request):
+    sid, s, user = require(request, "admin")
+    cfg = notify_cfg()
+    if not any(cfg[c].get("on") for c in ("email", "teams", "slack", "webhook")):
+        raise HTTPException(400, "Turn on at least one channel and save first")
+    alert = {"subject": "Guardian: test alert", "lines": ["This is a test from Guardian's alert settings."],
+             "body": f"This is a test from Guardian's alert settings, sent by {user['name']}.\n\nOpen the console: {site()[1]}/"}
+    result = notify.send(_notify_secrets(cfg), alert)
+    vault.audit(user["email"], "alert-test", ", ".join(f"{k} {v if v == 'ok' else 'failed'}" for k, v in result.items()))
+    return {"result": result}
+
+
 # -- console --------------------------------------------------------------------------------------------
 @app.get("/api/overview")
 def overview(request: Request):
@@ -926,22 +1350,17 @@ async def start(body: Start, request: Request):
     return launch(body.mode, body.run_id, sid, user)
 
 
-def launch(mode, run_id, sid, user):
+def launch(mode, run_id, sid, user, inbox=None):
     if job.running:
         raise HTTPException(409, "A run is already in progress")
     if mode not in MODES:
         raise HTTPException(400, "Unknown mode")
-    body = Start(mode=mode, run_id=run_id)
-    cmd = [PYTHON, str(BASE / "run.py"), *MODES[body.mode]["args"]]
-    target = None
-    if body.mode in ("resume", "report", "followup"):
-        d = run_dir(body.run_id)
+    if mode in ("resume", "report", "followup"):
+        d = run_dir(run_id)
         if not (d / "graph.json").exists():
             raise HTTPException(400, "That run has no scan data")
-        cmd.append(str(d))
-        target = d.name
     extra = {}
-    if body.mode in ("full", "resume", "followup"):
+    if mode in ("full", "resume", "followup"):
         if sid not in vault.holders:
             raise HTTPException(423, "Unlock the vault with your passkey first: the AI step needs the API key")
         keys = api_keys()
@@ -951,11 +1370,27 @@ def launch(mode, run_id, sid, user):
         if keys.get("nvd"):
             extra["NVD_API_KEY"] = keys["nvd"]
         vault.audit(user["email"], "secret-used", "API keys for an AI assessment")
+    if inbox:
+        chat.send_to_inbox(run_dir(run_id), inbox, user["name"])
+    status = start_job(mode, run_id, user["name"], extra)
+    vault.audit(user["email"], "scan-started", MODES[mode]["label"])
+    return status
+
+
+def start_job(mode, run_id, by, extra, note=None):
+    """Start run.py for this mode. Callers have checked permissions and gathered the keys it needs."""
+    cmd = [PYTHON, str(BASE / "run.py"), *MODES[mode]["args"]]
+    target = None
+    if mode in ("resume", "report", "followup"):
+        d = run_dir(run_id)
+        cmd.append(str(d))
+        target = d.name
     job.__init__()
-    job.mode, job.run_id, job.started, job.by = body.mode, target, time.time(), user["name"]
-    job.step = MODES[body.mode]["steps"][0]
-    job.add(f"[console] {MODES[body.mode]['label']} started by {user['name']}")
-    vault.audit(user["email"], "scan-started", MODES[body.mode]["label"])
+    job.mode, job.run_id, job.started, job.by, job.note = mode, target, time.time(), by, note
+    job.step = MODES[mode]["steps"][0]
+    job.add(f"[console] {MODES[mode]['label']} started by {by}")
+    if note:
+        job.add(f"[console] {note}")
     asyncio.create_task(run_job(cmd, extra))
     return job.status()
 
@@ -1057,7 +1492,7 @@ def run_overview(run_id: str, request: Request):
     if not g:
         raise HTTPException(404, "No data for this run")
     assets = g.get("assets") or {}
-    findings = [f for f in g.get("findings") or [] if f.get("status") != "resolved"]
+    findings = [f for f in g.get("findings") or [] if is_open(f)]
     sev = collections.Counter(f.get("severity", "info") for f in findings)
     risk = {}
     for f in findings:
@@ -1071,7 +1506,7 @@ def run_overview(run_id: str, request: Request):
     inv = [{"ip": ip, "name": name(ip, a)[:40], "type": a.get("device_type") or "unknown", "risk": risk.get(ip, "ok")}
            for ip, a in assets.items()]
     inv.sort(key=lambda r: (SEV_ORDER.index(r["risk"]) if r["risk"] in SEV_ORDER else 9, tuple(map(int, r["ip"].split(".")))))
-    top = sorted(findings, key=lambda f: (SEV_ORDER.index(f.get("severity", "info")), f.get("id", "")))[:6]
+    top = sorted(findings, key=lambda f: (priority_of(f), SEV_ORDER.index(f.get("severity", "info")), f.get("id", "")))[:6]
     agents = g.get("agents") or {}
     times = [a.get(k) for a in agents.values() for k in ("started", "ended") if a.get(k)]
     usage = collections.Counter()
@@ -1087,7 +1522,10 @@ def run_overview(run_id: str, request: Request):
         "services": sum(1 for a in assets.values() for p in a.get("ports", []) if p.get("state") == "open"),
         "severity": {k: sev.get(k, 0) for k in SEV_ORDER}, "open": len(findings),
         "resolved": sum(1 for f in g.get("findings") or [] if f.get("status") == "resolved"),
-        "top": [{k: f.get(k) for k in ("id", "title", "severity", "asset", "layer")} for f in top],
+        "top": [{**{k: f.get(k) for k in ("id", "title", "severity", "asset", "layer")}, "priority": priority_of(f),
+                 "ranked": bool(f.get("risk")), "kev": (f.get("risk") or {}).get("kev")} for f in top],
+        "paths": len(g.get("attack_paths") or []),
+        "changes": g.get("changes"),
         "inventory": inv[:8],
         "cost": round(g.get("cost_total") or 0, 2),
         "cost_by": {k: round(a.get("cost", 0), 2) for k, a in agents.items() if a.get("cost")},
@@ -1119,10 +1557,10 @@ def run_live(run_id: str, request: Request, since: int = 0):
                     if len(events) >= 3000:
                         break
     g = _read_graph(d)
-    per_layer = collections.Counter(f.get("layer") for f in g.get("findings", []) if f.get("status") != "resolved")
+    per_layer = collections.Counter(f.get("layer") for f in g.get("findings", []) if is_open(f))
     by_sev = collections.defaultdict(collections.Counter)
     for f in g.get("findings", []):
-        if f.get("status") != "resolved":
+        if is_open(f):
             by_sev[f.get("layer")][f.get("severity", "info")] += 1
     agents = {}
     for name, a in (g.get("agents") or {}).items():

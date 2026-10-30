@@ -301,6 +301,17 @@ Code agent then reads the flagged files and gives the verdict (Malicious, Suspic
 $0.10–$1. Without a key you still get the static and dependency checks. Private repositories aren't supported.
 The container needs outbound HTTPS to `api.github.com`, `codeload.github.com` and `api.osv.dev` for this.
 
+**Fix plan, attack paths and compliance.** After an AI assessment, the **Fix plan** tab (or **Plan** in the left menu)
+lists every open finding ranked P1 to P4 by the Risk analyst, with why. Give each an owner; the due date follows from the
+priority, and **Re-check** sends one finding back to the agent that found it. **Attack paths** shows how an attacker
+could chain the findings and which fixes break the paths. **Compliance** maps the assessment to CIS Controls IG1,
+ISO 27001, NIS2 and Swiss nLPD. Details: [docs/AGENTS.md](docs/AGENTS.md).
+
+**Schedules and alerts (optional, admins).** **Settings › Schedules & alerts**: a daily or weekly scan, a weekly or
+monthly AI assessment, and alerts by e-mail, Teams, Slack or webhook after each run (new priority findings and network
+changes). Scheduled AI runs need the vault unlocked, unless you allow unattended AI runs there (a root-only copy of the
+key; read the trade-off on that page). Step-by-step channel setup: [docs/SCHEDULES-ALERTS.md](docs/SCHEDULES-ALERTS.md).
+
 ---
 
 ## 9. Add people (optional)
@@ -378,6 +389,8 @@ read -rsp "API key: " K && ANTHROPIC_API_KEY=$K ./venv/bin/python run.py; unset 
 | `/opt/ai-guardian/console/guardian.db` | users, passkeys, encrypted vault (connectors, API keys, SSH key), audit log |
 | `/opt/ai-guardian/console/acme/` | certificate and acme-dns account |
 | `/opt/ai-guardian/runs/<date-time>/` | each run: `graph.json` (all data), `events.jsonl` (agent map), `chat.json`, `report.html` |
+| `/opt/ai-guardian/runs/<date-time>/tracking.json` | the fix plan of that run (owner, due date, status, note per finding) |
+| `/opt/ai-guardian/console/unattended.key` | only if you allowed unattended AI runs: the copy of the Anthropic key (root only) |
 | `/opt/ai-guardian/runs/code/<date-time-id>/` | each code scan: `scan.json` (result and evidence), `scan.log` |
 | `/opt/ai-guardian/.env` | non-secret settings (model, effort, agents on/off) |
 | `/etc/default/ai-guardian` | hostname and certificate e-mail |
@@ -417,7 +430,7 @@ read -rsp "API key: " K && ANTHROPIC_API_KEY=$K ./venv/bin/python run.py; unset 
   on your own network only. The chat proposes orders; a person confirms each one. Nothing on the network is changed.
 - **Secrets are encrypted** with a key that is only in memory while someone with a passkey has unlocked the vault.
   Reading the files on disk, or a backup of them, gives nothing usable.
-- **No inbound internet access** is needed or opened. Outbound: Anthropic API, NVD, CISA, endoflife.date,
-  Shodan InternetDB, Let's Encrypt, acme-dns.io.
+- **No inbound internet access** is needed or opened. Outbound: Anthropic API, NVD, CISA, FIRST (EPSS), endoflife.date,
+  Shodan InternetDB, Let's Encrypt, acme-dns.io, and the alert channels you set up (your SMTP server, Teams, Slack, webhook).
 - Every sign-in, setting change, secret use and agent order is in the tamper-evident audit log
   (Settings → Security & vault → Audit log).

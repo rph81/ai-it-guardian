@@ -27,7 +27,7 @@ def load_env():
 
 def main():
     load_env()
-    from guardian import collector, report
+    from guardian import changes, collector, report
     from guardian.graph import Graph
 
     ap = argparse.ArgumentParser()
@@ -47,6 +47,7 @@ def main():
         from guardian import agents
         g = Graph(a.followup)
         if agents.followups(g):
+            changes.record(g, findings=True)
             agents.summarize(g)
             print("report:", report.render(g))
         else:
@@ -64,6 +65,7 @@ def main():
         g.agent("collector", status="done", activity=f'{len(g.data["assets"])} devices found')
         g.event("done", "collector", "collector", f'Scan finished: {len(g.data["assets"])} devices')
         g.save()
+        changes.record(g)
     if a.collect_only:
         print(f"scan saved in {run_dir}")
         return
@@ -71,6 +73,7 @@ def main():
         sys.exit("ANTHROPIC_API_KEY is not set - put it in .env")
     from guardian import agents
     agents.run_all(g)
+    changes.record(g, findings=True)
     agents.summarize(g)
     print("report:", report.render(g))
 

@@ -40,6 +40,7 @@ function showSection() {
   if (s === "security") loadSecurity();
   if (s === "account") loadAccount();
   if (s === "appearance") renderAppearance();
+  if (s === "schedules" && typeof Schedule !== "undefined") Schedule.load();
 }
 const SECTIONS = ["connectors", "users", "security", "account", "ai", "scope", "schedules", "appearance"];
 window.addEventListener("hashchange", showSection);
@@ -246,6 +247,12 @@ const AGENT_INFO = {
     tools: "Scan data, web pages (GET), CVE database, web search", connector: "With a device connector: exact firmware versions it can't see from outside."},
   wan: {what: "What the internet sees on your public IP, router port forwards and UPnP rules, mapped to the device behind them.",
     tools: "Public-IP data (Shodan InternetDB), CVE database"},
+  risk: {what: "Analyst. Ranks every finding 1 to 4 by real-world risk (actively exploited, ransomware use, chance of exploitation, internet exposure, how important the device is), merges duplicates and carries owners over from the last assessment. Like Tenable VPR, Qualys TruRisk, Rapid7 Active Risk.",
+    tools: "The run's findings, CISA KEV, FIRST EPSS, web search"},
+  paths: {what: "Analyst. Chains findings into realistic attack paths to what matters most and names the fixes that break them. Reasoned from the evidence; nothing is exploited.",
+    tools: "The run's findings and inventory"},
+  compliance: {what: "Analyst. Maps the assessment to CIS Controls v8 IG1, ISO 27001:2022 Annex A, NIS2 Article 21 and Swiss revFADP / nLPD: met, partly, gap or not assessed, with the evidence.",
+    tools: "The run's findings and inventory, built-in control lists"},
 };
 let agentsOff = new Set();
 let scaleMode = "auto", scale = {};
@@ -262,7 +269,7 @@ function renderScale(c) {
   const num = (k, key, lo, hi, cls) => { const i = el("input", {type: "number", min: lo, max: hi, class: "wauto " + (cls || ""), "aria-label": `${c.agents[k]} ${key}`});
     i.value = scale[k][key]; i.disabled = k === "wan" && key !== "min";
     i.addEventListener("input", () => { scale[k][key] = Math.max(lo, Math.min(hi, +i.value || lo)); }); return i; };
-  $("scale-rows").replaceChildren(...Object.keys(c.agents).map(k => el("tr", {}, el("td", {}, c.agents[k]),
+  $("scale-rows").replaceChildren(...Object.keys(c.scale).map(k => el("tr", {}, el("td", {}, c.agents[k]),
     el("td", {}, num(k, "min", 1, 20)), el("td", {}, num(k, "max", 1, 20)), el("td", {}, num(k, "manual", 1, 20, "scale-manual")))));
   document.querySelectorAll("[data-scale]").forEach(b => b.onclick = () => { scaleMode = b.dataset.scale; paint(); });
   $("per-copy").oninput = paint;
@@ -306,7 +313,7 @@ $("ai-form").addEventListener("submit", async e => {
 
 // -- me, vault --------------------------------------------------------------------------
 let me = null;
-const ADMIN_ONLY = ["users", "security", "ai"];
+const ADMIN_ONLY = ["users", "security", "ai", "schedules"];
 const allowed = s => s === "appearance" || me.role === "admin" || (me.role === "operator" ? !ADMIN_ONLY.includes(s) : s === "account");
 function renderMe() {
   $("me").textContent = `${me.name} · ${me.role}`;

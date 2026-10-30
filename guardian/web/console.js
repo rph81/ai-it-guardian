@@ -29,7 +29,8 @@ function setStyle(e, css) {
   for (const decl of String(css).split(";")) { const i = decl.indexOf(":"); if (i > 0) e.style.setProperty(decl.slice(0, i).trim(), decl.slice(i + 1).trim()); }
 }
 const AGENT_NAMES = {orchestrator: "Orchestrator", discovery: "Discovery", network: "Network", os: "OS & endpoints", web: "Web & APIs",
-                     firmware: "Firmware", wan: "Internet perimeter", report: "Report writer", collector: "Scanner"};
+                     firmware: "Firmware", wan: "Internet perimeter", report: "Report writer", collector: "Scanner",
+                     risk: "Risk analyst", paths: "Attack paths", compliance: "Compliance"};
 const SEVS_ALL = ["critical", "high", "medium", "low", "info"];
 const money = v => v == null ? "—" : `$${Number(v).toFixed(2)}`;
 const fmtRun = id => `${id.slice(0,4)}-${id.slice(4,6)}-${id.slice(6,8)} ${id.slice(9,11)}:${id.slice(11,13)}`;
@@ -136,13 +137,31 @@ async function loadOverview(id) {
   $("c-min").replaceChildren(d.minutes != null ? String(d.minutes) : "—", el("small", {}, d.minutes != null ? " min" : ""));
   const tk = d.tokens >= 1e6 ? (d.tokens / 1e6).toFixed(1) + "M" : d.tokens >= 1e3 ? Math.round(d.tokens / 1e3) + "k" : String(d.tokens);
   $("c-work").replaceChildren(...[["Rounds", d.rounds], ["Checks", d.checks], ["Notes", d.notes], ["Tokens", tk]].map(([k, v]) => el("div", {class: "kv"}, el("span", {}, k), el("span", {}, String(v)))));
+  $("o-changes").textContent = changeText(d.changes);
   $("f-list").replaceChildren(...(d.top.length ? d.top.map(f => el("div", {class: "frow"},
       el("span", {class: `sev ${f.severity}`}, f.severity === "medium" ? "Med" : f.severity === "critical" ? "Crit" : f.severity),
-      el("div", {}, el("b", {}, f.title), el("span", {}, `${f.asset} · ${f.layer || ""}`)), el("span", {class: "id"}, f.id || "")))
+      el("div", {}, el("b", {}, f.title), el("span", {}, `${f.asset} · ${AGENT_NAMES[f.layer] || f.layer || ""}`)),
+      el("span", {class: "id"}, f.ranked ? el("span", {class: `prio p${f.priority}`}, `P${f.priority}`) : "", f.kev ? el("span", {class: "tag error"}, "KEV") : "", " ", f.id || "")))
     : [el("p", {class: "note"}, d.score != null ? "Nothing open. Well done." : "Findings appear after an AI assessment.")]));
   $("i-body").replaceChildren(...d.inventory.map(r => el("tr", {}, el("td", {}, r.name), el("td", {class: "m"}, r.type), el("td", {class: "m"}, "." + r.ip.split(".").pop()),
     el("td", {}, el("span", {class: `dotc bg-${r.risk}`}), r.risk === "ok" ? "OK" : r.risk[0].toUpperCase() + r.risk.slice(1)))));
   $("i-note").textContent = `${d.devices} devices · riskiest ${d.inventory.length} shown`;
+}
+
+function changeText(ch) {
+  if (!ch) return "";
+  const s = ch.scan, f = ch.findings, bits = [];
+  if (s) {
+    for (const [k, w] of [["new_devices", "new device"], ["gone_devices", "device gone"], ["new_ports", "new open port"],
+                          ["new_internet_ports", "new internet port"], ["new_forwards", "new port forward"]])
+      if ((s[k] || []).length) bits.push(`${s[k].length} ${w}${s[k].length > 1 && !w.endsWith("gone") ? "s" : ""}`);
+  }
+  if (f) {
+    if (f.new.length) bits.push(`${f.new.length} new finding${f.new.length > 1 ? "s" : ""}`);
+    if (f.not_seen_again.length) bits.push(`${f.not_seen_again.length} not found again`);
+  }
+  const against = (s && s.against) || (f && f.against);
+  return against ? `Since ${fmtRun(against)}: ${bits.length ? bits.join(" · ") : "no changes"}` : "";
 }
 
 function openRun(id, hasReport) {
@@ -151,6 +170,7 @@ function openRun(id, hasReport) {
   document.querySelectorAll(".run").forEach(n => n.classList.toggle("on", n.querySelector(".mono")?.textContent === fmtRun(id)));
   $("current").textContent = `run ${fmtRun(id)}`;
   if (typeof Agents !== "undefined") Agents.show(id);
+  if (typeof Plan !== "undefined") Plan.show(id);
   const url = `/api/runs/${id}/report`;
   if (hasReport) {
     $("frame").src = url; $("frame-empty").classList.add("hidden");
@@ -250,7 +270,8 @@ async function poll() {
 // -- tabs, theme, start-up ----------------------------------------------------------
 function showTab(t) {
   document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.t === t));
-  for (const p of ["report", "agents", "map", "log"]) $("p-" + p).classList.toggle("hidden", t !== p);
+  for (const p of ["report", "plan", "paths", "comp", "agents", "map", "log"]) $("p-" + p).classList.toggle("hidden", t !== p);
+  if (["plan", "paths", "comp"].includes(t) && typeof Plan !== "undefined") Plan.refresh(t);
   if ((t === "agents" || t === "map") && typeof Agents !== "undefined") Agents.refresh();
   if (t === "log") $("p-log").scrollTop = $("p-log").scrollHeight;
 }

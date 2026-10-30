@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="/console.css">
 <script src="/passkey.js" defer></script>
 <script src="/settings.js" defer></script>
+<script src="/schedule.js" defer></script>
 </head>
 <body>
 <div class="shell">
@@ -209,7 +210,57 @@
       </section>
       <section class="stack hidden" id="s-schedules">
         <div><h1>Schedules &amp; alerts</h1><p class="lede">Run scans automatically and get told when something changes.</p></div>
-        <div class="card"><span class="tag">Planned</span><p class="note">Scans run when you start them from the console.</p></div>
+        <form class="card" id="sched-form">
+          <h2>Schedules</h2>
+          <p class="note">Times are the server's local time. A scheduled run doesn't start while another run is going; it waits up to an hour.</p>
+          <div class="f3 field">
+            <div><label for="q-every">Network scan (free)</label><select id="q-every"><option value="off">Off</option><option value="daily">Every day</option><option value="weekly">Every week</option></select></div>
+            <div><label for="q-day">Day</label><select id="q-day" class="day"></select></div>
+            <div><label for="q-time">Time</label><input id="q-time" type="time" value="02:00"></div>
+          </div>
+          <div class="f3 field">
+            <div><label for="a-every">Full AI assessment (uses API credit)</label><select id="a-every"><option value="off">Off</option><option value="weekly">Every week</option><option value="monthly">Every month</option></select></div>
+            <div><label for="a-day">Day</label><select id="a-day" class="day"></select><select id="a-mday" class="hidden"></select></div>
+            <div><label for="a-time">Time</label><input id="a-time" type="time" value="03:00"></div>
+          </div>
+          <p class="note" id="sched-next"></p>
+          <div class="row mt16"><button class="btn primary" type="submit">Save schedules</button><span class="note m0" id="sched-saved"></span></div>
+        </form>
+        <div class="card">
+          <div class="sechead"><h2>Scheduled AI runs while the vault is locked</h2><span class="tag" id="un-state"></span></div>
+          <p class="note">The Anthropic key normally lives only in the vault, which is locked when nobody is signed in, so a scheduled AI assessment at night can't use it and runs a scan instead (and tells you). If you allow it, Guardian keeps a copy of the key in a file only the server's root account can read, like the sign-in provider secrets. Anyone with root access to the container could then read the key. You can switch this off at any time; the copy is deleted.</p>
+          <div class="row mt16"><button class="btn" type="button" id="un-on">Allow · passkey</button><button class="btn danger" type="button" id="un-off">Switch off and delete the copy</button></div>
+        </div>
+        <form class="card" id="notify-form">
+          <h2>Alerts</h2>
+          <p class="note">Sent after every run that finishes (scheduled or started by hand). Webhook addresses and the e-mail password are needed when nobody is signed in, so like the sign-in provider secrets they're protected by the server's file permissions rather than the vault.</p>
+          <div class="f3 field">
+            <div><label for="n-threshold">Send findings with priority</label><select id="n-threshold"><option value="p1">1 only</option><option value="p2">1 and 2</option><option value="p3">1 to 3</option><option value="all">All new findings</option></select></div>
+            <div><label class="check"><input type="checkbox" id="n-changes" checked> Also send network changes (new devices, new open ports, new internet exposure)</label></div>
+          </div>
+          <h3 class="gap">E-mail</h3>
+          <label class="check"><input type="checkbox" id="e-on"> Send by e-mail</label>
+          <div class="f3 field"><div><label for="e-host">SMTP server</label><input id="e-host" class="mono" placeholder="smtp.office365.com"></div>
+            <div><label for="e-port">Port</label><select id="e-port"><option>587</option><option>465</option></select></div>
+            <div><label for="e-user">Username</label><input id="e-user" class="mono" autocomplete="off"></div></div>
+          <div class="f3 field"><div><label for="e-pass">Password</label><input id="e-pass" type="password" autocomplete="new-password" placeholder="unchanged"></div>
+            <div><label for="e-from">From</label><input id="e-from" class="mono" placeholder="guardian@example.com"></div>
+            <div><label for="e-to">To (comma-separated)</label><input id="e-to" class="mono"></div></div>
+          <h3 class="gap">Microsoft Teams</h3>
+          <label class="check"><input type="checkbox" id="t-on"> Post to a Teams channel</label>
+          <p class="help">In Teams: channel ⋯ › Workflows › "Post to a channel when a webhook request is received" › copy the address.</p>
+          <input id="t-url" class="mono field" placeholder="unchanged" autocomplete="off">
+          <h3 class="gap">Slack</h3>
+          <label class="check"><input type="checkbox" id="s-on"> Post to a Slack channel</label>
+          <p class="help">Slack › your app › Incoming Webhooks › Add New Webhook to Workspace › copy the address.</p>
+          <input id="s-url" class="mono field" placeholder="unchanged" autocomplete="off">
+          <h3 class="gap">Webhook</h3>
+          <label class="check"><input type="checkbox" id="w-on"> Send JSON to a webhook (ticketing, automation, SIEM)</label>
+          <input id="w-url" class="mono field" placeholder="unchanged" autocomplete="off">
+          <div class="row mt16"><button class="btn primary" type="submit">Save alerts</button><button class="btn" type="button" id="n-test">Send a test</button>
+            <span class="note m0" id="n-result"></span></div>
+          <p class="note" id="n-last"></p>
+        </form>
       </section>
     </div>
   </div>

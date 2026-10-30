@@ -1,0 +1,125 @@
+"""Control catalogs the Compliance agent maps findings to.
+
+Titles follow the published frameworks; confirm the exact wording against the official documents before an audit.
+- CIS Controls v8, Implementation Group 1 (the 56 safeguards meant for every organisation)
+- ISO/IEC 27001:2022 Annex A (93 controls)
+- NIS2 Directive (EU) 2022/2555, Article 21(2) risk-management measures
+- Swiss Federal Act on Data Protection (revFADP / nLPD) and its Data Protection Ordinance (DPO / OPDo), data security
+"""
+
+CIS_IG1 = [
+    ("1.1", "Establish and maintain a detailed enterprise asset inventory"), ("1.2", "Address unauthorized assets"),
+    ("2.1", "Establish and maintain a software inventory"), ("2.2", "Ensure authorized software is currently supported"),
+    ("2.3", "Address unauthorized software"),
+    ("3.1", "Establish and maintain a data management process"), ("3.2", "Establish and maintain a data inventory"),
+    ("3.3", "Configure data access control lists"), ("3.4", "Enforce data retention"), ("3.5", "Securely dispose of data"),
+    ("3.6", "Encrypt data on end-user devices"),
+    ("4.1", "Establish and maintain a secure configuration process"),
+    ("4.2", "Establish and maintain a secure configuration process for network infrastructure"),
+    ("4.3", "Configure automatic session locking on enterprise assets"), ("4.4", "Implement and manage a firewall on servers"),
+    ("4.5", "Implement and manage a firewall on end-user devices"), ("4.6", "Securely manage enterprise assets and software"),
+    ("4.7", "Manage default accounts on enterprise assets and software"),
+    ("5.1", "Establish and maintain an inventory of accounts"), ("5.2", "Use unique passwords"), ("5.3", "Disable dormant accounts"),
+    ("5.4", "Restrict administrator privileges to dedicated administrator accounts"),
+    ("6.1", "Establish an access granting process"), ("6.2", "Establish an access revoking process"),
+    ("6.3", "Require MFA for externally-exposed applications"), ("6.4", "Require MFA for remote network access"),
+    ("6.5", "Require MFA for administrative access"),
+    ("7.1", "Establish and maintain a vulnerability management process"), ("7.2", "Establish and maintain a remediation process"),
+    ("7.3", "Perform automated operating system patch management"), ("7.4", "Perform automated application patch management"),
+    ("8.1", "Establish and maintain an audit log management process"), ("8.2", "Collect audit logs"),
+    ("8.3", "Ensure adequate audit log storage"),
+    ("9.1", "Ensure use of only fully supported browsers and email clients"), ("9.2", "Use DNS filtering services"),
+    ("10.1", "Deploy and maintain anti-malware software"), ("10.2", "Configure automatic anti-malware signature updates"),
+    ("10.3", "Disable autorun and autoplay for removable media"),
+    ("11.1", "Establish and maintain a data recovery process"), ("11.2", "Perform automated backups"),
+    ("11.3", "Protect recovery data"), ("11.4", "Establish and maintain an isolated instance of recovery data"),
+    ("12.1", "Ensure network infrastructure is up-to-date"),
+    ("14.1", "Establish and maintain a security awareness program"),
+    ("14.2", "Train workforce members to recognize social engineering attacks"),
+    ("14.3", "Train workforce members on authentication best practices"), ("14.4", "Train workforce on data handling best practices"),
+    ("14.5", "Train workforce members on causes of unintentional data exposure"),
+    ("14.6", "Train workforce members on recognizing and reporting security incidents"),
+    ("14.7", "Train workforce on how to identify and report if their enterprise assets are missing security updates"),
+    ("14.8", "Train workforce on the dangers of connecting to and transmitting enterprise data over insecure networks"),
+    ("15.1", "Establish and maintain an inventory of service providers"),
+    ("17.1", "Designate personnel to manage incident handling"),
+    ("17.2", "Establish and maintain contact information for reporting security incidents"),
+    ("17.3", "Establish and maintain an enterprise process for reporting incidents"),
+]
+
+ISO27001 = [
+    ("5.1", "Policies for information security"), ("5.2", "Information security roles and responsibilities"),
+    ("5.3", "Segregation of duties"), ("5.4", "Management responsibilities"), ("5.5", "Contact with authorities"),
+    ("5.6", "Contact with special interest groups"), ("5.7", "Threat intelligence"),
+    ("5.8", "Information security in project management"), ("5.9", "Inventory of information and other associated assets"),
+    ("5.10", "Acceptable use of information and other associated assets"), ("5.11", "Return of assets"),
+    ("5.12", "Classification of information"), ("5.13", "Labelling of information"), ("5.14", "Information transfer"),
+    ("5.15", "Access control"), ("5.16", "Identity management"), ("5.17", "Authentication information"), ("5.18", "Access rights"),
+    ("5.19", "Information security in supplier relationships"), ("5.20", "Addressing information security within supplier agreements"),
+    ("5.21", "Managing information security in the ICT supply chain"),
+    ("5.22", "Monitoring, review and change management of supplier services"),
+    ("5.23", "Information security for use of cloud services"),
+    ("5.24", "Information security incident management planning and preparation"),
+    ("5.25", "Assessment and decision on information security events"), ("5.26", "Response to information security incidents"),
+    ("5.27", "Learning from information security incidents"), ("5.28", "Collection of evidence"),
+    ("5.29", "Information security during disruption"), ("5.30", "ICT readiness for business continuity"),
+    ("5.31", "Legal, statutory, regulatory and contractual requirements"), ("5.32", "Intellectual property rights"),
+    ("5.33", "Protection of records"), ("5.34", "Privacy and protection of PII"),
+    ("5.35", "Independent review of information security"),
+    ("5.36", "Compliance with policies, rules and standards for information security"), ("5.37", "Documented operating procedures"),
+    ("6.1", "Screening"), ("6.2", "Terms and conditions of employment"),
+    ("6.3", "Information security awareness, education and training"), ("6.4", "Disciplinary process"),
+    ("6.5", "Responsibilities after termination or change of employment"), ("6.6", "Confidentiality or non-disclosure agreements"),
+    ("6.7", "Remote working"), ("6.8", "Information security event reporting"),
+    ("7.1", "Physical security perimeters"), ("7.2", "Physical entry"), ("7.3", "Securing offices, rooms and facilities"),
+    ("7.4", "Physical security monitoring"), ("7.5", "Protecting against physical and environmental threats"),
+    ("7.6", "Working in secure areas"), ("7.7", "Clear desk and clear screen"), ("7.8", "Equipment siting and protection"),
+    ("7.9", "Security of assets off-premises"), ("7.10", "Storage media"), ("7.11", "Supporting utilities"),
+    ("7.12", "Cabling security"), ("7.13", "Equipment maintenance"), ("7.14", "Secure disposal or re-use of equipment"),
+    ("8.1", "User end point devices"), ("8.2", "Privileged access rights"), ("8.3", "Information access restriction"),
+    ("8.4", "Access to source code"), ("8.5", "Secure authentication"), ("8.6", "Capacity management"),
+    ("8.7", "Protection against malware"), ("8.8", "Management of technical vulnerabilities"), ("8.9", "Configuration management"),
+    ("8.10", "Information deletion"), ("8.11", "Data masking"), ("8.12", "Data leakage prevention"), ("8.13", "Information backup"),
+    ("8.14", "Redundancy of information processing facilities"), ("8.15", "Logging"), ("8.16", "Monitoring activities"),
+    ("8.17", "Clock synchronization"), ("8.18", "Use of privileged utility programs"),
+    ("8.19", "Installation of software on operational systems"), ("8.20", "Networks security"),
+    ("8.21", "Security of network services"), ("8.22", "Segregation of networks"), ("8.23", "Web filtering"),
+    ("8.24", "Use of cryptography"), ("8.25", "Secure development life cycle"), ("8.26", "Application security requirements"),
+    ("8.27", "Secure system architecture and engineering principles"), ("8.28", "Secure coding"),
+    ("8.29", "Security testing in development and acceptance"), ("8.30", "Outsourced development"),
+    ("8.31", "Separation of development, test and production environments"), ("8.32", "Change management"),
+    ("8.33", "Test information"), ("8.34", "Protection of information systems during audit testing"),
+]
+
+NIS2 = [
+    ("21.2.a", "Policies on risk analysis and information system security"),
+    ("21.2.b", "Incident handling"),
+    ("21.2.c", "Business continuity: backup management, disaster recovery and crisis management"),
+    ("21.2.d", "Supply chain security"),
+    ("21.2.e", "Security in acquisition, development and maintenance, including vulnerability handling and disclosure"),
+    ("21.2.f", "Policies and procedures to assess the effectiveness of cybersecurity risk-management measures"),
+    ("21.2.g", "Basic cyber hygiene practices and cybersecurity training"),
+    ("21.2.h", "Policies and procedures on cryptography and, where appropriate, encryption"),
+    ("21.2.i", "Human resources security, access control policies and asset management"),
+    ("21.2.j", "Multi-factor or continuous authentication, secured voice, video and text communications, secured emergency communications"),
+]
+
+NLPD = [
+    ("FADP 7", "Data protection by design and by default"),
+    ("FADP 8", "Data security: appropriate technical and organisational measures for the risk"),
+    ("DPO 2 conf", "Protection objective: confidentiality (only authorised people can access personal data)"),
+    ("DPO 2 avail", "Protection objective: availability (data is available and can be restored after an incident)"),
+    ("DPO 2 integ", "Protection objective: integrity (data can't be changed without authorisation)"),
+    ("DPO 2 trace", "Protection objective: traceability (who accessed or changed data can be established)"),
+    ("DPO 3", "Technical and organisational measures: access, user, transport and storage control; encryption where appropriate"),
+    ("DPO 4", "Logging of automated processing of sensitive personal data"),
+    ("FADP 24", "Notification of data security breaches to the FDPIC as soon as possible"),
+]
+
+FRAMEWORKS = {
+    "cis_ig1": {"title": "CIS Controls v8 · IG1", "controls": CIS_IG1},
+    "iso27001": {"title": "ISO/IEC 27001:2022 Annex A", "controls": ISO27001},
+    "nis2": {"title": "NIS2 Article 21(2)", "controls": NIS2},
+    "nlpd": {"title": "Swiss revFADP / nLPD · data security", "controls": NLPD},
+}
+STATUSES = ("met", "partial", "gap", "not_assessed")

@@ -5,6 +5,11 @@ import threading
 import time
 
 SEVERITIES = ["critical", "high", "medium", "low", "info"]
+CLOSED = ("resolved", "duplicate")        # fixed and confirmed by a re-check, or merged into another finding
+
+
+def is_open(f):
+    return f.get("status", "open") not in CLOSED
 
 
 class Graph:
