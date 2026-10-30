@@ -11,6 +11,7 @@
 <script src="/schedule.js" defer></script>
 <script src="/ticketing.js" defer></script>
 <script src="/sites.js" defer></script>
+<script src="/evidence.js" defer></script>
 </head>
 <body>
 <div class="shell">
@@ -43,6 +44,7 @@
       <a href="#account" data-s="account">My account</a>
       <a href="#ai" data-s="ai" class="admin-only">AI agents</a>
       <a href="#scope" data-s="scope">Scan scope</a>
+      <a href="#evidence" data-s="evidence">Evidence library</a>
       <a href="#sites" data-s="sites">Sites &amp; collectors</a>
       <a href="#schedules" data-s="schedules">Schedules &amp; alerts</a>
       <a href="#ticketing" data-s="ticketing">Ticketing</a>
@@ -264,6 +266,14 @@
             <span class="note m0" id="n-result"></span></div>
           <p class="note" id="n-last"></p>
         </form>
+      </section>
+      <section class="stack hidden" id="s-evidence">
+        <div class="card">
+          <div class="sechead"><h2>Evidence library</h2><span class="note m0" id="ev-count"></span></div>
+          <p class="note">Files you added to compliance controls (policies, training records, contracts, screenshots). They're encrypted with the vault key, reused by later assessments until they expire, and listed with their SHA-256 in the compliance PDF. Add files from a run's Compliance tab; change which controls a file supports or its expiry here. Only admins can delete.</p>
+          <p class="note hidden" id="ev-locked">Unlock the vault to see the evidence: it's encrypted.</p>
+          <div class="tablewrap field"><table><thead><tr><th>File</th><th>Controls (framework:control, comma-separated)</th><th>Valid until</th><th>State</th><th></th></tr></thead><tbody id="ev-rows"></tbody></table></div>
+        </div>
       </section>
       <section class="stack hidden" id="s-sites">
         <div class="card">

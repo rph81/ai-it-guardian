@@ -100,21 +100,88 @@ const Plan = (() => {
   }
 
   // -- compliance --------------------------------------------------------------------------------
+  const kb = n => n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
+  const ESTATE = {valid: ["ok", "valid"], expiring: ["warn", "expires soon"], expired: ["error", "expired"]};
+
+  async function upload(file, fwKey, ctl, valid) {
+    const r = await fetch("/api/evidence", {method: "POST", body: file, headers: {"X-Guardian": "1", "Content-Type": "application/octet-stream",
+      "X-Filename": encodeURIComponent(file.name), "X-Controls": encodeURIComponent(`${fwKey}:${ctl}`), "X-Valid-Until": valid || ""}});
+    const out = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(out.detail || `Upload failed (${r.status})`);
+    return out;
+  }
+
+  function controlBody(c, fwKey) {
+    const d = S.comp, body = el("div", {class: "co-body"});
+    if (c.findings.length) body.append(el("div", {class: "micro"}, c.findings.map(f => `${f} ${d.findings[f] || ""}`).join(" · ")));
+    if (c.agent_status !== c.status) body.append(el("p", {class: "micro"}, `Agent: ${CSTAT[c.agent_status]} · shown: ${CSTAT[c.status]} (${c.source === "evidence" ? "evidence attached" : "your status"})`));
+    if (c.blocked) body.append(el("p", {class: "note"}, `Your status isn't applied while ${c.blocked.join(", ")} ${c.blocked.length > 1 ? "are" : "is"} open: fix ${c.blocked.length > 1 ? "them" : "it"} and re-check.`));
+    for (const e of c.evidence || []) {
+      const [cls, lbl] = ESTATE[e.state] || ["", e.state];
+      body.append(el("div", {class: "co-ev"}, el("span", {}, el("b", {}, e.name), ` · ${kb(e.size)} · ${e.uploaded_by} ${new Date(e.uploaded_at * 1000).toLocaleDateString()}`,
+        e.valid_until ? ` · valid until ${e.valid_until}` : ""), el("span", {class: "tag " + cls}, lbl),
+        el("a", {class: "btn sm", href: `/api/evidence/${e.id}/download`}, "Download")));
+    }
+    if (!d.evidence_unlocked) { body.append(el("p", {class: "note"}, "Unlock the vault to see and add evidence: it's encrypted.")); return body; }
+    if (!canEdit()) return body;
+    const o = c.override || {};
+    const st = el("select", {"aria-label": "Your status"}, el("option", {value: ""}, "Agent's status"),
+      ...["met", "partial", "gap", "not_assessed"].map(k => { const x = el("option", {value: k}, CSTAT[k]); if (o.status === k) x.selected = true; return x; }));
+    const nt = el("input", {class: "grow", maxlength: "500", placeholder: "Note for the auditor", value: o.note || "", "aria-label": "Note"});
+    const save = el("button", {class: "btn sm primary", type: "button", onclick: async () => {
+      try { await api("/api/compliance/override", {framework: fwKey, control: c.id, status: st.value || null, note: nt.value}); await refresh("comp"); }
+      catch (e) { alert(e.message); } }}, "Save");
+    const file = el("input", {type: "file", accept: ".pdf,.png,.jpg,.jpeg,.txt,.csv,.docx,.xlsx", class: "hidden"});
+    const valid = el("input", {type: "date", "aria-label": "Valid until (optional)", title: "Valid until (optional)"});
+    file.addEventListener("change", async () => {
+      if (!file.files[0]) return;
+      try { await upload(file.files[0], fwKey, c.id, valid.value); await refresh("comp"); } catch (e) { alert(e.message); }
+    });
+    body.append(el("div", {class: "pl-edit"}, st, nt, save),
+      el("div", {class: "pl-edit"}, el("span", {class: "micro"}, "Evidence valid until"), valid,
+        el("button", {class: "btn sm", type: "button", onclick: () => file.click()}, "Add evidence"), file,
+        el("span", {class: "micro"}, "PDF, PNG, JPG, TXT, CSV, DOCX, XLSX · 10 MB")));
+    return body;
+  }
+
+  function exportBar() {
+    const d = S.comp, picks = Object.keys(d.frameworks);
+    const boxes = picks.map(k => { const b = el("input", {type: "checkbox", value: k}); b.checked = true; return [b, el("label", {class: "check"}, b, d.frameworks[k].title)]; });
+    const opt = (label, on) => { const b = el("input", {type: "checkbox"}); b.checked = on; return [b, el("label", {class: "check"}, b, label)]; };
+    const [fnd, fl] = opt("Findings appendix", true), [na, nl] = opt('Controls "not assessed"', false);
+    const q = () => `frameworks=${boxes.filter(([b]) => b.checked).map(([b]) => b.value).join(",")}&findings=${+fnd.checked}&na=${+na.checked}`;
+    const go = kind => { if (!d.evidence_unlocked) return alert("Unlock the vault first: the export includes your encrypted evidence and notes.");
+      location.href = `/api/runs/${S.run}/${kind}?${q()}`; };
+    return el("details", {class: "co-export"}, el("summary", {}, "Export · PDF or evidence pack"),
+      el("div", {class: "row mt16"}, ...boxes.map(x => x[1])), el("div", {class: "row"}, fl, nl),
+      el("div", {class: "row mt16"}, el("button", {class: "btn primary", type: "button", onclick: () => go("compliance.pdf")}, "Download PDF"),
+        el("button", {class: "btn", type: "button", onclick: () => go("compliance-pack.zip")}, "Evidence pack (ZIP)")),
+      el("p", {class: "note"}, "The pack holds the PDF, the evidence files and SHA256SUMS.txt, so an auditor can check each file against the PDF's list."));
+  }
+
   function renderComp() {
-    const d = S.comp, fw = d.frameworks[S.fw];
+    const d = S.comp;
+    if (!d.frameworks[S.fw]) S.fw = Object.keys(d.frameworks)[0];
+    const fw = d.frameworks[S.fw];
     $("co-meta").textContent = d.analysed ? "" : "Not mapped yet: runs after the next AI assessment";
     $("co-tabs").replaceChildren(el("div", {class: "seg"}, ...Object.entries(d.frameworks).map(([k, v]) => el("button", {type: "button",
-      "aria-pressed": String(k === S.fw), onclick: () => { S.fw = k; S.cfilter = "all"; renderComp(); }}, v.title))));
+      "aria-pressed": String(k === S.fw), onclick: () => { S.fw = k; S.cfilter = "all"; renderComp(); }}, v.title))), exportBar());
     const n = fw.controls.length;
     $("co-bar").replaceChildren(...["met", "partial", "gap", "not_assessed"].map(s => {
       const i = el("i", {class: `cb-${s}`, title: `${CSTAT[s]}: ${fw.counts[s]}`}); i.style.setProperty("width", `${fw.counts[s] / n * 100}%`); return i; }));
     $("co-filter").replaceChildren(el("div", {class: "seg"}, ...["all", "gap", "partial", "met", "not_assessed"].map(s => el("button", {type: "button",
       "aria-pressed": String(S.cfilter === s), onclick: () => { S.cfilter = s; renderComp(); }}, `${s === "all" ? "All" : CSTAT[s]} · ${s === "all" ? n : fw.counts[s]}`))));
     const list = fw.controls.filter(c => S.cfilter === "all" || c.status === S.cfilter);
-    $("co-list").replaceChildren(...list.map(c => el("div", {class: `co-row cs-${c.status}`},
-      el("div", {class: "co-id"}, c.id), el("div", {}, el("b", {}, c.title), el("div", {class: "note m0"}, c.note || ""),
-        c.findings.length ? el("div", {class: "micro"}, c.findings.map(f => `${f} ${d.findings[f] || ""}`).join(" · ")) : null),
-      el("span", {class: `tag co-${c.status}`}, CSTAT[c.status]))));
+    $("co-list").replaceChildren(...list.map(c => {
+      const dt = el("details", {class: `co-row cs-${c.status}`, ...(S.open === `${S.fw}:${c.id}` ? {open: true} : {})},
+        el("summary", {}, el("div", {class: "co-id"}, c.id), el("div", {}, el("b", {}, c.title),
+          el("div", {class: "note m0"}, (c.override && c.override.note) || c.note || "")),
+          el("span", {class: "row"}, (c.evidence || []).length ? el("span", {class: "tag"}, `${c.evidence.length} file${c.evidence.length > 1 ? "s" : ""}`) : null,
+            el("span", {class: `tag co-${c.status}`}, CSTAT[c.status]))),
+        controlBody(c, S.fw));
+      dt.addEventListener("toggle", () => { if (dt.open) S.open = `${S.fw}:${c.id}`; });
+      return dt;
+    }));
   }
 
   return {show, refresh};

@@ -43,8 +43,9 @@ function showSection() {
   if (s === "schedules" && typeof Schedule !== "undefined") Schedule.load();
   if (s === "ticketing" && typeof Ticketing !== "undefined") Ticketing.load();
   if (s === "sites" && typeof Sites !== "undefined") Sites.load();
+  if (s === "evidence" && typeof Evidence !== "undefined") Evidence.load();
 }
-const SECTIONS = ["connectors", "users", "security", "account", "ai", "scope", "sites", "schedules", "ticketing", "appearance"];
+const SECTIONS = ["connectors", "users", "security", "account", "ai", "scope", "evidence", "sites", "schedules", "ticketing", "appearance"];
 window.addEventListener("hashchange", showSection);
 
 // -- connectors -----------------------------------------------------------------------

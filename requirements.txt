@@ -7,3 +7,4 @@ dnspython>=2.6
 webauthn>=2.2
 pyjwt>=2.8
 pywinrm>=0.4.3
+reportlab>=4.2

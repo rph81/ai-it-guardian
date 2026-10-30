@@ -26,6 +26,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
+import zipfile
 from pathlib import Path
 from typing import Optional
 
@@ -39,6 +41,8 @@ from guardian import remediate
 from guardian import notify
 from guardian import ticketing
 from guardian import sitestore
+from guardian import evidence
+from guardian import comppdf
 from guardian import connectors as conn
 from guardian.agents import ANALYSTS, LAYERS
 from guardian.controls import FRAMEWORKS, STATUSES as CONTROL_STATUSES
@@ -444,7 +448,8 @@ STATIC = {"/console.css": ("console.css", "text/css"), "/theme.js": ("theme.js",
           "/passkey.js": ("passkey.js", "text/javascript"), "/agents.js": ("agents.js", "text/javascript"),
           "/remediate.js": ("remediate.js", "text/javascript"), "/code.js": ("code.js", "text/javascript"),
           "/plan.js": ("plan.js", "text/javascript"), "/schedule.js": ("schedule.js", "text/javascript"),
-          "/ticketing.js": ("ticketing.js", "text/javascript"), "/sites.js": ("sites.js", "text/javascript")}
+          "/ticketing.js": ("ticketing.js", "text/javascript"), "/sites.js": ("sites.js", "text/javascript"),
+          "/evidence.js": ("evidence.js", "text/javascript")}
 PAGES = {"/": "console.html", "/settings": "settings.html", "/signin": "signin.html"}
 
 
@@ -1059,22 +1064,202 @@ def run_paths(run_id: str, request: Request):
     return {"paths": g.get("attack_paths") or [], "findings": titles, "analysed": "paths" in (g.get("agents") or {})}
 
 
-@app.get("/api/runs/{run_id}/compliance")
-def run_compliance(run_id: str, request: Request):
-    require(request)
-    g = _read_graph(run_dir(run_id))
+EVIDENCE_DIR = STATE / "evidence"
+
+
+def evidence_store():
+    return evidence.Store(vault, EVIDENCE_DIR)
+
+
+def compliance_view(run_id, sid):
+    """The agent's control statuses for a run, merged with the organisation's own statuses, notes and evidence
+    (only when this session holds the vault: they're encrypted)."""
+    d = run_dir(run_id)
+    g = _read_graph(d)
     done = g.get("compliance") or {}
     titles = {f["id"]: f.get("title") for f in g.get("findings") or []}
+    open_ids = {f["id"] for f in g.get("findings") or [] if is_open(f)}
+    unlocked = vault.unlocked and sid in vault.holders
+    st = evidence_store() if unlocked else None
+    overrides, ev = (st.overrides(), st.list()) if st else ({}, [])
     out = {}
     for key, fw in FRAMEWORKS.items():
         got = done.get(key, {})
-        if fw.get("optional") and not got:
+        if fw.get("optional") and not got and not any(k.startswith(key + ":") for k in overrides) \
+                and not any(c.startswith(key + ":") for e in ev for c in e.get("controls", [])):
             continue
         controls = [{"id": c, "title": t, **got.get(c, {"status": "not_assessed", "findings": [], "note": "Not mapped by the Compliance agent."})}
                     for c, t in fw["controls"]]
+        controls = evidence.merge(key, controls, overrides, ev, open_ids)
         out[key] = {"title": fw["title"], "controls": controls, "mapped": bool(got),
-                    "counts": {st: sum(1 for c in controls if c["status"] == st) for st in CONTROL_STATUSES}}
-    return {"frameworks": out, "findings": titles, "analysed": "compliance" in (g.get("agents") or {})}
+                    "counts": {s_: sum(1 for c in controls if c["status"] == s_) for s_ in CONTROL_STATUSES}}
+    return g, out, titles, unlocked, ev
+
+
+@app.get("/api/runs/{run_id}/compliance")
+def run_compliance(run_id: str, request: Request):
+    sid, s, user = require(request)
+    g, out, titles, unlocked, ev = compliance_view(run_id, sid)
+    return {"frameworks": out, "findings": titles, "analysed": "compliance" in (g.get("agents") or {}), "evidence_unlocked": unlocked}
+
+
+class OverrideBody(BaseModel):
+    framework: str
+    control: str
+    status: Optional[str] = None
+    note: str = ""
+
+
+@app.post("/api/compliance/override")
+def compliance_override(body: OverrideBody, request: Request):
+    sid, s, user = require(request, "operator", unlocked=True)
+    fw = FRAMEWORKS.get(body.framework)
+    if not fw or body.control not in {c for c, _ in fw["controls"]}:
+        raise HTTPException(404, "Unknown control")
+    if body.status is not None and body.status not in evidence.USER_STATUSES:
+        raise HTTPException(400, "Unknown status")
+    if len(body.note) > 500 or any(ord(ch) < 32 and ch not in "\n\t" for ch in body.note):
+        raise HTTPException(400, "The note is limited to 500 characters")
+    o = evidence_store().set_override(body.framework, body.control, body.status, body.note.strip(), user["name"])
+    vault.audit(user["email"], "compliance-status", f"{body.framework} {body.control}: {body.status or 'agent'}" + (" + note" if body.note else ""))
+    return {"ok": True, "override": o}
+
+
+@app.get("/api/evidence")
+def evidence_list(request: Request):
+    require(request, "operator", unlocked=True)
+    return {"evidence": [{**e, "state": evidence.state(e)} for e in evidence_store().list()], "max_bytes": evidence.MAX_BYTES,
+            "types": sorted(evidence.EXT)}
+
+
+@app.post("/api/evidence")
+async def evidence_upload(request: Request):
+    """Raw file body; name, controls and validity in headers (no multipart parser needed)."""
+    sid, s, user = require(request, "operator", unlocked=True)
+    cl = request.headers.get("content-length", "")
+    if not cl.isdigit() or int(cl) > evidence.MAX_BYTES:
+        raise HTTPException(413, "Files are limited to 10 MB")
+    data, size = bytearray(), 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > evidence.MAX_BYTES:
+            raise HTTPException(413, "Files are limited to 10 MB")
+        data += chunk
+    try:
+        name = urllib.parse.unquote(request.headers.get("x-filename", ""))
+        controls = evidence.check_controls(urllib.parse.unquote(request.headers.get("x-controls", "")).split(","), FRAMEWORKS)
+        valid = evidence.check_date(request.headers.get("x-valid-until", ""))
+        note = urllib.parse.unquote(request.headers.get("x-note", ""))[:300]
+        m = evidence_store().add(name, bytes(data), user["name"], controls, valid, note)
+    except (evidence.EvidenceError, ValueError) as e:
+        raise HTTPException(400, str(e))
+    vault.audit(user["email"], "evidence-added", f"{m['id']} {m['name']} sha256 {m['sha256']} for {', '.join(controls) or 'no control yet'}")
+    return {**m, "state": evidence.state(m)}
+
+
+class EvidenceEdit(BaseModel):
+    controls: Optional[list[str]] = None
+    valid_until: Optional[str] = None
+    note: Optional[str] = None
+
+
+@app.post("/api/evidence/{eid}")
+def evidence_edit(eid: str, body: EvidenceEdit, request: Request):
+    sid, s, user = require(request, "operator", unlocked=True)
+    try:
+        fields = {}
+        if body.controls is not None:
+            fields["controls"] = evidence.check_controls(body.controls, FRAMEWORKS)
+        if body.valid_until is not None:
+            fields["valid_until"] = evidence.check_date(body.valid_until)
+        if body.note is not None:
+            fields["note"] = body.note[:300]
+        m = evidence_store().update(eid, **fields)
+    except evidence.EvidenceError as e:
+        raise HTTPException(400, str(e))
+    vault.audit(user["email"], "evidence-changed", f"{eid} {m['name']}: {', '.join(m['controls'])}")
+    return {**m, "state": evidence.state(m)}
+
+
+@app.get("/api/evidence/{eid}/download")
+def evidence_download(eid: str, request: Request):
+    sid, s, user = require(request, "operator", unlocked=True)
+    try:
+        m, data = evidence_store().read(eid)
+    except evidence.EvidenceError as e:
+        raise HTTPException(404, str(e))
+    vault.audit(user["email"], "evidence-downloaded", f"{eid} {m['name']}")
+    return Response(data, media_type="application/octet-stream",
+                    headers={"Content-Disposition": f"attachment; filename=\"{m['name']}\"", "Cache-Control": "no-store",
+                             "Content-Security-Policy": "sandbox; default-src 'none'"})
+
+
+@app.delete("/api/evidence/{eid}")
+def evidence_delete(eid: str, request: Request):
+    sid, s, user = require(request, "admin", unlocked=True)
+    try:
+        m = evidence_store().delete(eid)
+    except evidence.EvidenceError as e:
+        raise HTTPException(404, str(e))
+    vault.audit(user["email"], "evidence-deleted", f"{eid} {m['name']} sha256 {m['sha256']}")
+    return {"ok": True}
+
+
+def _export_parts(run_id, request, frameworks, include_na):
+    sid, s, user = require(request, "operator", unlocked=True)
+    g, out, titles, unlocked, ev = compliance_view(run_id, sid)
+    pick = [f for f in (frameworks or "").split(",") if f in out] or list(out)
+    fws = {k: out[k] for k in pick}
+    rows = {r["id"]: r for r in tracking_rows(run_dir(run_id), g)}
+    findings = [{**f, "priority": rows.get(f["id"], {}).get("priority")} for f in g.get("findings") or [] if is_open(f)]
+    findings.sort(key=lambda f: (f.get("priority") or 9, f["id"]))
+    site_ = g.get("site") or {}
+    meta = {"site": site_.get("name") or (f"Network {site_['network']}" if site_.get("network") else "Assessed network"),
+            "run": run_id, "assessed": (g.get("started") or run_id)[:10], "exported_by": user["name"]}
+    ev = [{**e, "state": evidence.state(e)} for e in ev]
+    return user, meta, fws, findings, ev
+
+
+@app.get("/api/runs/{run_id}/compliance.pdf")
+def compliance_pdf(run_id: str, request: Request, frameworks: str = "", findings: int = 1, evidence_list: int = 1, na: int = 0):
+    user, meta, fws, fnd, ev = _export_parts(run_id, request, frameworks, bool(na))
+    pdf = comppdf.build(meta, fws, fnd, ev, bool(findings), bool(evidence_list), bool(na))
+    vault.audit(user["email"], "compliance-pdf", f"{run_id}: {', '.join(fws)}")
+    return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="guardian-compliance-{run_id}.pdf"',
+                                                                 "Cache-Control": "no-store"})
+
+
+@app.get("/api/runs/{run_id}/compliance-pack.zip")
+def compliance_pack(run_id: str, request: Request, frameworks: str = "", findings: int = 1, na: int = 0):
+    user, meta, fws, fnd, ev = _export_parts(run_id, request, frameworks, bool(na))
+    used = {e["id"] for fw in fws.values() for c in fw["controls"] for e in c.get("evidence", [])}
+    store = evidence_store()
+    pdf = comppdf.build(meta, fws, fnd, ev, bool(findings), True, bool(na))
+    buf, manifest, names = io.BytesIO(), [], set()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr(f"guardian-compliance-{run_id}.pdf", pdf)
+        for e in ev:
+            if e["id"] not in used:
+                continue
+            try:
+                m, data = store.read(e["id"])
+            except evidence.EvidenceError as err:
+                manifest.append({"file": None, "name": e["name"], "sha256": e["sha256"], "error": str(err)})
+                continue
+            name = m["name"]
+            while name.lower() in names:
+                name = f"{e['id']}-{m['name']}"
+            names.add(name.lower())
+            z.writestr(f"evidence/{name}", data)
+            manifest.append({"file": f"evidence/{name}", "sha256": m["sha256"], "size": m["size"], "uploaded_by": m["uploaded_by"],
+                             "uploaded_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(m["uploaded_at"])),
+                             "valid_until": m.get("valid_until"), "controls": m.get("controls", [])})
+        z.writestr("manifest.json", json.dumps({"run": run_id, "exported_by": user["name"], "exported_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                                                "frameworks": list(fws), "files": manifest}, indent=1))
+        z.writestr("SHA256SUMS.txt", "".join(f"{x['sha256']}  {x['file']}\n" for x in manifest if x.get("file")))
+    vault.audit(user["email"], "compliance-pack", f"{run_id}: {', '.join(fws)}, {len(manifest)} evidence file(s)")
+    return Response(buf.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="guardian-compliance-pack-{run_id}.zip"', "Cache-Control": "no-store"})
 
 
 # -- schedules, unattended AI runs and alerts -----------------------------------------------------------
