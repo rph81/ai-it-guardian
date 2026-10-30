@@ -18,6 +18,8 @@ credentials, and public vulnerability lookups (NVD, CISA KEV, FIRST EPSS, endofl
 |---|---|
 | **Scanner** (`guardian/collector.py`) | ARP, ports, services, OS guesses, web titles, TLS, UPnP, mDNS, router forwards, what the internet sees on the public IP. No AI, free, ~7 min. |
 | **Agents** (`guardian/agents.py`) | Discovery → Orchestrator → specialists (Network, OS & endpoints, Web & APIs, Firmware, Internet perimeter), a few at a time → analysts (Risk analyst, Attack paths, Compliance) → Report writer. See [docs/AGENTS.md](docs/AGENTS.md). |
+| **Active Directory** (`guardian/access.py`) | Through the AD connector (normal domain user, LDAPS): admins, Kerberoastable / AS-REP roastable accounts, delegation, password and lockout policy, krbtgt age, stale accounts, end-of-life Windows, LAPS. Modelled on Tenable Identity Exposure. |
+| **Patch & configuration** (`guardian/access.py`) | Through the Linux SSH, Synology and Proxmox connectors: pending security updates, OSV-vulnerable packages, reboot needed, end-of-life OS, SSH, firewall, users, hardening; DSM version; Proxmox updates, users, backup jobs. Fixed read-only checks only. Modelled on Nessus credentialed scans and Qualys VMDR. |
 | **Risk analyst** | Ranks every finding P1–P4 by real-world risk: actively exploited (CISA KEV) and ransomware use, EPSS exploitation probability, internet exposure, device criticality. Merges duplicates; links findings to the previous assessment. Modelled on Tenable VPR, Qualys TruRisk, Rapid7 Active Risk. |
 | **Attack paths** | Chains findings into realistic paths to what matters most and names the choke-point fixes. Reasoned from evidence, never exploited. Modelled on Tenable One, Wiz toxic combinations, NodeZero narratives. |
 | **Compliance** (`guardian/controls.py`) | Maps the assessment to CIS Controls v8 IG1 (56), ISO 27001:2022 Annex A (93), NIS2 Art. 21 (10) and Swiss revFADP / nLPD (9): met, partly, gap or not assessed, with evidence. |
@@ -67,6 +69,8 @@ exposure) and `previous` (the same issue in the previous assessment).
 - HTTP is GET/HEAD only, without credentials; probes are nmap scripts from the safe/discovery categories.
 - Text found on the network (banners, pages, device names) is passed to agents as data, never as instructions.
 - The chat can't send orders by itself: it proposes them, and an operator confirms.
+- Connector credentials reach a run through a pipe, live only in its memory, and are used by fixed, named read-only
+  checks; agents never see them. Connector agents run only when the vault was unlocked when the run started.
 - Analysts work on the findings only; the only outside data they fetch is the public CISA KEV and FIRST EPSS feeds
   (and web search for the Risk analyst). They can't send notes or start other agents.
 - API keys are given to a run in memory only; agents never see them or connector passwords.
@@ -77,7 +81,7 @@ exposure) and `previous` (the same issue in the previous assessment).
 
 1. **Now**: read-only assessment, live agents, agent-to-agent notes, Orchestrator chat, cost tracking.
    **Agents v2, wave 1 (now)**: Risk analyst, Attack paths, Compliance; fix plan with re-check; schedules; alerts.
-   **Wave 2 (next)**: Active Directory agent; Patch & configuration agent (Linux SSH, Synology, Proxmox).
+   **Wave 2 (now)**: Active Directory agent; Patch & configuration agent (Linux SSH, Synology, Proxmox).
    **Wave 3**: Microsoft 365 connector with Microsoft 365 & Entra ID and Device fleet agents; Windows (WinRM) connector;
    first ticketing integration. Then several customers (sites) in one console.
 2. **Next**: agents use the connectors (inside view of NAS, hypervisors, servers); more connector sign-in methods

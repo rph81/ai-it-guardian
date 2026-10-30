@@ -301,6 +301,12 @@ Code agent then reads the flagged files and gives the verdict (Malicious, Suspic
 $0.10–$1. Without a key you still get the static and dependency checks. Private repositories aren't supported.
 The container needs outbound HTTPS to `api.github.com`, `codeload.github.com` and `api.osv.dev` for this.
 
+**Look inside your systems (optional).** Add connectors in **Settings › Connectors**: Active Directory, Linux
+servers (SSH), Synology, Proxmox VE / Backup Server. The **Active Directory** and **Patch & configuration** agents then
+use them during AI assessments: missing security updates, vulnerable packages, admin and Kerberos weaknesses, hardening.
+Connectors are only handed to a run while the vault is unlocked, so start AI assessments while you're signed in.
+For Linux, test the connector in Settings first: Guardian then trusts that server's SSH host key. Details: [docs/AGENTS.md](docs/AGENTS.md).
+
 **Fix plan, attack paths and compliance.** After an AI assessment, the **Fix plan** tab (or **Plan** in the left menu)
 lists every open finding ranked P1 to P4 by the Risk analyst, with why. Give each an owner; the due date follows from the
 priority, and **Re-check** sends one finding back to the agent that found it. **Attack paths** shows how an attacker

@@ -17,6 +17,7 @@ All agents follow the same rules (the `COMMON` prompt):
 ```
 Scanner ─▶ Discovery ─▶ Orchestrator ─▶ Specialists (in parallel, scaled for big sites)
                                             Network · OS & endpoints · Web & APIs · Firmware · Internet perimeter
+                                            + through connectors: Active Directory · Patch & configuration
                                    ─▶ Analysts (one after another)
                                             Risk analyst ─▶ Attack paths ─▶ Compliance
                                    ─▶ Report writer
@@ -42,6 +43,43 @@ several copies for large sites; analysts always run as one copy.
 | **Web & APIs** | Admin pages over HTTP, TLS and certificates, security headers, exposed APIs and default pages | HTTP GET/HEAD, TLS inspection, probes, CVE lookup |
 | **Firmware** | Installed firmware vs the vendor's latest release, end of support, known-exploited firmware CVEs | HTTP GET, CVE lookup, web search |
 | **Internet perimeter** | Public IP as seen by Shodan InternetDB, UPnP port forwards, mapped to the device behind them | public-IP data, CVE lookup |
+| **Active Directory** | The Windows domain, through the AD connector (see below) | fixed read-only LDAP queries |
+| **Patch & configuration** | Inside servers, through the Linux SSH, Synology and Proxmox connectors (see below) | fixed read-only checks, OSV, CVE and end-of-life databases |
+
+## Specialists that sign in through a connector (Agents v2, wave 2)
+
+They run site-wide, only when a matching connector exists **and the vault was unlocked when the run started** (the
+console decrypts the connectors and hands them to the run through a pipe; they stay in the run's memory and are never
+written to disk, logs or the environment). Agents never see a password, token or key: they choose a named check and
+Guardian's code signs in. Scheduled AI runs while the vault is locked skip these agents ("needs a connector").
+
+### Active Directory (`ad`)
+
+**Modelled on:** Tenable Identity Exposure; the Active Directory modules of Pentera and Horizon3 NodeZero (read-only:
+nothing is cracked or attacked). **Needs:** the Active Directory connector, a normal domain user over LDAPS.
+
+| Query | What it finds |
+|---|---|
+| `privileged_groups`, `admin_count_users` | Members of Domain/Enterprise/Schema Admins, Administrators, Account/Backup/Server/Print Operators, DnsAdmins, GPO creators (nested membership resolved) |
+| `kerberoastable_users`, `asrep_roastable_users` | Accounts whose passwords anyone on the network can try to crack offline |
+| `unconstrained_delegation`, `constrained_delegation` | Accounts and computers trusted to impersonate users |
+| `domain_policy` | Password length, history, complexity, lockout, machine-account quota, functional level |
+| `krbtgt`, `builtin_accounts`, `password_never_expires`, `password_not_required`, `reversible_or_des`, `sid_history` | Account hygiene |
+| `stale_users`, `stale_computers`, `computer_os`, `domain_controllers` | Unused accounts, end-of-life Windows |
+| `laps_coverage`, `trusts`, `gpos` | Local admin passwords, domain trusts, group policies |
+
+### Patch & configuration (`patch`)
+
+**Modelled on:** Nessus credentialed scans, Qualys VMDR and Policy Compliance, Rapid7 InsightVM, CIS Benchmarks.
+**Needs:** a Linux SSH, Synology DSM, Proxmox VE or Proxmox Backup Server connector.
+
+| System | Checks (all read-only) |
+|---|---|
+| Linux (SSH as a normal user, no sudo) | `os_release`, `pending_updates` (incl. security updates and package-list age), `reboot_required`, `auto_updates`, `packages` + `linux_vulnerable_packages` (every installed package against OSV for Debian, Ubuntu LTS, Alpine), `ssh_config`, `listening`, `firewall`, `users`, `services`, `disk_encryption`, `time_sync`, `kernel_hardening` |
+| Synology DSM (non-admin user) | DSM version, model, update status where the account may read it |
+| Proxmox VE / Backup Server (read-only token) | A fixed list of GET paths: version, node status, pending apt updates, subscription, certificates, firewall options, cluster resources, backup jobs, users, storage, guest configs; on PBS datastores, verify, prune and sync jobs |
+
+The agent can't run its own commands or API paths: anything outside these lists is refused.
 
 ## Analysts
 
@@ -118,11 +156,10 @@ When an operator sends an order from the chat or presses **Re-check** on a findi
 follow-up and updates the finding (`update_finding`: resolved with evidence, or still open with new evidence). The
 analysts then run again in update mode, so priorities, attack paths and the compliance map reflect the change.
 
-## Coming next (Agents v2, waves 2 and 3)
+## Coming next (Agents v2, wave 3)
 
 | Agent | Modelled on | Needs |
 |---|---|---|
-| **Active Directory** | Tenable Identity Exposure; AD checks in Pentera / NodeZero (read-only) | Active Directory connector (exists) |
-| **Patch & configuration** | Nessus credentialed scans, Qualys VMDR + Policy Compliance, Rapid7 InsightVM, CIS Benchmarks | Linux SSH, Synology, Proxmox connectors (exist); Windows (WinRM) connector |
+| Windows in **Patch & configuration** | Nessus / Qualys credentialed Windows checks | Windows (WinRM) connector |
 | **Microsoft 365 & Entra ID** | Microsoft Secure Score / Defender, Tenable Identity Exposure for Entra, Qualys SaaS posture | Microsoft 365 connector (read-only Graph app) |
 | **Device fleet** | Tenable / Qualys / Rapid7 endpoint agents, Defender Vulnerability Management | Microsoft 365 connector (Intune, Defender) |

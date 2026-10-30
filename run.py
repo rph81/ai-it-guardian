@@ -8,6 +8,7 @@
   python3 run.py --report DIR    re-render the HTML report only
 """
 import argparse
+import json
 import os
 import sys
 import time
@@ -27,8 +28,17 @@ def load_env():
 
 def main():
     load_env()
-    from guardian import changes, collector, report
+    from guardian import access, changes, collector, report
     from guardian.graph import Graph
+
+    # Connector credentials come from the console through stdin (never a file or the environment) and stay in memory.
+    if os.environ.pop("GUARDIAN_ACCESS", "") == "stdin":
+        try:
+            data = json.loads(sys.stdin.read() or "{}")
+            access.load(data, data.get("state_dir") or os.path.join(HERE, "console"))
+            del data
+        except ValueError:
+            print("[console] could not read the connectors; continuing without them", flush=True)
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--iface", default=os.environ.get("GUARDIAN_IFACE", "eth0"))

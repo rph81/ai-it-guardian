@@ -357,12 +357,19 @@ class Job:
 job = Job()
 
 
-async def run_job(cmd, extra_env):
+async def run_job(cmd, extra_env, stdin=None):
     try:
         job.proc = await asyncio.create_subprocess_exec(
             *cmd, cwd=str(BASE), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-            env={**os.environ, "PYTHONUNBUFFERED": "1", **extra_env}, start_new_session=True)
+            stdin=asyncio.subprocess.PIPE if stdin else asyncio.subprocess.DEVNULL,
+            env={**os.environ, "PYTHONUNBUFFERED": "1", **extra_env, **({"GUARDIAN_ACCESS": "stdin"} if stdin else {})},
+            start_new_session=True)
         extra_env.clear()
+        if stdin:
+            job.proc.stdin.write(stdin)
+            await job.proc.stdin.drain()
+            job.proc.stdin.close()
+            stdin = None
         async for raw in job.proc.stdout:
             job.add(raw.decode("utf-8", "replace").rstrip("\n"))
         job.exit_code = await job.proc.wait()
@@ -1145,7 +1152,7 @@ def scheduled_tick(now=None):
     stored = vault.get("schedule", {})
     stored["last"] = cfg["last"]
     vault.put("schedule", stored)
-    start_job(mode, None, "Schedule", extra, note=note)
+    start_job(mode, None, "Schedule", extra, note=note, stdin=connector_handoff() if mode == "full" else None)
     vault.audit("system", "scheduled-run", MODES[mode]["label"] + (f" ({note})" if note else ""))
     return mode
 
@@ -1370,14 +1377,36 @@ def launch(mode, run_id, sid, user, inbox=None):
         if keys.get("nvd"):
             extra["NVD_API_KEY"] = keys["nvd"]
         vault.audit(user["email"], "secret-used", "API keys for an AI assessment")
+    stdin = None
+    if mode in ("full", "resume", "followup"):
+        stdin = connector_handoff()
+        if stdin:
+            vault.audit(user["email"], "secret-used", "Connectors for the Active Directory and Patch & configuration agents")
     if inbox:
         chat.send_to_inbox(run_dir(run_id), inbox, user["name"])
-    status = start_job(mode, run_id, user["name"], extra)
+    status = start_job(mode, run_id, user["name"], extra, stdin=stdin)
     vault.audit(user["email"], "scan-started", MODES[mode]["label"])
     return status
 
 
-def start_job(mode, run_id, by, extra, note=None):
+HANDOFF_TYPES = ("active_directory", "linux_ssh", "synology", "proxmox_ve", "proxmox_bs")
+
+
+def connector_handoff():
+    """The connectors the connector agents use, decrypted, as bytes for the run's stdin. None when there are none."""
+    if not vault.unlocked:
+        return None
+    items = [{"id": c["id"], "type": c["type"], "name": c.get("name") or conn.CATALOG[c["type"]]["label"],
+              "fields": store.fields_with_secrets(c), "pin": c.get("pin")}
+             for c in store.connectors() if c.get("type") in HANDOFF_TYPES]
+    if not items:
+        return None
+    key = next((r["private"] for r in vault.load_records("secret") if "private" in r), None) \
+        if any(i["type"] == "linux_ssh" for i in items) else None
+    return json.dumps({"connectors": items, "ssh_private_key": key, "state_dir": str(STATE)}).encode()
+
+
+def start_job(mode, run_id, by, extra, note=None, stdin=None):
     """Start run.py for this mode. Callers have checked permissions and gathered the keys it needs."""
     cmd = [PYTHON, str(BASE / "run.py"), *MODES[mode]["args"]]
     target = None
@@ -1391,7 +1420,7 @@ def start_job(mode, run_id, by, extra, note=None):
     job.add(f"[console] {MODES[mode]['label']} started by {by}")
     if note:
         job.add(f"[console] {note}")
-    asyncio.create_task(run_job(cmd, extra))
+    asyncio.create_task(run_job(cmd, extra, stdin))
     return job.status()
 
 

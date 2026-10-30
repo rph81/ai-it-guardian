@@ -13,7 +13,7 @@ import time
 import urllib.parse
 import urllib.request
 
-from . import netutil
+from . import access, netutil
 from .collector import parse_nmap_xml
 from .controls import FRAMEWORKS, STATUSES
 from .graph import SEVERITIES, is_open
@@ -153,6 +153,38 @@ class Toolbox:
                     "severity": {"type": "string", "enum": SEVERITIES},
                     "evidence": {"type": "string", "description": "What the re-check observed."}},
                     "required": ["id", "status", "evidence"], "additionalProperties": False}},
+            # -- connector tools (Active Directory, Patch & configuration): sign in read-only through a connector ----------
+            "list_connectors": {
+                "description": "The connectors set up for this site that your layer can use: id, type, name and the hosts or domain they cover.",
+                "input_schema": {"type": "object", "properties": {}, "additionalProperties": False}},
+            "ad_query": {
+                "description": "Run one fixed, read-only LDAP query against Active Directory through a connector. Queries: "
+                               + ", ".join(access.AD_QUERIES) + ". 'days' sets the age for stale_users / stale_computers (default 90).",
+                "input_schema": {"type": "object", "properties": {
+                    "connector": {"type": "string"}, "query": {"type": "string", "enum": list(access.AD_QUERIES)},
+                    "days": {"type": "integer", "minimum": 30, "maximum": 365}},
+                    "required": ["connector", "query"], "additionalProperties": False}},
+            "linux_check": {
+                "description": "Run one fixed, read-only check on a Linux server over SSH (as the connector's normal user, no sudo). Checks: "
+                               + ", ".join(access.LINUX_CHECKS) + ".",
+                "input_schema": {"type": "object", "properties": {
+                    "connector": {"type": "string"}, "host": {"type": "string"},
+                    "check": {"type": "string", "enum": list(access.LINUX_CHECKS)}},
+                    "required": ["connector", "host", "check"], "additionalProperties": False}},
+            "linux_vulnerable_packages": {
+                "description": "Check every installed package on a Debian, Ubuntu LTS or Alpine server against the OSV database; returns the packages with advisories.",
+                "input_schema": {"type": "object", "properties": {"connector": {"type": "string"}, "host": {"type": "string"}},
+                                 "required": ["connector", "host"], "additionalProperties": False}},
+            "synology_info": {
+                "description": "Read DSM version, model and update status from a Synology NAS through its read-only connector.",
+                "input_schema": {"type": "object", "properties": {"connector": {"type": "string"}},
+                                 "required": ["connector"], "additionalProperties": False}},
+            "proxmox_get": {
+                "description": "Read one Proxmox VE or Backup Server API path through a read-only token (GET only, fixed list of paths: "
+                               "version, nodes and their status, pending apt updates, subscription, certificates, firewall options, "
+                               "cluster resources and backup jobs, users, storage, guests and their config; for PBS also datastores, verify, sync and prune jobs).",
+                "input_schema": {"type": "object", "properties": {"connector": {"type": "string"}, "path": {"type": "string"}},
+                                 "required": ["connector", "path"], "additionalProperties": False}},
             # -- analyst tools: they read the run's findings and enrich them; nothing touches the network except the
             # EPSS and KEV feeds -------------------------------------------------------------------------------------
             "list_findings": {
@@ -342,6 +374,30 @@ class Toolbox:
                      finding=id, severity=f["severity"], status=status)
         return {"ok": True}
 
+    # -- connector tools -------------------------------------------------------------------------------------
+    def t_list_connectors(self):
+        want = access.CONNECTOR_AGENTS.get(self.agent)
+        rows = [c for c in access.summary() if not want or c["type"] in want]
+        return rows or {"note": "No connector of this kind was handed to this run (none set up, or the vault was locked when it started)."}
+
+    def t_ad_query(self, connector, query, days=90):
+        self.g.log(self.agent, f"ad_query {query}")
+        return access.ad_query(connector, query, days)
+
+    def t_linux_check(self, connector, host, check):
+        self.g.log(self.agent, f"linux_check {host} {check}")
+        return access.linux_check(connector, host, check)
+
+    def t_linux_vulnerable_packages(self, connector, host):
+        self.g.log(self.agent, f"linux_vulnerable_packages {host}")
+        return access.linux_vulnerable_packages(connector, host)
+
+    def t_synology_info(self, connector):
+        return access.synology_info(connector)
+
+    def t_proxmox_get(self, connector, path):
+        return access.proxmox_get(connector, path)
+
     # -- analyst tools ---------------------------------------------------------------------------------------
     def _finding(self, fid):
         f = next((x for x in self.g.data["findings"] if x["id"] == fid), None)
@@ -497,6 +553,18 @@ def describe(name, args):
         return f'Updated {a.get("id")}: ' + ("confirmed fixed" if a.get("status") == "resolved" else "still open, new evidence added")
     if name == "web_search":
         return f'Web search: {a.get("query", "")}'
+    if name == "list_connectors":
+        return "Read the connectors it can use"
+    if name == "ad_query":
+        return f'Active Directory: {a.get("query", "").replace("_", " ")}'
+    if name == "linux_check":
+        return f'{a.get("host")}: {a.get("check", "").replace("_", " ")}'
+    if name == "linux_vulnerable_packages":
+        return f'{a.get("host")}: packages against OSV'
+    if name == "synology_info":
+        return "Synology: DSM version and updates"
+    if name == "proxmox_get":
+        return f'Proxmox: {a.get("path")}'
     if name == "list_findings":
         return "Read the findings" + (f' of {a["layer"]}' if a.get("layer") else "")
     if name == "finding_details":
@@ -525,4 +593,5 @@ def describe(name, args):
 
 
 # checks that touch the network or the internet (drawn as a pulse on the map); the rest only read the run's data
-ACTIVE = {"probe", "http_get", "tls_inspect", "cve_lookup", "eol_lookup", "web_search", "epss_lookup", "kev_details"}
+ACTIVE = {"probe", "http_get", "tls_inspect", "cve_lookup", "eol_lookup", "web_search", "epss_lookup", "kev_details",
+          "ad_query", "linux_check", "linux_vulnerable_packages", "synology_info", "proxmox_get"}

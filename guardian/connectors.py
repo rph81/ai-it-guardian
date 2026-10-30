@@ -72,7 +72,7 @@ CATALOG = {
     "linux_ssh": {
         "label": "Linux servers (SSH)", "icon": "SSH", "color": "#475569", "category": "Endpoints & network",
         "status": "available", "multi": True,
-        "summary": "Linux hosts", "checks": "Pending security updates, users with sudo, SSH settings, running services. One key covers several hosts.",
+        "summary": "Linux hosts", "checks": "Used by the Patch & configuration agent: pending security updates, vulnerable packages (OSV), reboot needed, SSH, firewall, users, hardening. One key covers several hosts.",
         "steps": ["On each server: adduser --disabled-password guardian (no sudo, no extra groups).",
                   "Put Guardian's public key (below) in /home/guardian/.ssh/authorized_keys.",
                   "List the servers below, one per line. The test warns you if the account can use sudo."],
@@ -97,7 +97,7 @@ CATALOG = {
     "active_directory": {
         "label": "Active Directory", "icon": "AD", "color": "#2563eb", "category": "Identity & productivity",
         "status": "available", "multi": True, "always": True,
-        "summary": "Windows domain", "checks": "Stale and admin accounts, password policy, Kerberos settings, GPO hygiene.",
+        "summary": "Windows domain", "checks": "Used by the Active Directory agent: admin accounts, Kerberoastable and AS-REP roastable accounts, delegation, password and lockout policy, krbtgt age, stale accounts, LAPS, trusts.",
         "steps": ["Create a normal domain user, e.g. svc-guardian. Domain Users membership is enough to read the directory.",
                   "Set its password not to expire, or note the date: Guardian shows when it's due.",
                   "Use LDAPS (port 636) so the password is encrypted on the network."],

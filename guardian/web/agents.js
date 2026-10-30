@@ -1,7 +1,7 @@
 "use strict";
 // Agents tab, live agent map and the Orchestrator chat. Uses $, el, api and me from console.js.
 const Agents = (() => {
-  const ORDER = ["collector", "discovery", "orchestrator", "network", "os", "web", "firmware", "wan", "risk", "paths", "compliance", "report"];
+  const ORDER = ["collector", "discovery", "orchestrator", "network", "os", "web", "firmware", "wan", "ad", "patch", "risk", "paths", "compliance", "report"];
   const NODES = {
     orchestrator: {x: 400, y: 320, sub: "assigns · relays", center: true},
     collector: {x: 400, y: 70, sub: "program, not AI"},
@@ -12,18 +12,22 @@ const Agents = (() => {
     firmware: {x: 100, y: 380, sub: "vendor releases"},
     wan: {x: 160, y: 150, sub: "public IP, forwards"},
     report: {x: 400, y: 470, sub: "score, summary", small: true},
+    ad: {x: 285, y: 225, sub: "directory, admins, Kerberos", small: true},
+    patch: {x: 515, y: 225, sub: "updates, hardening", small: true},
     risk: {x: 250, y: 450, sub: "KEV, EPSS, priority", small: true},
     paths: {x: 550, y: 450, sub: "chains, choke points", small: true},
     compliance: {x: 400, y: 600, sub: "CIS, ISO, NIS2, nLPD", small: true},
   };
   const SHORT = {collector: "Scanner", discovery: "Discovery", orchestrator: "Orchestrator", network: "Network", os: "OS & endpoints",
                  web: "Web & APIs", firmware: "Firmware", wan: "Internet perimeter", report: "Report writer",
-                 risk: "Risk analyst", paths: "Attack paths", compliance: "Compliance"};
+                 ad: "Active Directory", patch: "Patch & config", risk: "Risk analyst", paths: "Attack paths", compliance: "Compliance"};
   const KIND = {order: "order", tool: "check", read: "read", find: "finding", note: "note", note_outcome: "then", done: "done", start: "start", error: "error"};
   const CHECKS = {probe: "probes", http_get: "web pages", tls_inspect: "TLS checks", cve_lookup: "CVE lookups", eol_lookup: "EOL lookups",
                   web_search: "searches", wan_info: "public-IP lookups", annotate_asset: "identifications",
                   epss_lookup: "EPSS lookups", kev_details: "KEV lookups", set_priority: "rankings", merge_findings: "merges",
-                  record_path: "attack paths", set_controls: "control updates", link_previous: "links to last run"};
+                  record_path: "attack paths", set_controls: "control updates", link_previous: "links to last run",
+                  ad_query: "directory queries", linux_check: "server checks", linux_vulnerable_packages: "package scans",
+                  synology_info: "NAS reads", proxmox_get: "Proxmox reads"};
   const NS = "http://www.w3.org/2000/svg";
   const S = {run: null, since: 0, events: [], agents: {}, notes: [], running: false, timer: null, t0: null,
              replay: null, speed: 3, links: {}, selected: null, nfind: 0, nnote: 0, cost: 0, view: null, drill: null};
