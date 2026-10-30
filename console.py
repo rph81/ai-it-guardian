@@ -44,6 +44,9 @@ from guardian import sitestore
 from guardian import evidence
 from guardian import comppdf
 from guardian import fixes
+from guardian import importers
+from guardian import report as report_mod
+from guardian.graph import Graph
 from guardian import connectors as conn
 from guardian.agents import ANALYSTS, LAYERS
 from guardian.controls import FRAMEWORKS, STATUSES as CONTROL_STATUSES
@@ -986,7 +989,8 @@ def tracking_rows(d, g):
                      "recommendation": f.get("recommendation"), "first_seen": first, "due": due,
                      "overdue": bool(due and not verified and status not in ("fixed", "accepted") and due < time.strftime("%Y-%m-%d")),
                      "owner": t.get("owner", ""), "status": status, "note": t.get("note", ""), "updated_by": t.get("updated_by"),
-                     "recheck": t.get("recheck"), "carried_from": t.get("carried_from"), "ticket": t.get("ticket")})
+                     "recheck": t.get("recheck"), "carried_from": t.get("carried_from"), "ticket": t.get("ticket"),
+                     "source": f.get("source"), "also": f.get("also_reported_by", [])})
     rows.sort(key=lambda r: (r["status"] == "verified", r["priority"], SEV_ORDER.index(r["severity"] or "info"), r["id"]))
     return rows
 
@@ -1513,6 +1517,98 @@ def notify_test(request: Request):
     result = notify.send(_notify_secrets(cfg), alert)
     vault.audit(user["email"], "alert-test", ", ".join(f"{k} {v if v == 'ok' else 'failed'}" for k, v in result.items()))
     return {"result": result}
+
+
+# -- import of other scanners' results (Nessus, OpenVAS, Qualys, Rapid7, CSV) ------------------------------------
+def _import_priority(f, kev, exposed):
+    """Same rules as the Risk analyst's, without the AI: actively exploited or internet-exposed first."""
+    if any(c in kev for c in f["cves"]):
+        return 1 if exposed or f["severity"] in ("critical", "high") else 2, True
+    base = {"critical": 2, "high": 2, "medium": 3, "low": 4}.get(f["severity"], 4)
+    return (1 if exposed and base <= 2 else base), False
+
+
+def _merge_import(g, rows, fmt):
+    """Add imported findings to the run. A finding about the same device that names the same CVE (or has the same
+    title) as an open finding is a duplicate: the other scanner is added to that finding's evidence instead."""
+    from guardian.tools import _kev_set
+    kev = _kev_set() if any(r["cves"] for r in rows) else {}
+    wan = g.data.get("wan") or {}
+    forwarded = {m.split("->")[1].split(":")[0] for m in wan.get("upnp_port_mappings") or [] if "->" in m}
+    added = merged = 0
+    with g.lock:
+        open_f = [f for f in g.data["findings"] if is_open(f)]
+    for r in rows:
+        asset = r["ip"] or "site"
+        dup = next((f for f in open_f if f.get("asset") == asset and (
+            (r["cves"] and set(r["cves"]) & set((f.get("risk") or {}).get("cves", []) + list(f.get("cves", []))))
+            or f.get("title", "").strip().lower() == r["title"].strip().lower())), None)
+        if dup:
+            with g.lock:
+                dup.setdefault("also_reported_by", [])
+                if r["ref"] not in dup["also_reported_by"]:
+                    dup["also_reported_by"].append(r["ref"])
+            merged += 1
+            continue
+        if r["ip"]:
+            g.merge_asset(r["ip"], f"import:{fmt}")
+        prio, is_kev = _import_priority(r, kev, r["ip"] in forwarded)
+        evidence = (f'{FORMAT_LABEL.get(fmt, fmt)} ({r["ref"]})' + (f', port {r["port"]}' if r["port"] else "") + ": " + r["evidence"]).strip()
+        fid = g.add_finding({"title": r["title"], "severity": r["severity"], "asset": asset, "layer": "import", "status": "open",
+                             "evidence": evidence[:3000], "recommendation": r["recommendation"], "cves": r["cves"],
+                             "source": r["source"], "first_seen": time.strftime("%Y-%m-%d")})
+        with g.lock:
+            f = next(x for x in g.data["findings"] if x["id"] == fid)
+            f["risk"] = {"priority": prio, "kev": is_kev or None, "cves": r["cves"], "due_days": PRIORITY_DAYS[prio], "by": f"import:{fmt}",
+                         "exposure": "internet" if r["ip"] in forwarded else "internal",
+                         "reason": ("Actively exploited (CISA KEV). " if is_kev else "") + f"Imported from {FORMAT_LABEL.get(fmt, fmt)} ({r['severity']})."}
+            f["risk"] = {k: v for k, v in f["risk"].items() if v is not None}
+            open_f.append(f)
+        added += 1
+    return added, merged
+
+
+FORMAT_LABEL = importers.FORMATS
+
+
+@app.post("/api/runs/{run_id}/import")
+async def import_results(run_id: str, request: Request, commit: int = 0):
+    """Preview (commit=0) or import (commit=1) another scanner's report into this run. The raw file is the body."""
+    sid, s, user = require(request, "operator")
+    d = run_dir(run_id)
+    if job.running and job.run_id == run_id:
+        raise HTTPException(409, "This run is still in progress")
+    cl = request.headers.get("content-length", "")
+    if not cl.isdigit() or int(cl) > importers.MAX_BYTES:
+        raise HTTPException(413, "Files are limited to 50 MB")
+    data = bytearray()
+    async for chunk in request.stream():
+        data += chunk
+        if len(data) > importers.MAX_BYTES:
+            raise HTTPException(413, "Files are limited to 50 MB")
+    name = urllib.parse.unquote(request.headers.get("x-filename", ""))[:200]
+    try:
+        fmt, rows = await asyncio.to_thread(importers.parse, name, bytes(data))
+    except importers.ImportError_ as e:
+        raise HTTPException(400, str(e))
+    g = Graph(str(d))
+    known = set((g.data.get("assets") or {}))
+    summary = {"format": FORMAT_LABEL[fmt], "findings": len(rows), "devices": len({r["ip"] for r in rows if r["ip"]}),
+               "new_devices": len({r["ip"] for r in rows if r["ip"] and r["ip"] not in known}),
+               "by_severity": {sv: sum(1 for r in rows if r["severity"] == sv) for sv in importers.SEVERITIES if sv != "info"},
+               "sample": [{k: r[k] for k in ("ip", "port", "title", "severity", "cves")} for r in rows[:8]]}
+    if not commit:
+        return summary
+    added, merged = await asyncio.to_thread(_merge_import, g, rows, fmt)
+    g.data.setdefault("imports", []).append({"t": time.time(), "by": user["name"], "file": name, "format": FORMAT_LABEL[fmt],
+                                             "added": added, "merged": merged})
+    g.save()
+    try:
+        report_mod.render(g, str(d / "report.html"))
+    except Exception as e:                                             # noqa: BLE001 - the import itself succeeded
+        print(f"report re-render failed: {e}", file=sys.stderr, flush=True)
+    vault.audit(user["email"], "results-imported", f"{run_id}: {FORMAT_LABEL[fmt]} {name}: {added} added, {merged} merged")
+    return {**summary, "added": added, "merged": merged}
 
 
 # -- ticketing (ServiceNow, ConnectWise PSA, Autotask, HaloPSA, Jira Service Management) ------------------------------

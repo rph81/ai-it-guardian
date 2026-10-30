@@ -39,6 +39,8 @@ cmd("Emulation.setEmulatedMedia", features=[{"name": "prefers-color-scheme", "va
 nav("/", 4); shot("01-dashboard"); shot("02-dashboard-full", height=2000)
 for t, name in [("report", "03-report"), ("plan", "04-fix-plan"), ("paths", "05-attack-paths"), ("comp", "06-compliance"), ("agents", "07-agents"), ("map", "08-map-chat"), ("log", "09-live-log")]:
     js(f"showTab('{t}')"); time.sleep(2.5)
+    if t == "plan":
+        js("document.querySelector('#pl-import details') && (document.querySelector('#pl-import details').open = true)"); time.sleep(0.3)
     if t in ("plan", "comp"):
         js(f"document.querySelector('#{'pl-rows' if t == 'plan' else 'co-list'} details') && (document.querySelector('#{'pl-rows' if t == 'plan' else 'co-list'} details').open = true)"); time.sleep(0.5)
     shot(name, "#workspace", height=1500, pad=6)

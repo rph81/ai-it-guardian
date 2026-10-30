@@ -170,6 +170,13 @@ Every open finding, ranked by the Risk analyst. Each row shows:
   Service Management, if set up); the ticket number then shows on the row. **Sync tickets** reads the tickets' states
   back.
 
+**Import results from another scanner** (top of the Fix plan): choose a **Nessus** (.nessus), **OpenVAS / Greenbone**,
+**Qualys** or **Rapid7 InsightVM** XML export, or a **CSV** (columns ip, title, severity, and optionally cve, port,
+description, solution), click **Preview** to see how many findings and devices it holds, then **Import**. Imported
+findings show a **from Nessus** (etc.) chip and get a priority like the others (actively exploited CVEs and services
+forwarded to the internet first). A finding Guardian already has on the same device (same CVE or title) isn't
+duplicated: it shows **also 1 scanner**. Details: [IMPORT.md](IMPORT.md).
+
 Filters: **Open**, **Overdue**, **Priority 1–2**, **Done**, **All**. Owners, dates, statuses and notes carry over to the
 next assessment when the Risk analyst recognises the same issue.
 
@@ -437,4 +444,5 @@ workspace you use for Guardian.
 | Azure posture agent | [AZURE.md](AZURE.md) |
 | Compliance evidence and PDF | [COMPLIANCE.md](COMPLIANCE.md) |
 | Fixes and patching | [FIXES.md](FIXES.md) |
+| Importing other scanners' results | [IMPORT.md](IMPORT.md) |
 | On-site collector | [ONSITE-COLLECTOR.md](ONSITE-COLLECTOR.md) |

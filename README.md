@@ -13,6 +13,7 @@ You watch them work live and can talk to the Orchestrator that coordinates them.
 **Azure posture agent: [docs/AZURE.md](docs/AZURE.md).**
 **Compliance evidence and PDF: [docs/COMPLIANCE.md](docs/COMPLIANCE.md).**
 **Fixes and patching (agentless and NinjaOne): [docs/FIXES.md](docs/FIXES.md).**
+**Importing other scanners' results (Nessus, OpenVAS, Qualys, Rapid7, CSV): [docs/IMPORT.md](docs/IMPORT.md).**
 **On-site collector (sites at customers): [docs/ONSITE-COLLECTOR.md](docs/ONSITE-COLLECTOR.md).**
 
 Nothing on the network is changed. Agents have no shell: only fixed, non-intrusive checks, web requests without
@@ -101,8 +102,9 @@ exposure) and `previous` (the same issue in the previous assessment).
    **On-site collector, phase A (now)**: sites, collector gateway, enrollment, heartbeat, revoke; collector with
    pause / disconnect. Phase B: scans and AI assessments through the collector.
    **Ticketing (now)**: ServiceNow, ConnectWise PSA, Autotask PSA, HaloPSA, Jira Service Management.
+   **Scanner import (now)**: Nessus, OpenVAS / Greenbone, Qualys, Rapid7 InsightVM, CSV into a run's Fix plan.
    **Next, in this order**: several customers (sites)
-   in one console; import of other scanners' results; MITRE ATT&CK mapping; integrations with business systems
+   in one console (with ticketing per customer); MITRE ATT&CK mapping; integrations with business systems
    (SAP S/4HANA, SAP BTP and other leading platforms); medium / low priority gap features; AWS posture agent;
    on-site collector phases B–D. Then a **final testing phase** against real systems (real AI run, AD, Microsoft 365, fix recipes, NinjaOne,
    Azure, Windows, ServiceNow, alert channels, collector packages, outside penetration test of the gateway).

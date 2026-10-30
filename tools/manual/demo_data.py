@@ -43,6 +43,12 @@ for title, sev, asset, layer, prio, kev, epss in F:
                    "evidence": "Observed by the agent (sample data).", "recommendation": "See the fix in the report (sample data)."})
     g.data["findings"][-1]["risk"] = {k: v for k, v in {"priority": prio, "reason": ("Actively exploited (CISA KEV). " if kev else "") + ("Business-critical device." if prio <= 2 else "Limited exposure; fix in the normal cycle."),
         "exposure": "internet" if prio == 1 else "internal", "kev": kev or None, "epss": epss, "due_days": {1: 7, 2: 30, 3: 90, 4: 180}[prio], "by": "risk"}.items() if v is not None}
+g.add_finding({"title": "OpenSSH Terrapin attack (CVE-2023-48795)", "severity": "medium", "asset": "192.168.50.21", "layer": "import", "status": "open",
+               "first_seen": "2026-10-30", "source": "Nessus", "cves": ["CVE-2023-48795"], "evidence": "Nessus (Nessus 187315), port 22/tcp: sample data.",
+               "recommendation": "Update OpenSSH (sample data)."})
+g.data["findings"][-1]["risk"] = {"priority": 3, "reason": "Imported from Nessus (medium).", "exposure": "internal", "due_days": 90, "by": "import:nessus"}
+g.data["findings"][3]["also_reported_by"] = ["Nessus 97833"]
+g.data["imports"] = [{"t": time.time(), "by": "Demo Admin", "file": "office-scan.nessus", "format": "Nessus", "added": 1, "merged": 1}]
 g.data["attack_paths"] = [{"id": "AP01", "title": "From the internet to the file server", "target": "File server data", "likelihood": "high",
     "steps": [{"text": "Brute force on RDP without NLA", "finding": "F001"}, {"text": "Missing patches allow privilege escalation", "finding": "F003"}, {"text": "SMBv1 reaches the NAS", "finding": "F004"}],
     "choke_points": [{"text": "Put RDP behind a VPN and require NLA", "finding": "F001"}], "summary": "One exposed service plus missing patches give an attacker the file server."}]

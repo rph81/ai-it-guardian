@@ -21,6 +21,7 @@ const Plan = (() => {
 
   // -- fix plan --------------------------------------------------------------------------------
   function renderPlan() {
+    if (!$("pl-import").childElementCount) { const p = importPanel(); if (p) $("pl-import").append(p); }
     const t = S.tracking, rows = t.rows;
     $("pl-meta").textContent = `${t.counts.open} open · ${t.counts.overdue} overdue · ${t.counts.verified} verified fixed` +
       (t.ranked ? "" : " · not ranked yet: priorities come from severity until the Risk analyst runs");
@@ -36,13 +37,47 @@ const Plan = (() => {
     $("pl-rows").replaceChildren(...(list.length ? list.map(row) : [el("p", {class: "note"}, rows.length ? "Nothing here." : "Findings appear after an AI assessment.")]));
   }
 
+  // -- import of another scanner's report ------------------------------------------------------------
+  function importPanel() {
+    if (!canEdit()) return null;
+    const file = el("input", {type: "file", accept: ".nessus,.xml,.csv", "aria-label": "Scanner report"});
+    const out = el("div", {class: "note"});
+    const send = async commit => {
+      const f = file.files[0];
+      if (!f) { out.textContent = "Choose a file first."; return null; }
+      const r = await fetch(`/api/runs/${S.run}/import?commit=${commit}`, {method: "POST", body: f, headers: {"X-Guardian": "1",
+        "Content-Type": "application/octet-stream", "X-Filename": encodeURIComponent(f.name)}});
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.detail || `Failed (${r.status})`);
+      return d;
+    };
+    const go = el("button", {class: "btn sm primary", type: "button", disabled: true, onclick: async () => {
+      try { const d = await send(1); out.textContent = `Imported: ${d.added} new finding(s), ${d.merged} merged into existing ones.`; go.disabled = true; refresh("plan"); }
+      catch (e) { out.textContent = e.message; } }}, "Import");
+    const pre = el("button", {class: "btn sm", type: "button", onclick: async () => {
+      out.textContent = "Reading…"; go.disabled = true;
+      try {
+        const d = await send(0);
+        const sev = Object.entries(d.by_severity).filter(([, n]) => n).map(([k, n]) => `${n} ${k}`).join(", ");
+        out.replaceChildren(el("b", {}, `${d.format}: ${d.findings} finding(s) on ${d.devices} device(s)`),
+          ` (${sev || "none"}${d.new_devices ? `; ${d.new_devices} device(s) Guardian hasn't seen` : ""}). Duplicates of Guardian's findings are merged on import.`);
+        go.disabled = !d.findings;
+      } catch (e) { out.textContent = e.message; } }}, "Preview");
+    file.addEventListener("change", () => { go.disabled = true; out.textContent = ""; });
+    return el("details", {class: "co-export"}, el("summary", {}, "Import results from another scanner"),
+      el("p", {class: "note"}, "Nessus (.nessus), OpenVAS / Greenbone, Qualys or Rapid7 InsightVM XML, or a CSV with ip, title, severity and optionally cve, port, description, solution. Up to 50 MB."),
+      el("div", {class: "row mt16"}, file, pre, go), out);
+  }
+
   function row(r) {
     const chips = el("div", {class: "row"}, el("span", {class: `prio p${r.priority}`}, `P${r.priority}`),
       el("span", {class: `sev ${r.severity}`}, r.severity), r.kev ? el("span", {class: "tag error"}, "Actively exploited") : null,
       r.ransomware ? el("span", {class: "tag error"}, "Ransomware") : null,
       r.epss != null ? el("span", {class: "tag"}, `EPSS ${(r.epss * 100).toFixed(r.epss < 0.01 ? 2 : 0)}%`) : null,
       r.exposure ? el("span", {class: "tag"}, r.exposure) : null, el("span", {class: "tag"}, STATUS[r.status] || r.status),
-      r.overdue ? el("span", {class: "tag error"}, "Overdue") : null, r.carried_from ? el("span", {class: "tag new"}, "carried over") : null,
+      r.overdue ? el("span", {class: "tag error"}, "Overdue") : null,
+      r.source ? el("span", {class: "tag", title: "Imported from another scanner"}, `from ${r.source}`) : null,
+      (r.also || []).length ? el("span", {class: "tag", title: r.also.join(", ")}, `also ${r.also.length} scanner${r.also.length > 1 ? "s" : ""}`) : null, r.carried_from ? el("span", {class: "tag new"}, "carried over") : null,
       r.ticket ? el("a", {class: "tag", href: r.ticket.url, target: "_blank", rel: "noopener"}, `${r.ticket.number} · ${(r.ticket.state || "").replace("_", " ")}`) : null);
     const head = el("div", {class: "pl-head"}, el("div", {}, el("b", {}, r.title), el("div", {class: "meta"}, `${r.id} · ${r.asset} · first seen ${r.first_seen}`)), chips);
     const body = el("div", {class: "pl-body"});
