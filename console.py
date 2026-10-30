@@ -191,6 +191,7 @@ def public_config():
                       for k in LAYERS if k not in ANALYSTS},
             "agents": {k: v["title"] for k, v in LAYERS.items()}, "analysts": ANALYSTS,
             "anthropic_key_set": bool(keys.get("anthropic")), "nvd_key_set": bool(keys.get("nvd")),
+            "anthropic_key_expires": vault.get("anthropic_key_expires"),
             "models": MODELS, "efforts": EFFORTS, "rounds": ROUNDS, "parallels": PARALLELS}
 
 
@@ -1514,24 +1515,30 @@ def notify_test(request: Request):
     return {"result": result}
 
 
-# -- ticketing (ServiceNow first) ----------------------------------------------------------------------
-TICKET_DEFAULT = {"system": "servicenow", "on": False, "auto": False, "threshold": "p2", "resolve_on_verify": False,
-                  "instance": "", "username": "", "table": "incident", "assignment_group": "", "caller_id": "", "category": ""}
+# -- ticketing (ServiceNow, ConnectWise PSA, Autotask, HaloPSA, Jira Service Management) ------------------------------
+TICKET_DEFAULT = {"system": "servicenow", "on": False, "auto": False, "threshold": "p2", "resolve_on_verify": False, "settings": {}}
 
 
 def ticket_cfg():
-    return {**TICKET_DEFAULT, **vault.get("ticketing", {})}
+    raw = vault.get("ticketing", {})
+    if raw and "settings" not in raw:                  # older versions stored the ServiceNow fields flat
+        raw = {**{k: raw[k] for k in ("on", "auto", "threshold", "resolve_on_verify") if k in raw}, "system": "servicenow",
+               "settings": {"servicenow": {k: raw.get(k, "") for k in ("instance", "username", "table", "assignment_group", "caller_id", "category")}}}
+    cfg = {**TICKET_DEFAULT, **raw}
+    if cfg["system"] not in ticketing.SYSTEMS:
+        cfg["system"] = "servicenow"
+    return cfg
 
 
 def ticket_client(cfg=None):
     cfg = cfg or ticket_cfg()
     if not cfg.get("on"):
         raise HTTPException(400, "Ticketing is off: set it up in Settings › Ticketing")
-    pw = vault.get("ticketing_secrets", {}).get("servicenow")
-    if not pw:
-        raise HTTPException(400, "The ServiceNow password isn't saved yet")
+    secret = vault.get("ticketing_secrets", {}).get(cfg["system"])
+    if not secret:
+        raise HTTPException(400, f"The {ticketing.SYSTEMS[cfg['system']]['label']} secret isn't saved yet")
     try:
-        return ticketing.ServiceNow(cfg, pw)
+        return ticketing.make(cfg["system"], {"table": "incident", **(cfg["settings"].get(cfg["system"]) or {})}, secret)
     except ticketing.TicketError as e:
         raise HTTPException(400, str(e))
 
@@ -1544,9 +1551,9 @@ def _ticket_finding(run_id, row, g):
 def sync_tickets(run_id, auto=False):
     """Open tickets for new high-priority findings (auto), and read ticket states back into the Fix plan."""
     cfg = ticket_cfg()
-    if not cfg.get("on") or not vault.get("ticketing_secrets", {}).get("servicenow"):
+    if not cfg.get("on") or not vault.get("ticketing_secrets", {}).get(cfg["system"]):
         return {"created": 0, "updated": 0}
-    sn = ticketing.ServiceNow(cfg, vault.get("ticketing_secrets", {})["servicenow"])
+    sn = ticket_client(cfg)
     d = run_dir(run_id)
     g = _read_graph(d)
     data = _tracking(d)
@@ -1562,17 +1569,17 @@ def sync_tickets(run_id, auto=False):
             data[row["id"]] = {**t, "ticket": tk}
             created += 1
             continue
-        if not tk or tk.get("system") != "servicenow":
+        if not tk or tk.get("system") != cfg["system"]:
             continue
         data[row["id"]] = t
-        st = sn.state(tk["sys_id"])
+        st = sn.state(tk.get("id") or tk.get("sys_id"))
         if st["state"] != tk.get("state"):
             tk["state"], updated = st["state"], updated + 1
         if st["state"] in ("resolved", "closed") and t.get("status", "open") in ("open", "in_progress") and row["status"] != "verified":
             t["status"] = "fixed"
-            t["note"] = (t.get("note", "") + f" · {tk['number']} {st['state']} in ServiceNow; Re-check to verify").strip(" ·")[:300]
+            t["note"] = (t.get("note", "") + f" · {tk['number']} {st['state']} in {ticketing.SYSTEMS[cfg['system']]['label']}; Re-check to verify").strip(" ·")[:300]
         if row["status"] == "verified" and not tk.get("verified_noted"):
-            sn.note(tk["sys_id"], f"Guardian re-checked {row['id']} \"{row['title']}\" and confirmed it is fixed.",
+            sn.note(tk.get("id") or tk.get("sys_id"), f"Guardian re-checked {row['id']} \"{row['title']}\" and confirmed it is fixed.",
                     resolve=bool(cfg.get("resolve_on_verify")) and st["state"] not in ("resolved", "closed"))
             tk["verified_noted"] = True
             updated += 1
@@ -1585,21 +1592,19 @@ def sync_tickets(run_id, auto=False):
 @app.get("/api/ticketing")
 def ticketing_get(request: Request):
     require(request, "admin")
-    return {**ticket_cfg(), "secret_set": bool(vault.get("ticketing_secrets", {}).get("servicenow"))}
+    secrets_ = vault.get("ticketing_secrets", {})
+    return {**ticket_cfg(), "secret_set": {k: bool(secrets_.get(k)) for k in ticketing.SYSTEMS},
+            "systems": {k: {"label": v["label"], "fields": v["fields"]} for k, v in ticketing.SYSTEMS.items()}}
 
 
 class TicketingBody(BaseModel):
+    system: str = "servicenow"
     on: bool = False
     auto: bool = False
     threshold: str = "p2"
     resolve_on_verify: bool = False
-    instance: str = ""
-    username: str = ""
-    password: Optional[str] = None
-    table: str = "incident"
-    assignment_group: str = ""
-    caller_id: str = ""
-    category: str = ""
+    fields: dict = {}
+    secret: Optional[str] = None
 
 
 @app.post("/api/ticketing")
@@ -1607,22 +1612,34 @@ def ticketing_set(body: TicketingBody, request: Request):
     sid, s, user = require(request, "admin")
     if body.threshold not in notify.THRESHOLDS:
         raise HTTPException(400, "Unknown threshold")
-    cfg = {k: (v.strip() if isinstance(v, str) else v) for k, v in body.model_dump().items() if k != "password"}
-    cfg["system"] = "servicenow"
+    if body.system not in ticketing.SYSTEMS:
+        raise HTTPException(400, "Unknown ticketing system")
+    spec = {f["name"]: f for f in ticketing.SYSTEMS[body.system]["fields"] if not f["secret"]}
+    vals = {}
+    for k, v in (body.fields or {}).items():
+        if k not in spec:
+            continue
+        v = str(v).strip()
+        if len(v) > 200 or any(ord(c) < 32 for c in v):
+            raise HTTPException(400, f"{spec[k]['label']} is too long")
+        vals[k] = v
+    cfg = ticket_cfg()
+    cfg.update(system=body.system, on=body.on, auto=body.auto, threshold=body.threshold, resolve_on_verify=body.resolve_on_verify)
+    cfg["settings"][body.system] = vals
+    secrets_ = vault.get("ticketing_secrets", {})
+    if body.secret:
+        secrets_[body.system] = body.secret
+        vault.put("ticketing_secrets", secrets_)
     if cfg["on"]:
-        if not ticketing.INSTANCE_RE.match(cfg["instance"].rstrip("/")) or not cfg["username"]:
-            raise HTTPException(400, "Enter the instance address (https://yourcompany.service-now.com) and the integration user")
-        if not re.fullmatch(r"[a-z_][a-z0-9_]{0,79}", cfg["table"]):
-            raise HTTPException(400, "Unknown table name")
-    for k in ("assignment_group", "caller_id", "category"):
-        if len(cfg[k]) > 100:
-            raise HTTPException(400, f"{k} is too long")
-    if body.password:
-        vault.put("ticketing_secrets", {"servicenow": body.password})
-    if cfg["on"] and not vault.get("ticketing_secrets", {}).get("servicenow"):
-        raise HTTPException(400, "Enter the integration user's password")
+        try:
+            ticketing.make(body.system, {"table": "incident", **vals}, secrets_.get(body.system) or "x")
+        except ticketing.TicketError as e:
+            raise HTTPException(400, str(e))
+        if not secrets_.get(body.system):
+            raise HTTPException(400, f"Enter the {next(f['label'] for f in ticketing.SYSTEMS[body.system]['fields'] if f['secret'])}")
     vault.put("ticketing", cfg)
-    vault.audit(user["email"], "ticketing-changed", f"ServiceNow {'on' if cfg['on'] else 'off'}, auto {cfg['auto']} ({cfg['threshold']})")
+    label = ticketing.SYSTEMS[body.system]["label"]
+    vault.audit(user["email"], "ticketing-changed", f"{label} {'on' if cfg['on'] else 'off'}, auto {cfg['auto']} ({cfg['threshold']})")
     return {"ok": True}
 
 
@@ -1945,6 +1962,7 @@ class Settings(BaseModel):
     scale: dict = {}
     anthropic_key: Optional[str] = None
     nvd_key: Optional[str] = None
+    anthropic_key_expires: Optional[str] = None      # "YYYY-MM-DD", "" clears; the console can't read it from the key
 
 
 @app.post("/api/settings")
@@ -1974,6 +1992,14 @@ def save_settings(body: Settings, request: Request):
                "GUARDIAN_SCALE_MODE": body.scale_mode, "GUARDIAN_PER_COPY": body.per_copy, "GUARDIAN_SCALE": ",".join(sorted(scale))})
     if off != before["agents_off"]:
         vault.audit(user["email"], "agents-changed", "Turned off: " + (", ".join(off) or "none"))
+    exp = body.anthropic_key_expires
+    if exp is not None:
+        exp = exp.strip()
+        if exp and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", exp):
+            raise HTTPException(400, "The expiry date looks like 2027-10-31")
+        if exp != (vault.get("anthropic_key_expires") or ""):
+            vault.put("anthropic_key_expires", exp or None)
+            vault.audit(user["email"], "api-key-expiry", exp or "cleared")
     new = {k: (v or "").strip() for k, v in (("anthropic", body.anthropic_key), ("nvd", body.nvd_key)) if (v or "").strip()}
     if new:
         if sid not in vault.holders:

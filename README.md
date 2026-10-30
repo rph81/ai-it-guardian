@@ -100,7 +100,8 @@ exposure) and `previous` (the same issue in the previous assessment).
    separate fix app, NinjaOne patch status and patch jobs; Proxmox snapshots before Linux updates.
    **On-site collector, phase A (now)**: sites, collector gateway, enrollment, heartbeat, revoke; collector with
    pause / disconnect. Phase B: scans and AI assessments through the collector.
-   **Next, in this order**: more ticketing systems (ConnectWise PSA, Autotask, HaloPSA, Jira Service Management); several customers (sites)
+   **Ticketing (now)**: ServiceNow, ConnectWise PSA, Autotask PSA, HaloPSA, Jira Service Management.
+   **Next, in this order**: several customers (sites)
    in one console; import of other scanners' results; MITRE ATT&CK mapping; integrations with business systems
    (SAP S/4HANA, SAP BTP and other leading platforms); medium / low priority gap features; AWS posture agent;
    on-site collector phases B–D. Then a **final testing phase** against real systems (real AI run, AD, Microsoft 365, fix recipes, NinjaOne,

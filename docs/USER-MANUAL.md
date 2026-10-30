@@ -54,7 +54,8 @@ The installation itself is described in [INSTALL.md](../INSTALL.md). After the f
    in a safe). It opens the vault if every admin passkey is lost.
 5. Unlock the vault and go to **Settings › AI agents**:
    - **Anthropic API key**: from the Claude Console, ideally a dedicated workspace with a spend limit and a service
-     account (role Developer).
+     account (role Developer). Enter the key's **expiry date** too: the dashboard then warns you 30 days before it
+     expires.
    - **NVD API key** (optional, free from nvd.nist.gov): makes CVE look-ups faster.
 6. Run a first **Scan only** to see your devices, then a **Scan + AI assessment**.
 
@@ -98,6 +99,11 @@ only when an admin or operator confirms with their passkey, and closes on sign-o
 | **Open latest report** | Opens the most recent report in a new tab |
 | **Replay agent map** | Replays how the agents worked in the latest run |
 | Vault chip, **Lock**, your name, **Sign out** | Vault state and your session |
+
+Theme, light / dark mode and text size are set only in **Settings › Appearance**.
+
+**API key warning:** 30 days before the Anthropic key's expiry date (entered in Settings › AI agents), a yellow
+banner at the top says when it expires and what to do; after the date it says AI runs have stopped.
 
 **Posture / Status**: the latest assessment's headline, the **score** (0–100) and grade, number of **devices**,
 **internet** port forwards, open **services**, and **open findings** by severity. **Findings / Trend** shows how the
@@ -146,7 +152,7 @@ its own.
 
 The report a manager or customer reads: score and grade, headline, executive summary, findings per severity, **What
 to fix first** (with effort and the finding IDs), then every finding with evidence and the recommended fix, the
-devices, and the compliance summary. **Light / Dark** in the report only changes how the report itself is shown.
+devices, and the compliance summary. The report follows your theme from Settings › Appearance.
 
 ### 6.2 Fix plan
 
@@ -160,8 +166,9 @@ Every open finding, ranked by the Risk analyst. Each row shows:
   priority), a **Status** (Open, In progress, Fixed – to verify, Risk accepted) and a **Note**.
 - **Re-check** sends this one finding back to the agent that found it (a short, cheap follow-up). If it's fixed, the
   status becomes **Verified fixed**.
-- **Open ticket** creates a ServiceNow incident (if ticketing is set up); the ticket number then shows on the row.
-  **Sync tickets** reads the tickets' states back.
+- **Open ticket** creates a ticket in your ticketing system (ServiceNow, ConnectWise PSA, Autotask, HaloPSA or Jira
+  Service Management, if set up); the ticket number then shows on the row. **Sync tickets** reads the tickets' states
+  back.
 
 Filters: **Open**, **Overdue**, **Priority 1–2**, **Done**, **All**. Owners, dates, statuses and notes carry over to the
 next assessment when the Risk analyst recognises the same issue.
@@ -310,8 +317,8 @@ Your passkeys (add a second one on another device), your name.
 
 ![AI agents](manual/10-settings-ai.png)
 
-The Anthropic and NVD keys, the model and effort, which agents run, and scaling for large sites (several copies of a
-specialist in parallel).
+The Anthropic and NVD keys, the Anthropic key's **expiry date** (for the dashboard warning), the model and effort,
+which agents run, and scaling for large sites (several copies of a specialist in parallel).
 
 ### Scan scope
 
@@ -350,15 +357,17 @@ Paused by customer, Disconnected by customer or Not reachable. Details: [ONSITE-
 
 ![Ticketing](manual/10-settings-ticketing.png)
 
-ServiceNow: instance, integration user, optional assignment group / caller / category, automatic tickets after each
-assessment for a chosen priority, and resolving the ticket when Guardian verifies the fix. Details:
-[TICKETING.md](TICKETING.md).
+Pick the **system**: ServiceNow, ConnectWise PSA, Autotask PSA, HaloPSA or Jira Service Management. The fields
+change with the system (address, API user, secret, and where tickets go: board, queue, customer or project). Then:
+automatic tickets after each assessment for a chosen priority, closing the ticket when Guardian verifies the fix, and
+**Test the connection**. Details: [TICKETING.md](TICKETING.md).
 
 ### Appearance
 
 ![Appearance](manual/10-settings-appearance.png)
 
-Theme, light / dark mode and **text size** (useful on large 4K screens). Saved per user.
+Theme, light / dark mode and **text size** (useful on large 4K screens). Saved per user. This is the only place to
+change them; every page and the report follow it.
 
 ---
 
@@ -424,7 +433,7 @@ workspace you use for Guardian.
 | Installation and certificates | [INSTALL.md](../INSTALL.md) |
 | Every agent and what it checks | [AGENTS.md](AGENTS.md) |
 | Schedules, alerts, fix plan | [SCHEDULES-ALERTS.md](SCHEDULES-ALERTS.md) |
-| Ticketing (ServiceNow) | [TICKETING.md](TICKETING.md) |
+| Ticketing (ServiceNow, ConnectWise, Autotask, HaloPSA, Jira) | [TICKETING.md](TICKETING.md) |
 | Azure posture agent | [AZURE.md](AZURE.md) |
 | Compliance evidence and PDF | [COMPLIANCE.md](COMPLIANCE.md) |
 | Fixes and patching | [FIXES.md](FIXES.md) |

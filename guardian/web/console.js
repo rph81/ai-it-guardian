@@ -260,6 +260,16 @@ function renderJob(s) {
   $("job-bar").style.width = busy ? `${Math.round((s.step - 0.5) / s.steps.length * 100)}%` : "100%";
 }
 
+// Anthropic keys expire (Claude Console); Guardian can't read the date from the key, so an admin enters it in Settings › AI.
+function keyWarning(c) {
+  const exp = c && c.anthropic_key_expires, box = $("key-warn");
+  const days = exp ? Math.ceil((new Date(exp + "T23:59:59") - Date.now()) / 86400000) : null;
+  box.classList.toggle("hidden", days === null || days > 30);
+  if (days === null || days > 30) return;
+  box.textContent = days < 0 ? `The Anthropic API key expired on ${exp}: AI assessments, re-checks and chat stop working. Create a new key in the Claude Console and paste it in Settings › AI agents.`
+    : `The Anthropic API key expires in ${days} day${days === 1 ? "" : "s"} (${exp}). Create a new key in the Claude Console and paste it in Settings › AI agents before then.`;
+}
+
 async function poll() {
   clearTimeout(polling);
   try {
@@ -269,6 +279,7 @@ async function poll() {
     if (s.running) { polling = setTimeout(poll, 2000); return; }
     const o = await api("/api/overview");
     renderRuns(o.runs, o.job);
+    keyWarning(o.config);
     if (s.run_id && s.exit_code === 0) {
       const r = o.runs.find(x => x.id === s.run_id);
       if (r && r.has_report && s.mode !== "collect") openRun(r.id, true);

@@ -1,7 +1,31 @@
-# Ticketing (ServiceNow)
+# Ticketing
 
-Guardian can open a ServiceNow incident for each finding, keep it linked across assessments, read its state back into
-the **Fix plan**, and add a work note (optionally resolve it) when a re-check verifies the fix.
+Guardian can open a ticket for each finding in **ServiceNow, ConnectWise PSA, Autotask PSA, HaloPSA or Jira Service
+Management**, keep it linked across assessments, read its state back into the **Fix plan**, and add a note (optionally
+close it) when a re-check verifies the fix. Choose the system in **Settings › Ticketing**; the fields change with it.
+
+## The other systems
+
+| System | What to create | Fields in Guardian | How Guardian finds its own ticket again |
+|---|---|---|---|
+| **ConnectWise PSA** | API member with a role that can read/edit service tickets; API keys (public / private); a clientId from developer.connectwise.com | API site (e.g. `https://api-eu.myconnectwise.net`), company ID, public key, private key, client ID, service board, customer company identifier, optional closing status | `externalXRef` holds a hash of the Guardian reference |
+| **Autotask PSA** | API-only user (Admin › Resources) with an API tracking identifier | Zone URL (e.g. `https://webservices16.autotask.net`), API user, secret, tracking identifier, company ID, queue ID | The description carries `ai-it-guardian:<run>/<finding>` |
+| **HaloPSA** | API application (client credentials) allowed to read and edit tickets | Halo address, client ID, client secret, customer (client) ID, optional ticket type ID | Search on the Guardian reference in the details |
+| **Jira Service Management** | An account for Guardian and an API token (id.atlassian.com › Security › API tokens) | Site (`https://yourcompany.atlassian.net`), account e-mail, API token, project key, optional issue type | A label `guardian-<hash>` (plus `ai-it-guardian`) |
+
+| Guardian priority | ConnectWise severity / impact | Autotask priority | HaloPSA priority | Jira |
+|---|---|---|---|---|
+| P1 | High / High | Critical | 1 | in the summary `[Guardian P1]` |
+| P2 | High / Medium | High | 2 | `[Guardian P2]` |
+| P3 | Medium / Medium | Medium | 3 | `[Guardian P3]` |
+| P4 | Low / Low | Low | 4 | `[Guardian P4]` |
+
+Closing on a verified fix: ConnectWise sets the closing status (default "Closed (resolved)"), Autotask sets status
+Complete (5), HaloPSA adds a private note with status Closed (9), Jira adds a comment and moves the issue through the
+first transition into the Done category. Tested against simulated APIs (31 checks); not yet against real instances.
+Status names and IDs differ between installations: check the closing status, queue and ticket type IDs in yours.
+
+## ServiceNow
 
 ## Set up ServiceNow
 

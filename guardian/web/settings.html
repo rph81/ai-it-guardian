@@ -32,7 +32,6 @@
       <p class="sub">Connectors, people, security, AI agents and appearance.</p>
     </div>
     <div class="who"><span class="vchip" id="vault-chip"></span><button class="btn sm hidden" id="unlock">Unlock</button>
-      <button class="chip" id="mode-toggle">Dark</button>
       <span class="meta" id="me"></span><button class="btn sm" id="signout">Sign out</button></div>
   </div>
 
@@ -116,6 +115,8 @@
           <div class="cgrid" id="agent-cards"></div>
           <div class="field"><label for="akey">Anthropic API key <span id="akey-state"></span></label>
             <input id="akey" type="password" autocomplete="off" placeholder="Paste to set or replace"></div>
+          <div class="field"><label for="akey-exp">Anthropic key expires on (from the Claude Console; Guardian warns 30 days before)</label>
+            <input id="akey-exp" type="date" class="wauto"></div>
           <div class="field"><label for="nkey">NVD API key <span id="nkey-state"></span></label>
             <input id="nkey" type="password" autocomplete="off" placeholder="Optional; speeds up CVE lookups"></div>
           <div class="row field"><button class="btn primary sm" type="submit">Save</button><span class="note" id="ai-msg"></span></div>
@@ -299,20 +300,16 @@
       </section>
       <section class="stack hidden" id="s-ticketing">
         <form class="card" id="tk-form">
-          <div class="sechead"><h2>ServiceNow</h2><span class="tag" id="tk-state"></span></div>
-          <p class="note">Guardian opens one incident per finding (Table API, a dedicated integration user with the <span class="mono">itil</span> role), keeps it across runs, reads its state back into the Fix plan, and adds a work note when a re-check verifies the fix. The password is needed after scheduled runs, so like the alert secrets it's protected by the server's file permissions.</p>
-          <label class="check"><input type="checkbox" id="tk-on"> Use ServiceNow</label>
-          <div class="f3 field"><div><label for="tk-inst">Instance</label><input id="tk-inst" class="mono" placeholder="https://yourcompany.service-now.com"></div>
-            <div><label for="tk-user">Integration user</label><input id="tk-user" class="mono" autocomplete="off"></div>
-            <div><label for="tk-pass">Password</label><input id="tk-pass" type="password" autocomplete="new-password" placeholder="unchanged"></div></div>
-          <div class="f3 field"><div><label for="tk-group">Assignment group (optional)</label><input id="tk-group" class="mono" placeholder="sys_id or name"></div>
-            <div><label for="tk-caller">Caller (optional)</label><input id="tk-caller" class="mono" placeholder="sys_id or user name"></div>
-            <div><label for="tk-cat">Category (optional)</label><input id="tk-cat" class="mono" placeholder="e.g. network"></div></div>
+          <div class="sechead"><h2>Ticketing</h2><span class="tag" id="tk-state"></span></div>
+          <p class="note">Guardian opens one ticket per finding in your ticketing system, keeps it across assessments, reads its state back into the Fix plan, and adds a note (optionally closes it) when a re-check verifies the fix. Use a dedicated API user. Its secret is needed after scheduled runs, so like the alert secrets it's protected by the server's file permissions.</p>
+          <div class="f3 field"><div><label for="tk-sys">System</label><select id="tk-sys"></select></div>
+            <div><label class="check"><input type="checkbox" id="tk-on"> Use this system</label></div></div>
+          <div class="f3 field" id="tk-fields"></div>
           <h3 class="gap">Automatic tickets</h3>
           <div class="f3 field">
             <div><label class="check"><input type="checkbox" id="tk-auto"> Open tickets after each AI assessment</label></div>
             <div><label for="tk-th">For priority</label><select id="tk-th"><option value="p1">1 only</option><option value="p2">1 and 2</option><option value="p3">1 to 3</option><option value="all">All</option></select></div>
-            <div><label class="check"><input type="checkbox" id="tk-resolve"> Resolve the ticket when Guardian verifies the fix</label></div>
+            <div><label class="check"><input type="checkbox" id="tk-resolve"> Close the ticket when Guardian verifies the fix</label></div>
           </div>
           <div class="row mt16"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" id="tk-test">Test the connection</button>
             <span class="note m0" id="tk-result"></span></div>

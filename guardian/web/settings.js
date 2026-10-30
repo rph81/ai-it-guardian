@@ -310,6 +310,7 @@ function renderConfig(c) {
   $("rounds").value = c.max_rounds; $("parallel").value = c.parallel;
   renderAgents(c); renderScale(c);
   $("akey-state").replaceChildren(c.anthropic_key_set ? el("span", {class: "ok"}, "✓ set") : el("span", {class: "c-high"}, "not set"));
+  $("akey-exp").value = c.anthropic_key_expires || "";
   $("nkey-state").replaceChildren(c.nvd_key_set ? el("span", {class: "ok"}, "✓ set") : el("span", {}, "(optional)"));
 }
 $("ai-form").addEventListener("submit", async e => {
@@ -317,7 +318,8 @@ $("ai-form").addEventListener("submit", async e => {
   try {
     renderConfig(await api("/api/settings", {model: $("model").value, effort: $("effort").value, max_rounds: +$("rounds").value,
       parallel: +$("parallel").value, agents_off: [...agentsOff],
-      scale_mode: scaleMode, per_copy: +$("per-copy").value, scale, anthropic_key: $("akey").value, nvd_key: $("nkey").value}));
+      scale_mode: scaleMode, per_copy: +$("per-copy").value, scale, anthropic_key: $("akey").value, nvd_key: $("nkey").value,
+      anthropic_key_expires: $("akey-exp").value}));
     $("akey").value = ""; $("nkey").value = ""; $("ai-msg").textContent = "Saved";
   } catch (err) { $("ai-msg").textContent = err.message; }
 });

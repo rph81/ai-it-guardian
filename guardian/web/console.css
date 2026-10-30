@@ -280,7 +280,7 @@ ol.steps li+li{margin-top:6px}
 .result.error{border-color:color-mix(in srgb,var(--bad) 50%,var(--line))}
 .result ul{margin:6px 0 0;padding-left:18px}
 .codebox,.keybox{margin-top:12px;background:var(--bg2);border:1px solid var(--line);padding:10px 12px;font:13px var(--mono);overflow-wrap:anywhere}
-.keybox{font-size:11.5px;line-height:1.5;margin:0 0 6px}
+.keybox{font-size:11.5px;line-height:1.5;margin:0 0 6px;white-space:pre-wrap}
 .codebox.big{font-size:15px;letter-spacing:.04em;text-align:center;padding:14px}
 .toggle-row{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
 .vaultrow{display:flex;gap:14px;align-items:center}
