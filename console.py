@@ -40,6 +40,7 @@ from guardian import chat
 from guardian import remediate
 from guardian import notify
 from guardian import ticketing
+from guardian import attack
 from guardian import sitestore
 from guardian import evidence
 from guardian import comppdf
@@ -990,7 +991,7 @@ def tracking_rows(d, g):
                      "overdue": bool(due and not verified and status not in ("fixed", "accepted") and due < time.strftime("%Y-%m-%d")),
                      "owner": t.get("owner", ""), "status": status, "note": t.get("note", ""), "updated_by": t.get("updated_by"),
                      "recheck": t.get("recheck"), "carried_from": t.get("carried_from"), "ticket": t.get("ticket"),
-                     "source": f.get("source"), "also": f.get("also_reported_by", [])})
+                     "source": f.get("source"), "also": f.get("also_reported_by", []), "attack": attack.techniques(f)})
     rows.sort(key=lambda r: (r["status"] == "verified", r["priority"], SEV_ORDER.index(r["severity"] or "info"), r["id"]))
     return rows
 
@@ -1004,6 +1005,21 @@ def run_tracking(run_id: str, request: Request):
     return {"rows": rows, "ranked": any(r["ranked"] for r in rows), "sla": PRIORITY_DAYS,
             "counts": {"open": sum(1 for r in rows if r["status"] in ("open", "in_progress")),
                        "overdue": sum(1 for r in rows if r["overdue"]), "verified": sum(1 for r in rows if r["status"] == "verified")}}
+
+
+@app.get("/api/runs/{run_id}/attack")
+def run_attack(run_id: str, request: Request):
+    """MITRE ATT&CK view: the techniques the open findings enable, by tactic, plus the attack paths' steps."""
+    require(request)
+    g = _read_graph(run_dir(run_id))
+    findings = [f for f in g.get("findings") or [] if is_open(f)]
+    m = attack.matrix(findings)
+    m["findings"] = {f["id"]: {"title": f.get("title"), "asset": f.get("asset"), "severity": f.get("severity"),
+                               "priority": priority_of(f)} for f in findings}
+    m["paths"] = [{"id": p.get("id"), "title": p.get("title"),
+                   "steps": [{**s, **({"technique_name": attack.TECHNIQUES[s["technique"]][0]} if s.get("technique") in attack.TECHNIQUES else {})}
+                             for s in p.get("steps", [])]} for p in g.get("attack_paths") or []]
+    return m
 
 
 class TrackBody(BaseModel):
@@ -1217,7 +1233,7 @@ def _export_parts(run_id, request, frameworks, include_na):
     pick = [f for f in (frameworks or "").split(",") if f in out] or list(out)
     fws = {k: out[k] for k in pick}
     rows = {r["id"]: r for r in tracking_rows(run_dir(run_id), g)}
-    findings = [{**f, "priority": rows.get(f["id"], {}).get("priority")} for f in g.get("findings") or [] if is_open(f)]
+    findings = [{**f, "priority": rows.get(f["id"], {}).get("priority"), "attack": attack.techniques(f)} for f in g.get("findings") or [] if is_open(f)]
     findings.sort(key=lambda f: (f.get("priority") or 9, f["id"]))
     site_ = g.get("site") or {}
     meta = {"site": site_.get("name") or (f"Network {site_['network']}" if site_.get("network") else "Assessed network"),

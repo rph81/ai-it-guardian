@@ -1,20 +1,21 @@
 "use strict";
 // Fix plan (remediation tracking), Attack paths and Compliance tabs. Uses $, el, api, me, unlock and fmtRun from console.js.
 const Plan = (() => {
-  const S = {run: null, tracking: null, paths: null, comp: null, filter: "open", fw: "cis_ig1", cfilter: "all"};
+  const S = {run: null, tracking: null, paths: null, attack: null, pick: null, comp: null, filter: "open", fw: "cis_ig1", cfilter: "all"};
   const STATUS = {open: "Open", in_progress: "In progress", fixed: "Fixed (to verify)", accepted: "Risk accepted", verified: "Verified fixed"};
   const CSTAT = {met: "Met", partial: "Partly", gap: "Gap", not_assessed: "Not assessed"};
   const STAGE = {entry: "Entry", foothold: "Foothold", move: "Move", escalate: "Escalate", target: "Target"};
   const canEdit = () => me && me.role !== "viewer";
   const today = () => new Date().toISOString().slice(0, 10);
 
-  function show(id) { S.run = id; S.tracking = S.paths = S.comp = null; }
+  function show(id) { S.run = id; S.tracking = S.paths = S.attack = S.comp = S.pick = null; }
 
   async function refresh(tab) {
     if (!S.run) return;
     try {
       if (tab === "plan") { S.tracking = await api(`/api/runs/${S.run}/tracking`); renderPlan(); }
       if (tab === "paths") { S.paths = await api(`/api/runs/${S.run}/paths`); renderPaths(); }
+      if (tab === "attack") { S.attack = await api(`/api/runs/${S.run}/attack`); renderAttack(); }
       if (tab === "comp") { S.comp = await api(`/api/runs/${S.run}/compliance`); renderComp(); }
     } catch (e) { /* the run may have no data yet */ }
   }
@@ -78,6 +79,7 @@ const Plan = (() => {
       r.overdue ? el("span", {class: "tag error"}, "Overdue") : null,
       r.source ? el("span", {class: "tag", title: "Imported from another scanner"}, `from ${r.source}`) : null,
       (r.also || []).length ? el("span", {class: "tag", title: r.also.join(", ")}, `also ${r.also.length} scanner${r.also.length > 1 ? "s" : ""}`) : null, r.carried_from ? el("span", {class: "tag new"}, "carried over") : null,
+      ...(r.attack || []).map(t => el("a", {class: "tag att", href: attUrl(t), target: "_blank", rel: "noopener", title: "MITRE ATT&CK technique"}, t)),
       r.ticket ? el("a", {class: "tag", href: r.ticket.url, target: "_blank", rel: "noopener"}, `${r.ticket.number} · ${(r.ticket.state || "").replace("_", " ")}`) : null);
     const head = el("div", {class: "pl-head"}, el("div", {}, el("b", {}, r.title), el("div", {class: "meta"}, `${r.id} · ${r.asset} · first seen ${r.first_seen}`)), chips);
     const body = el("div", {class: "pl-body"});
@@ -128,10 +130,36 @@ const Plan = (() => {
         el("span", {class: "tag"}, p.id), el("b", {}, p.title)),
       el("p", {class: "note"}, "Ends at: ", el("b", {}, p.target)),
       el("div", {class: "ap-steps"}, ...p.steps.map(s => el("div", {class: "ap-step" + (p.choke_points.some(c => c.finding && c.finding === s.finding) ? " choke" : "")},
-        el("b", {}, STAGE[s.stage] || s.stage), s.asset ? el("span", {class: "micro"}, s.asset) : null, el("span", {}, s.text), s.finding ? fref(s.finding) : null))),
+        el("b", {}, STAGE[s.stage] || s.stage), s.asset ? el("span", {class: "micro"}, s.asset) : null, el("span", {}, s.text), s.technique ? el("a", {class: "tag att", href: attUrl(s.technique), target: "_blank", rel: "noopener"}, s.technique) : null,
+        s.finding ? fref(s.finding) : null))),
       p.choke_points.length ? el("div", {class: "ap-choke"}, el("b", {}, "Choke points: "),
         ...p.choke_points.map(c => el("div", {}, "• ", c.fix, c.finding ? ` (${c.finding})` : ""))) : null,
       el("p", {class: "note"}, p.summary))));
+  }
+
+  // -- MITRE ATT&CK ------------------------------------------------------------------------------
+  const attUrl = t => `https://attack.mitre.org/techniques/${t.replace(".", "/")}/`;
+  function renderAttack() {
+    const d = S.attack, max = Math.max(1, ...d.tactics.flatMap(c => c.techniques.map(t => t.findings.length)));
+    $("at-meta").textContent = d.total ? `${d.techniques} techniques in ${d.tactics.filter(c => c.techniques.length).length} of ${d.tactics.length} tactics · ${d.mapped} of ${d.total} open findings mapped` : "";
+    if (!d.techniques) {
+      $("at-grid").replaceChildren(el("p", {class: "note"}, d.total ? "No open finding maps to an ATT&CK technique." : "The matrix appears after an assessment."));
+      $("at-detail").replaceChildren();
+      return;
+    }
+    const cols = d.tactics.filter(c => c.techniques.length);
+    $("at-grid").style.gridTemplateColumns = `repeat(${cols.length}, minmax(120px, 1fr))`;
+    $("at-grid").replaceChildren(...cols.map(c => el("div", {class: "at-col"},
+      el("div", {class: "at-head"}, el("b", {}, c.name), el("span", {class: "micro"}, String(c.techniques.length))),
+      ...c.techniques.map(t => el("button", {type: "button", class: "at-cell" + (S.pick === t.id ? " on" : ""), "aria-pressed": String(S.pick === t.id),
+        style: `--h:${(0.15 + 0.85 * t.findings.length / max).toFixed(2)}`, onclick: () => { S.pick = S.pick === t.id ? null : t.id; renderAttack(); }},
+        el("span", {class: "micro"}, t.id), el("span", {}, t.name.replace(/^.*?: /, "")), el("b", {}, String(t.findings.length)))))));
+    const t = d.tactics.flatMap(c => c.techniques).find(x => x.id === S.pick);
+    $("at-detail").replaceChildren(...(t ? [el("div", {class: "ap"},
+      el("div", {class: "row"}, el("a", {class: "tag att", href: t.url, target: "_blank", rel: "noopener"}, t.id), el("b", {}, t.name), el("span", {class: "micro"}, t.tactic_name)),
+      ...t.findings.map(id => { const f = d.findings[id] || {}; return el("div", {class: "at-f"}, el("span", {class: `sev ${f.severity}`}, f.severity || ""),
+        el("span", {class: "micro"}, `${id} · P${f.priority}`), el("span", {}, f.title || ""), f.asset ? el("span", {class: "micro"}, f.asset) : null); }),
+      ...d.paths.filter(p => p.steps.some(s => s.technique === t.id)).map(p => el("p", {class: "note"}, `Used in attack path ${p.id}: ${p.title}`)))] : []));
   }
 
   // -- compliance --------------------------------------------------------------------------------

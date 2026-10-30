@@ -143,7 +143,7 @@
       <div class="kicker">Guardian / workspace</div>
       <h2 class="stitle" id="ws-title">Run / Detail.</h2>
       <div class="tabs">
-        <div class="row"><button class="tab on" data-t="report">Report</button><button class="tab" data-t="plan">Fix plan</button><button class="tab" data-t="paths">Attack paths</button><button class="tab" data-t="comp">Compliance</button><button class="tab" data-t="agents">Agents</button><button class="tab" data-t="map">Map &amp; chat</button><button class="tab" data-t="log">Live log</button></div>
+        <div class="row"><button class="tab on" data-t="report">Report</button><button class="tab" data-t="plan">Fix plan</button><button class="tab" data-t="paths">Attack paths</button><button class="tab" data-t="attack">ATT&amp;CK</button><button class="tab" data-t="comp">Compliance</button><button class="tab" data-t="agents">Agents</button><button class="tab" data-t="map">Map &amp; chat</button><button class="tab" data-t="log">Live log</button></div>
         <span class="row"><span class="meta mono" id="current"></span><a class="btn sm hidden" id="newtab" target="_blank" rel="noopener">Open in new tab</a></span>
       </div>
       <div class="panel" id="p-report"><iframe id="frame" sandbox="allow-scripts" title="Report"></iframe>
@@ -195,6 +195,12 @@
         <div class="cardhead"><h2>Attack / Paths</h2><span class="meta" id="ap-meta"></span></div>
         <p class="note">How an attacker could chain what Guardian found to reach what matters most. Reasoned from the evidence; nothing was exploited. Choke points are the fixes that break a path.</p>
         <div id="ap-list"></div>
+      </div>
+      <div class="panel scroll hidden" id="p-attack">
+        <div class="cardhead"><h2>MITRE / ATT&amp;CK</h2><span class="meta" id="at-meta"></span></div>
+        <p class="note">What an attacker could do with the open findings, in the MITRE ATT&amp;CK Enterprise matrix: one column per tactic that has findings, a cell per technique, darker when more findings enable it. Click a technique to see the findings; the ID opens it on attack.mitre.org.</p>
+        <div id="at-grid" class="at-grid"></div>
+        <div id="at-detail"></div>
       </div>
       <div class="panel scroll hidden" id="p-comp">
         <div class="cardhead"><h2>Compliance / Map</h2><span class="meta" id="co-meta"></span></div>

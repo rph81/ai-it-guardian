@@ -37,10 +37,12 @@ cmd("Page.enable"); cmd("Runtime.enable")
 cmd("Emulation.setDeviceMetricsOverride", width=1440, height=900, deviceScaleFactor=1, mobile=False)
 cmd("Emulation.setEmulatedMedia", features=[{"name": "prefers-color-scheme", "value": "dark"}])
 nav("/", 4); shot("01-dashboard"); shot("02-dashboard-full", height=2000)
-for t, name in [("report", "03-report"), ("plan", "04-fix-plan"), ("paths", "05-attack-paths"), ("comp", "06-compliance"), ("agents", "07-agents"), ("map", "08-map-chat"), ("log", "09-live-log")]:
+for t, name in [("report", "03-report"), ("plan", "04-fix-plan"), ("paths", "05-attack-paths"), ("attack", "05b-attack-matrix"), ("comp", "06-compliance"), ("agents", "07-agents"), ("map", "08-map-chat"), ("log", "09-live-log")]:
     js(f"showTab('{t}')"); time.sleep(2.5)
     if t == "plan":
         js("document.querySelector('#pl-import details') && (document.querySelector('#pl-import details').open = true)"); time.sleep(0.3)
+    if t == "attack":
+        js("document.querySelector('#at-grid .at-cell') && document.querySelector('#at-grid .at-cell').click()"); time.sleep(0.5)
     if t in ("plan", "comp"):
         js(f"document.querySelector('#{'pl-rows' if t == 'plan' else 'co-list'} details') && (document.querySelector('#{'pl-rows' if t == 'plan' else 'co-list'} details').open = true)"); time.sleep(0.5)
     shot(name, "#workspace", height=1500, pad=6)

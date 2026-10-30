@@ -290,8 +290,8 @@ async function poll() {
 // -- tabs, theme, start-up ----------------------------------------------------------
 function showTab(t) {
   document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.t === t));
-  for (const p of ["report", "plan", "paths", "comp", "agents", "map", "log"]) $("p-" + p).classList.toggle("hidden", t !== p);
-  if (["plan", "paths", "comp"].includes(t) && typeof Plan !== "undefined") Plan.refresh(t);
+  for (const p of ["report", "plan", "paths", "attack", "comp", "agents", "map", "log"]) $("p-" + p).classList.toggle("hidden", t !== p);
+  if (["plan", "paths", "attack", "comp"].includes(t) && typeof Plan !== "undefined") Plan.refresh(t);
   if ((t === "agents" || t === "map") && typeof Agents !== "undefined") Agents.refresh();
   if (t === "log") $("p-log").scrollTop = $("p-log").scrollHeight;
 }

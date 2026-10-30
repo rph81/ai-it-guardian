@@ -13,7 +13,7 @@ reading the results, fixing issues, compliance evidence and the settings.
 3. [Signing in, roles and the vault](#3-signing-in-roles-and-the-vault)
 4. [The dashboard](#4-the-dashboard)
 5. [Running an assessment](#5-running-an-assessment)
-6. [Run detail: the seven tabs](#6-run-detail-the-seven-tabs)
+6. [Run detail: the eight tabs](#6-run-detail-the-eight-tabs)
 7. [Fix: remediation](#7-fix-remediation)
 8. [Code: GitHub repository scan](#8-code-github-repository-scan)
 9. [Settings](#9-settings)
@@ -141,9 +141,9 @@ credentials in memory and never to the AI.
 
 ---
 
-## 6. Run detail: the seven tabs
+## 6. Run detail: the eight tabs
 
-Pick a run in **Runs** (or the latest is shown). The workspace has seven tabs; **Open in new tab** opens the report on
+Pick a run in **Runs** (or the latest is shown). The workspace has eight tabs; **Open in new tab** opens the report on
 its own.
 
 ### 6.1 Report
@@ -186,7 +186,18 @@ next assessment when the Risk analyst recognises the same issue.
 
 Realistic chains of weaknesses from an entry point (the internet, a phished user, a camera) to what the business
 can't lose. Each step names its finding; **choke points** are the fixes that break a path, usually the best place to
-start.
+start. A step can carry its ATT&CK technique ID.
+
+### 6.3b ATT&CK
+
+![ATT&CK matrix](manual/05b-attack-matrix.png)
+
+The open findings in the MITRE ATT&CK Enterprise matrix: one column per tactic that has findings (Initial Access,
+Credential Access, Lateral Movement…), one cell per technique, darker when more findings enable it. Click a cell to list
+those findings; the technique ID opens its page on attack.mitre.org. The Risk analyst assigns up to five techniques per
+finding; findings it hasn't ranked (or imported ones) get them from Guardian's built-in rules. The same IDs appear as
+chips on Fix plan rows, in the report (a "What an attacker could do" section and on each finding) and in Appendix A of
+the compliance PDF. Details: [ATTACK.md](ATTACK.md).
 
 ### 6.4 Compliance
 

@@ -50,8 +50,8 @@ g.data["findings"][-1]["risk"] = {"priority": 3, "reason": "Imported from Nessus
 g.data["findings"][3]["also_reported_by"] = ["Nessus 97833"]
 g.data["imports"] = [{"t": time.time(), "by": "Demo Admin", "file": "office-scan.nessus", "format": "Nessus", "added": 1, "merged": 1}]
 g.data["attack_paths"] = [{"id": "AP01", "title": "From the internet to the file server", "target": "File server data", "likelihood": "high",
-    "steps": [{"text": "Brute force on RDP without NLA", "finding": "F001"}, {"text": "Missing patches allow privilege escalation", "finding": "F003"}, {"text": "SMBv1 reaches the NAS", "finding": "F004"}],
-    "choke_points": [{"text": "Put RDP behind a VPN and require NLA", "finding": "F001"}], "summary": "One exposed service plus missing patches give an attacker the file server."}]
+    "steps": [{"text": "Brute force on RDP without NLA", "finding": "F001", "technique": "T1110"}, {"text": "Missing patches allow privilege escalation", "finding": "F003", "technique": "T1068"}, {"text": "SMBv1 reaches the NAS", "finding": "F004", "technique": "T1210"}],
+    "choke_points": [{"fix": "Put RDP behind a VPN and require NLA", "finding": "F001"}], "summary": "One exposed service plus missing patches give an attacker the file server."}]
 g.data["compliance"] = {"cis_ig1": {"1.1": {"status": "met", "findings": [], "note": "12 devices identified."}, "4.4": {"status": "partial", "findings": ["F004"], "note": "SMBv1 open."},
                         "6.5": {"status": "gap", "findings": ["F005"], "note": "2 admins without MFA."}, "7.3": {"status": "gap", "findings": ["F003", "F009"], "note": "Patching stalled."}},
                         "iso27001": {"8.8": {"status": "gap", "findings": ["F001", "F003", "F007"], "note": "Known exploited vulnerabilities open."}, "8.5": {"status": "gap", "findings": ["F005"], "note": "MFA not enforced."}}}

@@ -3,6 +3,7 @@ import base64
 import json
 import os
 
+from . import attack
 from .controls import FRAMEWORKS
 from .graph import is_open
 
@@ -30,7 +31,8 @@ def render(graph, out_path=None):
             ("started", "site", "assets", "wan", "summary", "layer_summaries", "agent_log", "plan", "cost_total",
              "attack_paths", "changes")}
     # findings an agent re-checked and confirmed fixed, or merged into another, drop out; graph.json keeps their history
-    data["findings"] = [f for f in graph.data.get("findings") or [] if is_open(f)]
+    data["findings"] = [{**f, "attack": attack.techniques(f)} for f in graph.data.get("findings") or [] if is_open(f)]
+    data["attack"] = attack.matrix(data["findings"])
     done = graph.data.get("compliance") or {}
     data["compliance"] = [{"title": fw["title"], "counts": {s: sum(1 for c in fw["controls"] if done.get(k, {}).get(c[0], {}).get("status", "not_assessed") == s)
                                                             for s in ("met", "partial", "gap", "not_assessed")},

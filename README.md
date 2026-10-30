@@ -102,9 +102,10 @@ exposure) and `previous` (the same issue in the previous assessment).
    **On-site collector, phase A (now)**: sites, collector gateway, enrollment, heartbeat, revoke; collector with
    pause / disconnect. Phase B: scans and AI assessments through the collector.
    **Ticketing (now)**: ServiceNow, ConnectWise PSA, Autotask PSA, HaloPSA, Jira Service Management.
+   **MITRE ATT&CK (now)**: every finding mapped to techniques; ATT&CK tab, report section, PDF appendix.
    **Scanner import (now)**: Nessus, OpenVAS / Greenbone, Qualys, Rapid7 InsightVM, CSV into a run's Fix plan.
    **Next, in this order**: several customers (sites)
-   in one console (with ticketing per customer); MITRE ATT&CK mapping; integrations with business systems
+   in one console (with ticketing per customer); integrations with business systems
    (SAP S/4HANA, SAP BTP and other leading platforms); medium / low priority gap features; AWS posture agent;
    on-site collector phases B–D. Then a **final testing phase** against real systems (real AI run, AD, Microsoft 365, fix recipes, NinjaOne,
    Azure, Windows, ServiceNow, alert channels, collector packages, outside penetration test of the gateway).

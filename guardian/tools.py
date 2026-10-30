@@ -14,6 +14,7 @@ import urllib.parse
 import urllib.request
 
 from . import access, netutil
+from . import attack as mitre
 from .collector import parse_nmap_xml
 from .controls import FRAMEWORKS, STATUSES
 from .graph import SEVERITIES, is_open
@@ -252,7 +253,9 @@ class Toolbox:
                     "exposure": {"type": "string", "enum": ["internet", "lan", "internal-only", "account"]},
                     "kev": {"type": "boolean"}, "ransomware": {"type": "boolean"},
                     "epss": {"type": "number", "description": "Highest EPSS of the finding's CVEs, 0-1."},
-                    "cves": {"type": "array", "items": {"type": "string"}}},
+                    "cves": {"type": "array", "items": {"type": "string"}},
+                    "attack": {"type": "array", "maxItems": 5, "items": {"type": "string"},
+                               "description": "MITRE ATT&CK technique IDs this weakness enables, most relevant first (see attack_catalog)."}},
                     "required": ["id", "priority", "reason", "exposure"], "additionalProperties": False}},
             "merge_findings": {
                 "description": "Mark findings as duplicates of another one (the same issue reported by several agents). The kept finding stays open.",
@@ -267,6 +270,9 @@ class Toolbox:
             "previous_findings": {
                 "description": "Open findings from the previous assessment of this site, so the same issue keeps its owner and due date.",
                 "input_schema": {"type": "object", "properties": {}, "additionalProperties": False}},
+            "attack_catalog": {
+                "description": "The MITRE ATT&CK techniques Guardian maps findings to, with their tactic, and the techniques the rules suggest for each open finding.",
+                "input_schema": {"type": "object", "properties": {}, "additionalProperties": False}},
             "link_previous": {
                 "description": "Say that a finding in this run is the same issue as a finding from the previous assessment.",
                 "input_schema": {"type": "object", "properties": {
@@ -278,7 +284,8 @@ class Toolbox:
                     "likelihood": {"type": "string", "enum": ["high", "medium", "low"]},
                     "steps": {"type": "array", "minItems": 2, "maxItems": 8, "items": {"type": "object", "properties": {
                         "stage": {"type": "string", "enum": ["entry", "foothold", "move", "escalate", "target"]},
-                        "asset": {"type": "string"}, "text": {"type": "string"}, "finding": {"type": "string"}},
+                        "asset": {"type": "string"}, "text": {"type": "string"}, "finding": {"type": "string"},
+                        "technique": {"type": "string", "description": "MITRE ATT&CK technique ID for this step."}},
                         "required": ["stage", "text"], "additionalProperties": False}},
                     "choke_points": {"type": "array", "items": {"type": "object", "properties": {
                         "finding": {"type": "string"}, "fix": {"type": "string"}},
@@ -520,7 +527,10 @@ class Toolbox:
                               "required_action": v.get("requiredAction")} if v else {"in_kev": False}
         return out
 
-    def t_set_priority(self, id, priority, reason, exposure, kev=None, ransomware=None, epss=None, cves=None):
+    def t_set_priority(self, id, priority, reason, exposure, kev=None, ransomware=None, epss=None, cves=None, attack=None):
+        bad = [t for t in (attack or []) if t not in mitre.TECHNIQUES]
+        if bad:
+            return {"error": f"unknown ATT&CK techniques: {', '.join(bad)} (see attack_catalog)"}
         with self.g.lock:
             f = self._finding(id)
             f["risk"] = {k: v for k, v in {
@@ -528,7 +538,13 @@ class Toolbox:
                 "epss": round(epss, 4) if isinstance(epss, (int, float)) else None,
                 "cves": [c.upper() for c in (cves or [])][:20], "due_days": PRIORITY_DAYS[priority],
                 "by": self.agent}.items() if v is not None}
+            if attack:
+                f["attack"] = list(dict.fromkeys(attack))[:5]
         return {"ok": True}
+
+    def t_attack_catalog(self):
+        return {"techniques": mitre.catalog(),
+                "suggested": {f["id"]: mitre.techniques(f) for f in self.g.data["findings"] if is_open(f)}}
 
     def t_merge_findings(self, keep, duplicates, reason):
         with self.g.lock:
@@ -570,6 +586,9 @@ class Toolbox:
         bad = [x for x in [s.get("finding") for s in steps] + [c.get("finding") for c in (choke_points or [])] if x and x not in known]
         if bad:
             return {"error": f"unknown finding IDs: {', '.join(bad)}"}
+        bad = [s["technique"] for s in steps if s.get("technique") and s["technique"] not in mitre.TECHNIQUES]
+        if bad:
+            return {"error": f"unknown ATT&CK techniques: {', '.join(bad)} (see attack_catalog)"}
         with self.g.lock:
             paths = self.g.data.setdefault("attack_paths", [])
             pid = "AP%02d" % (len(paths) + 1)
@@ -665,6 +684,8 @@ def describe(name, args):
         return f'{a.get("ip")} is {a.get("level")} criticality'
     if name == "previous_findings":
         return "Read the previous assessment's findings"
+    if name == "attack_catalog":
+        return "Read the ATT&CK technique catalogue"
     if name == "link_previous":
         return f'{a.get("id")} is the same issue as {a.get("previous_id")} last time'
     if name == "record_path":

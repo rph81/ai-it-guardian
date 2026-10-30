@@ -121,7 +121,8 @@ def build(meta, frameworks, findings, evidence, include_findings=True, include_e
         rows = [["ID", "P", "Severity", "Finding", "Asset"]]
         for f in findings:
             rows.append([P(f["id"], SMALL), P(f"P{f.get('priority') or '-'}", SMALL), P(f.get("severity"), SMALL),
-                         Paragraph(f"<b>{escape(f.get('title') or '')}</b><br/>{escape((f.get('recommendation') or '')[:400])}", SMALL),
+                         Paragraph(f"<b>{escape(f.get('title') or '')}</b><br/>{escape((f.get('recommendation') or '')[:400])}"
+                                   + (f"<br/><font color='#666666'>ATT&amp;CK: {escape(', '.join(f['attack']))}</font>" if f.get("attack") else ""), SMALL),
                          P(f.get("asset"), SMALL)])
         s += [_table(rows, [W * .09, W * .06, W * .10, W * .55, W * .20])]
         if include_evidence:

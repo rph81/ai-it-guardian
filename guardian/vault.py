@@ -115,6 +115,29 @@ class VaultLocked(Exception):
 
 
 # -- store ------------------------------------------------------------------------------------
+class _Rows(list):
+    def fetchone(self):
+        return self[0] if self else None
+
+    def fetchall(self):
+        return list(self)
+
+
+class _LockedDB:
+    """One SQLite connection shared by the console's request threads: every statement runs, and its rows are read,
+    under the vault lock, so two requests never interleave on the connection."""
+    def __init__(self, conn, lock):
+        self._conn, self._lock = conn, lock
+
+    def execute(self, sql, args=()):
+        with self._lock:
+            return _Rows(self._conn.execute(sql, args).fetchall())
+
+    def executescript(self, sql):
+        with self._lock:
+            return self._conn.executescript(sql)
+
+
 class Vault:
     def __init__(self, path):
         self.path = str(path)
@@ -133,6 +156,7 @@ class Vault:
         self.db.execute("PRAGMA journal_mode = WAL")
         self.db.executescript(SCHEMA)
         os.chmod(self.path, 0o600)
+        self.db = _LockedDB(self.db, self.lock)
 
     # meta
     def get(self, key, default=None):

@@ -112,7 +112,8 @@ It also:
 
 **Tools:** `list_findings`, `finding_details`, `inventory`, `asset_details`, `kev_details` (date added, ransomware use,
 required action), `epss_lookup` (FIRST.org, 30-day exploitation probability), `set_priority`, `merge_findings`,
-`set_criticality`, `previous_findings`, `link_previous`, web search.
+`set_criticality`, `previous_findings`, `link_previous`, `attack_catalog`, web search. It also gives each finding up to
+five MITRE ATT&CK techniques ([ATTACK.md](ATTACK.md)).
 
 ### Attack paths (`paths`)
 
@@ -123,7 +124,7 @@ user, a compromised IoT device) to what the business can't lose, and names the *
 path. Every step is tied to a finding where there is one; steps without a finding must say why they're plausible.
 Nothing is exploited and nothing is invented: if the findings don't support a path, it records none.
 
-**Tools:** `list_findings`, `finding_details`, `inventory`, `asset_details`, `record_path`.
+**Tools:** `list_findings`, `finding_details`, `inventory`, `asset_details`, `attack_catalog`, `record_path` (each step can carry an ATT&CK technique).
 
 ### Compliance (`compliance`)
 
@@ -182,7 +183,7 @@ fixed list of paths, never follows paging links to other hosts, and passes only 
 
 ## Coming next
 
-More ticketing systems and several customers in one console. (Fixes and patching: [FIXES.md](FIXES.md); evidence and the compliance PDF: [COMPLIANCE.md](COMPLIANCE.md); the full user manual: [USER-MANUAL.md](USER-MANUAL.md).)
+Several customers (sites) in one console, with ticketing per customer. (Fixes and patching: [FIXES.md](FIXES.md); evidence and the compliance PDF: [COMPLIANCE.md](COMPLIANCE.md); the full user manual: [USER-MANUAL.md](USER-MANUAL.md).)
 | **Microsoft 365 & Entra ID** | Microsoft Secure Score / Defender, Tenable Identity Exposure for Entra, Qualys SaaS posture | Microsoft 365 connector (read-only Graph app) |
 | **Device fleet** | Tenable / Qualys / Rapid7 endpoint agents, Defender Vulnerability Management | Microsoft 365 connector (Intune, Defender) |
 | **Azure** | Defender for Cloud, Wiz, Orca, Prisma Cloud (CSPM) | Azure connector (Reader + Security Reader) |

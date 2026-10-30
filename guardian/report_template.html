@@ -118,6 +118,12 @@ footer{margin-top:28px;font:600 10px var(--head);letter-spacing:.16em;text-trans
     <div class="actions"><ol id="actions"></ol></div>
   </section>
 
+  <section class="card" id="attack-card" hidden>
+    <div class="kicker">Guardian / MITRE ATT&amp;CK</div><h2>What an attacker could do.</h2>
+    <p class="muted">The open findings mapped to MITRE ATT&amp;CK Enterprise techniques, by tactic. The number is how many findings enable each technique.</p>
+    <div id="attack"></div>
+  </section>
+
   <section class="card" id="paths-card" hidden>
     <div class="kicker">Guardian / analysts</div><h2>Attack paths.</h2>
     <p class="muted">How an attacker could chain these findings to reach what matters most. Reasoned from the evidence; nothing was exploited.</p>
@@ -246,6 +252,7 @@ function init(){
       ${f.risk?`<dt>Priority</dt><dd>P${f.risk.priority}${f.risk.kev?" · actively exploited (CISA KEV)":""}${f.risk.ransomware?" · used by ransomware":""}${f.risk.epss!=null?` · EPSS ${(f.risk.epss*100).toFixed(1)}%`:""} · ${esc(f.risk.reason)}</dd>`:""}
       <dt>Impact</dt><dd>${esc(f.impact)}</dd><dt>Fix</dt><dd>${esc(f.recommendation)}</dd>
       <dt>Evidence</dt><dd class="mono">${esc(f.evidence)}</dd>
+      ${(f.attack||[]).length?`<dt>ATT&amp;CK</dt><dd>${f.attack.map(t=>`<a class="mono" target="_blank" rel="noopener" href="https://attack.mitre.org/techniques/${t.replace(".","/")}/">${esc(t)}</a>`).join(" · ")}</dd>`:""}
       ${(f.references||[]).length?`<dt>References</dt><dd>${f.references.map(esc).join("<br>")}</dd>`:""}</dl></details>`}).join("") || `<p class="muted">No findings match.</p>`;
   }
   drawFindings();
@@ -263,11 +270,17 @@ function init(){
       <td class="mono">${esc(svcs.slice(0,6).join(", "))}${svcs.length>6?` <span class="muted">+${svcs.length-6}</span>`:""}</td>
       <td><div class="dots">${fs.sort((x,y)=>SEV.indexOf(x.severity)-SEV.indexOf(y.severity)).map(f=>`<i title="${esc(f.title)}" style="background:var(--${{critical:"crit",high:"high",medium:"med",low:"low",info:"info"}[f.severity]})"></i>`).join("")}</div></td></tr>`}).join("");
 
+  const M = D.attack || {};
+  if (M.techniques) {
+    $("attack-card").hidden = false;
+    $("attack").innerHTML = `<table>${M.tactics.filter(c=>c.techniques.length).map(c=>`<tr><th>${esc(c.name)}</th><td>${c.techniques.map(t=>
+      `<a class="mono" target="_blank" rel="noopener" href="${esc(t.url)}" title="${esc(t.findings.join(", "))}">${esc(t.id)}</a> ${esc(t.name)} <span class="muted">(${t.findings.length})</span>`).join("<br>")}</td></tr>`).join("")}</table>`;
+  }
   const P = D.attack_paths || [];
   if (P.length) {
     $("paths-card").hidden = false;
     $("paths").innerHTML = P.map(p=>`<details class="finding"><summary><span class="badge b-${p.likelihood==="high"?"critical":p.likelihood==="medium"?"medium":"low"}">${esc(p.likelihood)}</span><span class="ft">${esc(p.title)}</span><span class="fa">→ ${esc(p.target)}</span></summary>
-      <dl class="fd">${p.steps.map((st,i)=>`<dt>${i+1}. ${esc(st.stage)}</dt><dd>${esc(st.text)}${st.finding?` <a href="#${esc(st.finding)}">${esc(st.finding)}</a>`:""}</dd>`).join("")}
+      <dl class="fd">${p.steps.map((st,i)=>`<dt>${i+1}. ${esc(st.stage)}</dt><dd>${esc(st.text)}${st.technique?` <span class="mono muted">${esc(st.technique)}</span>`:""}${st.finding?` <a href="#${esc(st.finding)}">${esc(st.finding)}</a>`:""}</dd>`).join("")}
       ${(p.choke_points||[]).length?`<dt>Choke points</dt><dd>${p.choke_points.map(c=>esc(c.fix)+(c.finding?` (${esc(c.finding)})`:"")).join("<br>")}</dd>`:""}
       <dt>Summary</dt><dd>${esc(p.summary)}</dd></dl></details>`).join("");
   }

@@ -302,7 +302,7 @@ ANALYST_BRIEFS = {
     "risk": {
         "title": "Risk analyst",
         "tools": ["list_findings", "finding_details", "inventory", "asset_details", "epss_lookup", "kev_details",
-                  "set_priority", "merge_findings", "set_criticality", "previous_findings", "link_previous"],
+                  "set_priority", "merge_findings", "set_criticality", "previous_findings", "link_previous", "attack_catalog"],
         "web": True,
         "brief": """Your job: rank every open finding by how likely it is to hurt this business, the way Tenable VPR,
 Qualys TruRisk and Rapid7 Active Risk do, and explain each ranking in plain words. You work on the specialists'
@@ -321,13 +321,16 @@ findings; you do not test the network. Steps:
    3 = planned: other high and medium issues.
    4 = when convenient: low and info, hygiene.
    Judgement beats the table when the evidence says so; say why in the reason.
+   Also give each finding its MITRE ATT&CK techniques (attack, up to 5, most relevant first): what an attacker could do
+   with this weakness. Read attack_catalog once; it lists the techniques and the rules' suggestions per finding. Keep a
+   suggestion when it fits, correct it when the evidence says otherwise.
 5. previous_findings: link each finding that is the same issue as one from the previous assessment (link_previous), so
    it keeps its owner and due date. Only link when it is clearly the same issue on the same device.
 Finish with a short summary: the five findings to fix first, and why.""",
     },
     "paths": {
         "title": "Attack paths",
-        "tools": ["list_findings", "finding_details", "inventory", "asset_details", "record_path"],
+        "tools": ["list_findings", "finding_details", "inventory", "asset_details", "attack_catalog", "record_path"],
         "web": False,
         "brief": """Your job: show how an attacker could chain the observed weaknesses into a real attack, the way Tenable One
 attack paths, Wiz "toxic combinations" and Horizon3 NodeZero narratives do, but reasoned from the evidence only:
@@ -337,7 +340,7 @@ nothing is exploited. Steps:
 2. Record 1 to 5 realistic paths (record_path), most likely first. Each starts at a believable entry (internet-exposed
    service, phished user, compromised IoT device on the LAN, guest Wi-Fi...) and ends at a target. Tie every step to a
    finding ID when there is one; a step without a finding must say why it is plausible (e.g. "flat network: no
-   segmentation found between IoT and servers").
+   segmentation found between IoT and servers"). Give each step its ATT&CK technique (attack_catalog) when one fits.
 3. For each path, name the choke points: the one or two fixes that break it, tied to finding IDs.
 Never invent vulnerabilities. If the findings don't support a meaningful path, record none and say so.
 Finish with a short summary: the paths, and which fixes break most of them.""",
