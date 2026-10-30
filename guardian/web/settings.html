@@ -9,6 +9,7 @@
 <script src="/passkey.js" defer></script>
 <script src="/settings.js" defer></script>
 <script src="/schedule.js" defer></script>
+<script src="/ticketing.js" defer></script>
 </head>
 <body>
 <div class="shell">
@@ -42,6 +43,7 @@
       <a href="#ai" data-s="ai" class="admin-only">AI agents</a>
       <a href="#scope" data-s="scope">Scan scope</a>
       <a href="#schedules" data-s="schedules">Schedules &amp; alerts</a>
+      <a href="#ticketing" data-s="ticketing">Ticketing</a>
       <a href="#appearance" data-s="appearance">Appearance</a>
     </nav>
 
@@ -259,6 +261,27 @@
           <div class="row mt16"><button class="btn primary" type="submit">Save alerts</button><button class="btn" type="button" id="n-test">Send a test</button>
             <span class="note m0" id="n-result"></span></div>
           <p class="note" id="n-last"></p>
+        </form>
+      </section>
+      <section class="stack hidden" id="s-ticketing">
+        <form class="card" id="tk-form">
+          <div class="sechead"><h2>ServiceNow</h2><span class="tag" id="tk-state"></span></div>
+          <p class="note">Guardian opens one incident per finding (Table API, a dedicated integration user with the <span class="mono">itil</span> role), keeps it across runs, reads its state back into the Fix plan, and adds a work note when a re-check verifies the fix. The password is needed after scheduled runs, so like the alert secrets it's protected by the server's file permissions.</p>
+          <label class="check"><input type="checkbox" id="tk-on"> Use ServiceNow</label>
+          <div class="f3 field"><div><label for="tk-inst">Instance</label><input id="tk-inst" class="mono" placeholder="https://yourcompany.service-now.com"></div>
+            <div><label for="tk-user">Integration user</label><input id="tk-user" class="mono" autocomplete="off"></div>
+            <div><label for="tk-pass">Password</label><input id="tk-pass" type="password" autocomplete="new-password" placeholder="unchanged"></div></div>
+          <div class="f3 field"><div><label for="tk-group">Assignment group (optional)</label><input id="tk-group" class="mono" placeholder="sys_id or name"></div>
+            <div><label for="tk-caller">Caller (optional)</label><input id="tk-caller" class="mono" placeholder="sys_id or user name"></div>
+            <div><label for="tk-cat">Category (optional)</label><input id="tk-cat" class="mono" placeholder="e.g. network"></div></div>
+          <h3 class="gap">Automatic tickets</h3>
+          <div class="f3 field">
+            <div><label class="check"><input type="checkbox" id="tk-auto"> Open tickets after each AI assessment</label></div>
+            <div><label for="tk-th">For priority</label><select id="tk-th"><option value="p1">1 only</option><option value="p2">1 and 2</option><option value="p3">1 to 3</option><option value="all">All</option></select></div>
+            <div><label class="check"><input type="checkbox" id="tk-resolve"> Resolve the ticket when Guardian verifies the fix</label></div>
+          </div>
+          <div class="row mt16"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" id="tk-test">Test the connection</button>
+            <span class="note m0" id="tk-result"></span></div>
         </form>
       </section>
     </div>

@@ -8,6 +8,7 @@ You watch them work live and can talk to the Orchestrator that coordinates them.
 **Installing: see [INSTALL.md](INSTALL.md)**. It covers everything from creating the Proxmox container to the first report.
 **The agents, what each one checks and which products it is modelled on: [docs/AGENTS.md](docs/AGENTS.md).**
 **Schedules, alerts and the fix plan: [docs/SCHEDULES-ALERTS.md](docs/SCHEDULES-ALERTS.md).**
+**Ticketing (ServiceNow): [docs/TICKETING.md](docs/TICKETING.md).**
 
 Nothing on the network is changed. Agents have no shell: only fixed, non-intrusive checks, web requests without
 credentials, and public vulnerability lookups (NVD, CISA KEV, FIRST EPSS, endoflife.date).
@@ -84,7 +85,14 @@ exposure) and `previous` (the same issue in the previous assessment).
    **Agents v2, wave 1 (now)**: Risk analyst, Attack paths, Compliance; fix plan with re-check; schedules; alerts.
    **Wave 2 (now)**: Active Directory agent; Patch & configuration agent (Linux SSH, Synology, Proxmox).
    **Wave 3 (now)**: Microsoft 365 connector with Microsoft 365 & Entra ID and Device fleet agents; Windows (WinRM)
-   connector in Patch & configuration. **Next**: first ticketing integration, then several customers (sites) in one console.
+   connector in Patch & configuration.
+   **Ticketing**: ServiceNow incidents per finding, auto-created after runs, state synced into the Fix plan.
+   **Next waves**: more ticketing systems (ConnectWise PSA, Autotask, HaloPSA, Jira Service Management); several customers (sites) in one console; Azure and AWS posture
+   agents; compliance PDF with evidence uploads; RMM / patching integration and more fix recipes; import of other
+   scanners' results; MITRE ATT&CK mapping; an on-site Guardian collector at the customer that connects back to the
+   central Guardian server; integrations with business systems (SAP S/4HANA, SAP BTP and other leading platforms);
+   remote-site connectivity (built-in VPN client, pending a design review; meanwhile a VPN set up on the Proxmox host
+   can be used).
 2. **Next**: agents use the connectors (inside view of NAS, hypervisors, servers); more connector sign-in methods
    (Kerberos, WinRM, OAuth with certificates, client certificates, TOTP); Microsoft 365 and Google Workspace;
    RADIUS / TACACS+ / 802.1X checks.

@@ -91,7 +91,7 @@ Each run's **Fix plan** lists every open finding, ranked by the Risk analyst (P1
 | **Owner** | Free text: a person, a team, "IT partner" |
 | **Due** | Defaults to *first seen + the priority's target* (P1 7 days, P2 30, P3 90, P4 180). Change it if you agree on another date |
 | **Status** | Open, In progress, Fixed (to verify), Risk accepted. **Verified fixed** is set by an agent after a successful re-check |
-| **Note** | Ticket number, decision, anything useful |
+| **Note** | Decision, anything useful (ServiceNow tickets get their own chip: [TICKETING.md](TICKETING.md)) |
 
 - **Filters:** Open, Overdue, Priority 1–2, Done, All.
 - **Re-check** sends that one finding back to the agent that found it, as a short follow-up run (vault unlocked, uses a

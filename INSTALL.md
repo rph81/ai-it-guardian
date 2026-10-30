@@ -318,6 +318,9 @@ monthly AI assessment, and alerts by e-mail, Teams, Slack or webhook after each 
 changes). Scheduled AI runs need the vault unlocked, unless you allow unattended AI runs there (a root-only copy of the
 key; read the trade-off on that page). Step-by-step channel setup: [docs/SCHEDULES-ALERTS.md](docs/SCHEDULES-ALERTS.md).
 
+**Ticketing (optional, admins).** **Settings › Ticketing**: a ServiceNow integration user (itil role) to open an
+incident per finding, automatically after each AI assessment if you want. Setup: [docs/TICKETING.md](docs/TICKETING.md).
+
 ---
 
 ## 9. Add people (optional)

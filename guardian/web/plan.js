@@ -28,7 +28,10 @@ const Plan = (() => {
                done: r => ["fixed", "verified", "accepted"].includes(r.status), all: () => true};
     const L = {open: "Open", overdue: "Overdue", p1: "Priority 1–2", done: "Done", all: "All"};
     $("pl-filter").replaceChildren(el("div", {class: "seg"}, ...Object.keys(F).map(k => el("button", {type: "button", "aria-pressed": String(S.filter === k),
-      onclick: () => { S.filter = k; renderPlan(); }}, `${L[k]} · ${rows.filter(F[k]).length}`))));
+      onclick: () => { S.filter = k; renderPlan(); }}, `${L[k]} · ${rows.filter(F[k]).length}`))),
+      rows.some(r => r.ticket) && canEdit() ? el("button", {class: "btn sm", type: "button", onclick: async () => {
+        try { const x = await api(`/api/runs/${S.run}/tickets/sync`, {}); alert(`Tickets synced: ${x.updated} updated.`); refresh("plan"); }
+        catch (e) { alert(e.message); } }}, "Sync tickets") : null);
     const list = rows.filter(F[S.filter]);
     $("pl-rows").replaceChildren(...(list.length ? list.map(row) : [el("p", {class: "note"}, rows.length ? "Nothing here." : "Findings appear after an AI assessment.")]));
   }
@@ -39,7 +42,8 @@ const Plan = (() => {
       r.ransomware ? el("span", {class: "tag error"}, "Ransomware") : null,
       r.epss != null ? el("span", {class: "tag"}, `EPSS ${(r.epss * 100).toFixed(r.epss < 0.01 ? 2 : 0)}%`) : null,
       r.exposure ? el("span", {class: "tag"}, r.exposure) : null, el("span", {class: "tag"}, STATUS[r.status] || r.status),
-      r.overdue ? el("span", {class: "tag error"}, "Overdue") : null, r.carried_from ? el("span", {class: "tag new"}, "carried over") : null);
+      r.overdue ? el("span", {class: "tag error"}, "Overdue") : null, r.carried_from ? el("span", {class: "tag new"}, "carried over") : null,
+      r.ticket ? el("a", {class: "tag", href: r.ticket.url, target: "_blank", rel: "noopener"}, `${r.ticket.number} · ${(r.ticket.state || "").replace("_", " ")}`) : null);
     const head = el("div", {class: "pl-head"}, el("div", {}, el("b", {}, r.title), el("div", {class: "meta"}, `${r.id} · ${r.asset} · first seen ${r.first_seen}`)), chips);
     const body = el("div", {class: "pl-body"});
     if (r.reason) body.append(el("p", {class: "pl-why"}, el("b", {}, "Why this priority: "), r.reason));
@@ -54,7 +58,10 @@ const Plan = (() => {
         try { await api(`/api/runs/${S.run}/tracking/${r.id}`, {owner: owner.value, due: due.value || null, status: st.value, note: nt.value}); refresh("plan"); }
         catch (e) { alert(e.message); } }}, "Save");
       const re = el("button", {class: "btn sm", type: "button", onclick: () => recheck(r)}, "Re-check");
-      body.append(el("div", {class: "pl-edit"}, owner, due, st, nt, save, re));
+      const tk = r.ticket ? null : el("button", {class: "btn sm", type: "button", onclick: async () => {
+        try { const t = await api(`/api/runs/${S.run}/tracking/${r.id}/ticket`, {}); alert(`Ticket ${t.number} opened.`); refresh("plan"); }
+        catch (e) { alert(e.message); } }}, "Open ticket");
+      body.append(el("div", {class: "pl-edit"}, owner, due, st, nt, save, re, tk));
       if (r.recheck) body.append(el("p", {class: "micro"}, `Re-check asked by ${r.recheck.by} ${new Date(r.recheck.at * 1000).toLocaleString()}`));
     } else {
       body.append(el("p", {class: "meta"}, `Owner: ${r.owner || "—"} · due ${r.due || "—"}` + (r.note ? ` · ${r.note}` : "")));

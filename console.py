@@ -36,6 +36,7 @@ from guardian import auth
 from guardian import chat
 from guardian import remediate
 from guardian import notify
+from guardian import ticketing
 from guardian import connectors as conn
 from guardian.agents import ANALYSTS, LAYERS
 from guardian.controls import FRAMEWORKS, STATUSES as CONTROL_STATUSES
@@ -440,7 +441,8 @@ STATIC = {"/console.css": ("console.css", "text/css"), "/theme.js": ("theme.js",
           "/settings.js": ("settings.js", "text/javascript"), "/signin.js": ("signin.js", "text/javascript"),
           "/passkey.js": ("passkey.js", "text/javascript"), "/agents.js": ("agents.js", "text/javascript"),
           "/remediate.js": ("remediate.js", "text/javascript"), "/code.js": ("code.js", "text/javascript"),
-          "/plan.js": ("plan.js", "text/javascript"), "/schedule.js": ("schedule.js", "text/javascript")}
+          "/plan.js": ("plan.js", "text/javascript"), "/schedule.js": ("schedule.js", "text/javascript"),
+          "/ticketing.js": ("ticketing.js", "text/javascript")}
 PAGES = {"/": "console.html", "/settings": "settings.html", "/signin": "signin.html"}
 
 
@@ -971,7 +973,7 @@ def tracking_rows(d, g):
                      "recommendation": f.get("recommendation"), "first_seen": first, "due": due,
                      "overdue": bool(due and not verified and status not in ("fixed", "accepted") and due < time.strftime("%Y-%m-%d")),
                      "owner": t.get("owner", ""), "status": status, "note": t.get("note", ""), "updated_by": t.get("updated_by"),
-                     "recheck": t.get("recheck"), "carried_from": t.get("carried_from")})
+                     "recheck": t.get("recheck"), "carried_from": t.get("carried_from"), "ticket": t.get("ticket")})
     rows.sort(key=lambda r: (r["status"] == "verified", r["priority"], SEV_ORDER.index(r["severity"] or "info"), r["id"]))
     return rows
 
@@ -1161,6 +1163,10 @@ def after_run(run_id, mode, note=None):
     """Runs in the console once a run has finished: carry tracking over, then send alerts."""
     if mode in ("full", "resume", "followup"):
         carry_tracking(run_id)
+        try:
+            sync_tickets(run_id, auto=True)
+        except Exception as e:                                      # noqa: BLE001 - tickets must not block alerts
+            vault.audit("system", "ticketing-failed", str(e)[:200])
     cfg = notify_cfg()
     if not any(cfg[c].get("on") for c in ("email", "teams", "slack", "webhook")):
         return
@@ -1312,6 +1318,161 @@ def notify_test(request: Request):
     result = notify.send(_notify_secrets(cfg), alert)
     vault.audit(user["email"], "alert-test", ", ".join(f"{k} {v if v == 'ok' else 'failed'}" for k, v in result.items()))
     return {"result": result}
+
+
+# -- ticketing (ServiceNow first) ----------------------------------------------------------------------
+TICKET_DEFAULT = {"system": "servicenow", "on": False, "auto": False, "threshold": "p2", "resolve_on_verify": False,
+                  "instance": "", "username": "", "table": "incident", "assignment_group": "", "caller_id": "", "category": ""}
+
+
+def ticket_cfg():
+    return {**TICKET_DEFAULT, **vault.get("ticketing", {})}
+
+
+def ticket_client(cfg=None):
+    cfg = cfg or ticket_cfg()
+    if not cfg.get("on"):
+        raise HTTPException(400, "Ticketing is off: set it up in Settings › Ticketing")
+    pw = vault.get("ticketing_secrets", {}).get("servicenow")
+    if not pw:
+        raise HTTPException(400, "The ServiceNow password isn't saved yet")
+    try:
+        return ticketing.ServiceNow(cfg, pw)
+    except ticketing.TicketError as e:
+        raise HTTPException(400, str(e))
+
+
+def _ticket_finding(run_id, row, g):
+    f = next((x for x in g.get("findings") or [] if x["id"] == row["id"]), {})
+    return {**row, "evidence": f.get("evidence"), "key": f"{run_id}/{row['id']}"}
+
+
+def sync_tickets(run_id, auto=False):
+    """Open tickets for new high-priority findings (auto), and read ticket states back into the Fix plan."""
+    cfg = ticket_cfg()
+    if not cfg.get("on") or not vault.get("ticketing_secrets", {}).get("servicenow"):
+        return {"created": 0, "updated": 0}
+    sn = ticketing.ServiceNow(cfg, vault.get("ticketing_secrets", {})["servicenow"])
+    d = run_dir(run_id)
+    g = _read_graph(d)
+    data = _tracking(d)
+    limit = notify.THRESHOLDS.get(cfg.get("threshold", "p2"), 2)
+    created = updated = 0
+    for row in tracking_rows(d, g):
+        t = data.get(row["id"], {})
+        tk = t.get("ticket")
+        if not tk and auto and cfg.get("auto") and row["priority"] <= limit and row["status"] in ("open", "in_progress"):
+            fnd = _ticket_finding(run_id, row, g)
+            tk = sn.find(fnd["key"]) or sn.create(fnd, run_id, site()[1])
+            tk["key"] = fnd["key"]
+            data[row["id"]] = {**t, "ticket": tk}
+            created += 1
+            continue
+        if not tk or tk.get("system") != "servicenow":
+            continue
+        data[row["id"]] = t
+        st = sn.state(tk["sys_id"])
+        if st["state"] != tk.get("state"):
+            tk["state"], updated = st["state"], updated + 1
+        if st["state"] in ("resolved", "closed") and t.get("status", "open") in ("open", "in_progress") and row["status"] != "verified":
+            t["status"] = "fixed"
+            t["note"] = (t.get("note", "") + f" · {tk['number']} {st['state']} in ServiceNow; Re-check to verify").strip(" ·")[:300]
+        if row["status"] == "verified" and not tk.get("verified_noted"):
+            sn.note(tk["sys_id"], f"Guardian re-checked {row['id']} \"{row['title']}\" and confirmed it is fixed.",
+                    resolve=bool(cfg.get("resolve_on_verify")) and st["state"] not in ("resolved", "closed"))
+            tk["verified_noted"] = True
+            updated += 1
+    _save_tracking(d, data)
+    if created or updated:
+        vault.audit("system", "tickets-synced", f"{run_id}: {created} created, {updated} updated")
+    return {"created": created, "updated": updated}
+
+
+@app.get("/api/ticketing")
+def ticketing_get(request: Request):
+    require(request, "admin")
+    return {**ticket_cfg(), "secret_set": bool(vault.get("ticketing_secrets", {}).get("servicenow"))}
+
+
+class TicketingBody(BaseModel):
+    on: bool = False
+    auto: bool = False
+    threshold: str = "p2"
+    resolve_on_verify: bool = False
+    instance: str = ""
+    username: str = ""
+    password: Optional[str] = None
+    table: str = "incident"
+    assignment_group: str = ""
+    caller_id: str = ""
+    category: str = ""
+
+
+@app.post("/api/ticketing")
+def ticketing_set(body: TicketingBody, request: Request):
+    sid, s, user = require(request, "admin")
+    if body.threshold not in notify.THRESHOLDS:
+        raise HTTPException(400, "Unknown threshold")
+    cfg = {k: (v.strip() if isinstance(v, str) else v) for k, v in body.model_dump().items() if k != "password"}
+    cfg["system"] = "servicenow"
+    if cfg["on"]:
+        if not ticketing.INSTANCE_RE.match(cfg["instance"].rstrip("/")) or not cfg["username"]:
+            raise HTTPException(400, "Enter the instance address (https://yourcompany.service-now.com) and the integration user")
+        if not re.fullmatch(r"[a-z_][a-z0-9_]{0,79}", cfg["table"]):
+            raise HTTPException(400, "Unknown table name")
+    for k in ("assignment_group", "caller_id", "category"):
+        if len(cfg[k]) > 100:
+            raise HTTPException(400, f"{k} is too long")
+    if body.password:
+        vault.put("ticketing_secrets", {"servicenow": body.password})
+    if cfg["on"] and not vault.get("ticketing_secrets", {}).get("servicenow"):
+        raise HTTPException(400, "Enter the integration user's password")
+    vault.put("ticketing", cfg)
+    vault.audit(user["email"], "ticketing-changed", f"ServiceNow {'on' if cfg['on'] else 'off'}, auto {cfg['auto']} ({cfg['threshold']})")
+    return {"ok": True}
+
+
+@app.post("/api/ticketing/test")
+def ticketing_test(request: Request):
+    sid, s, user = require(request, "admin")
+    try:
+        return {"ok": True, **ticket_client().test()}
+    except ticketing.TicketError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/runs/{run_id}/tracking/{fid}/ticket")
+def ticket_create(run_id: str, fid: str, request: Request):
+    sid, s, user = require(request, "operator")
+    d = run_dir(run_id)
+    g = _read_graph(d)
+    row = next((r for r in tracking_rows(d, g) if r["id"] == fid), None)
+    if not row:
+        raise HTTPException(404, "No such finding")
+    data = _tracking(d)
+    if (data.get(fid) or {}).get("ticket"):
+        raise HTTPException(409, "This finding already has a ticket")
+    sn = ticket_client()
+    fnd = _ticket_finding(run_id, row, g)
+    try:
+        tk = sn.find(fnd["key"]) or sn.create(fnd, run_id, site()[1])
+    except ticketing.TicketError as e:
+        raise HTTPException(502, str(e))
+    tk["key"] = fnd["key"]
+    data.setdefault(fid, {})["ticket"] = tk
+    _save_tracking(d, data)
+    vault.audit(user["email"], "ticket-created", f"{run_id} {fid} -> {tk.get('number')}")
+    return tk
+
+
+@app.post("/api/runs/{run_id}/tickets/sync")
+def ticket_sync(run_id: str, request: Request):
+    sid, s, user = require(request, "operator")
+    run_dir(run_id)
+    try:
+        return sync_tickets(run_id)
+    except ticketing.TicketError as e:
+        raise HTTPException(502, str(e))
 
 
 # -- console --------------------------------------------------------------------------------------------
