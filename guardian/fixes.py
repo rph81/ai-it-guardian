@@ -678,6 +678,11 @@ def proposals(graph, fix, collector_ip=None):
                 continue
             if kind == "linux" and ip in windows or kind == "windows" and ip in linux:
                 continue
+            osname = " ".join(str((graph.get("assets") or {}).get(ip, {}).get(k) or "") for k in ("os", "os_guess", "device_type")).lower()
+            is_win = "windows" in osname or "windows" in text.lower()
+            is_lin = any(w in osname for w in ("linux", "debian", "ubuntu", "proxmox")) or re.search(r"\b(apt|debian|ubuntu|linux)\b", text, re.I)
+            if kind == "linux" and is_win and not is_lin or kind == "windows" and is_lin and not is_win:
+                continue                                    # a Windows finding never gets a Linux recipe, and the other way round
             seen.add((recipe, ip))
             blocked = "This is Guardian's own host: change it by hand." if ip == collector_ip else None
             if not blocked and kind == "linux" and ip not in linux:

@@ -27,11 +27,11 @@ const Plan = (() => {
     const F = {open: r => ["open", "in_progress"].includes(r.status), overdue: r => r.overdue, p1: r => r.priority <= 2 && !["verified", "accepted"].includes(r.status),
                done: r => ["fixed", "verified", "accepted"].includes(r.status), all: () => true};
     const L = {open: "Open", overdue: "Overdue", p1: "Priority 1–2", done: "Done", all: "All"};
-    $("pl-filter").replaceChildren(el("div", {class: "seg"}, ...Object.keys(F).map(k => el("button", {type: "button", "aria-pressed": String(S.filter === k),
+    $("pl-filter").replaceChildren(...[el("div", {class: "seg"}, ...Object.keys(F).map(k => el("button", {type: "button", "aria-pressed": String(S.filter === k),
       onclick: () => { S.filter = k; renderPlan(); }}, `${L[k]} · ${rows.filter(F[k]).length}`))),
       rows.some(r => r.ticket) && canEdit() ? el("button", {class: "btn sm", type: "button", onclick: async () => {
         try { const x = await api(`/api/runs/${S.run}/tickets/sync`, {}); alert(`Tickets synced: ${x.updated} updated.`); refresh("plan"); }
-        catch (e) { alert(e.message); } }}, "Sync tickets") : null);
+        catch (e) { alert(e.message); } }}, "Sync tickets") : null].filter(Boolean));
     const list = rows.filter(F[S.filter]);
     $("pl-rows").replaceChildren(...(list.length ? list.map(row) : [el("p", {class: "note"}, rows.length ? "Nothing here." : "Findings appear after an AI assessment.")]));
   }

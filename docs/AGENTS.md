@@ -182,7 +182,7 @@ fixed list of paths, never follows paging links to other hosts, and passes only 
 
 ## Coming next
 
-RMM / patching integration and more fix recipes. (Evidence and the compliance PDF: [COMPLIANCE.md](COMPLIANCE.md).)
+More ticketing systems and several customers in one console. (Fixes and patching: [FIXES.md](FIXES.md); evidence and the compliance PDF: [COMPLIANCE.md](COMPLIANCE.md); the full user manual: [USER-MANUAL.md](USER-MANUAL.md).)
 | **Microsoft 365 & Entra ID** | Microsoft Secure Score / Defender, Tenable Identity Exposure for Entra, Qualys SaaS posture | Microsoft 365 connector (read-only Graph app) |
 | **Device fleet** | Tenable / Qualys / Rapid7 endpoint agents, Defender Vulnerability Management | Microsoft 365 connector (Intune, Defender) |
 | **Azure** | Defender for Cloud, Wiz, Orca, Prisma Cloud (CSPM) | Azure connector (Reader + Security Reader) |

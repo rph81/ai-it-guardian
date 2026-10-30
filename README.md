@@ -9,6 +9,7 @@ You watch them work live and can talk to the Orchestrator that coordinates them.
 **The agents, what each one checks and which products it is modelled on: [docs/AGENTS.md](docs/AGENTS.md).**
 **Schedules, alerts and the fix plan: [docs/SCHEDULES-ALERTS.md](docs/SCHEDULES-ALERTS.md).**
 **Ticketing (ServiceNow): [docs/TICKETING.md](docs/TICKETING.md).**
+**User manual (every screen, with screenshots): [docs/USER-MANUAL.md](docs/USER-MANUAL.md).**
 **Azure posture agent: [docs/AZURE.md](docs/AZURE.md).**
 **Compliance evidence and PDF: [docs/COMPLIANCE.md](docs/COMPLIANCE.md).**
 **Fixes and patching (agentless and NinjaOne): [docs/FIXES.md](docs/FIXES.md).**
