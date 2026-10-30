@@ -24,15 +24,15 @@
 /* names the page scripts already use */
 [data-theme]{--card:var(--panel);--card2:var(--panel2);--busy:var(--warn);--bad:var(--crit);--note:var(--info)}
 *{box-sizing:border-box}
-html{background:var(--bg)}
+html{background:var(--bg);zoom:var(--zoom,1)}
 body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 var(--body);-webkit-font-smoothing:antialiased}
 .hidden{display:none!important}
 a{color:var(--accent)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 /* -- shell: left rail + page -------------------------------------------------------- */
-.shell{display:grid;grid-template-columns:76px minmax(0,1fr);min-height:100vh}
-.rail{border-right:1px solid var(--line);background:var(--bg2);display:flex;flex-direction:column;align-items:center;padding:18px 0;gap:6px;position:sticky;top:0;height:100vh;z-index:5}
+.shell{display:grid;grid-template-columns:76px minmax(0,1fr);min-height:calc(100vh / var(--zoom,1))}
+.rail{border-right:1px solid var(--line);background:var(--bg2);display:flex;flex-direction:column;align-items:center;padding:18px 0;gap:6px;position:sticky;top:0;height:calc(100vh / var(--zoom,1));z-index:5}
 .logo{width:38px;height:38px;border:1px solid var(--accent);display:grid;place-items:center;font:700 15px var(--head);color:var(--accent);margin-bottom:18px;text-decoration:none}
 .rail a.ri,.rail button.ri{width:58px;padding:9px 0 7px;display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--muted);text-decoration:none;font:500 9.5px var(--head);letter-spacing:.08em;text-transform:uppercase;border:1px solid transparent;background:none;cursor:pointer}
 .rail .ri svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.6}
@@ -184,7 +184,7 @@ hr.thin{border:0;border-top:1px solid var(--line);margin:8px 0}
 .tabs{display:flex;gap:6px;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:12px;flex-wrap:wrap}
 .tab{font:600 11.5px var(--head);letter-spacing:.1em;text-transform:uppercase;border:1px solid var(--line2);background:var(--panel);color:var(--muted);padding:8px 13px;cursor:pointer}
 .tab.on{color:var(--text);box-shadow:inset 0 -2px 0 var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--panel))}
-.panel{height:calc(100vh - 200px);min-height:460px;border:1px solid var(--line);overflow:hidden;position:relative;background:var(--panel2)}
+.panel{height:calc(calc(100vh / var(--zoom,1)) - 200px);min-height:460px;border:1px solid var(--line);overflow:hidden;position:relative;background:var(--panel2)}
 .panel iframe{width:100%;height:100%;border:0;display:block;background:var(--bg)}
 .panel.scroll{overflow:auto;padding:16px;background:var(--panel);height:auto;min-height:460px}
 .empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);padding:20px;text-align:center}
@@ -317,7 +317,7 @@ ol.steps li+li{margin-top:6px}
 .tcard[aria-checked="true"] .meta2 .on{display:inline-block}
 
 /* -- sign-in -------------------------------------------------------------------------- */
-.signin{min-height:100vh;display:grid;place-items:center;padding:16px;background:radial-gradient(ellipse at 50% 40%,var(--stage1),var(--bg) 70%)}
+.signin{min-height:calc(100vh / var(--zoom,1));display:grid;place-items:center;padding:16px;background:radial-gradient(ellipse at 50% 40%,var(--stage1),var(--bg) 70%)}
 .scard{width:100%;max-width:440px;padding:28px}
 .scard .brand{display:flex;align-items:center;gap:10px;font:600 11.5px var(--head);letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
 .scard h1{font-size:28px;margin:10px 0 6px}

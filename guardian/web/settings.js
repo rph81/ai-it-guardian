@@ -471,13 +471,17 @@ function renderAppearance() {
       Theme.set({theme: next}, true); box.querySelector(`[data-theme="${next}"]`).focus();
     });
     document.querySelectorAll("#s-appearance .seg button").forEach(b => b.addEventListener("click", () => Theme.set({mode: b.dataset.mode}, true)));
+    $("sizes").append(...Theme.SIZES.map(z => el("button", {type: "button", "data-size": z, "aria-pressed": "false", onclick: () => Theme.set({size: z}, true)},
+      z === "auto" ? "Auto" : `${z}%`)));
     Theme.onChange(paintAppearance);
   }
   paintAppearance();
 }
 function paintAppearance() {
   const t = Theme.get();
-  document.querySelectorAll("#s-appearance .seg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === t.mode)));
+  document.querySelectorAll("#s-appearance .seg button[data-mode]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === t.mode)));
+  document.querySelectorAll("#sizes button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.size === t.size)));
+  $("size-note").textContent = t.size === "auto" ? `Grows with the window on large screens. Now ${Math.round(t.zoom * 100)}% on this screen.` : `Fixed at ${t.size}% on every screen.`;
   document.querySelectorAll(".tcard").forEach(c => { c.dataset.scheme = t.scheme; c.setAttribute("aria-checked", String(c.dataset.theme === t.theme)); c.tabIndex = c.dataset.theme === t.theme ? 0 : -1; });
   $("theme-saved").textContent = `${Theme.THEMES[t.theme][0]} · ${t.mode === "system" ? `follows your system (now ${t.scheme})` : t.mode}`;
 }

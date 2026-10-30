@@ -857,20 +857,22 @@ def me(request: Request):
 
 
 THEMES, THEME_MODES = ("ember", "arctic", "volt", "crimson", "mono"), ("light", "dark", "system")
+TEXT_SIZES = ("auto", "100", "115", "130", "150", "175", "200")
 
 
 class Prefs(BaseModel):
     mode: str
     theme: str
+    size: str = "auto"
 
 
 @app.post("/api/me/prefs")
 def my_prefs(body: Prefs, request: Request):
     """Appearance is per person and follows them to every device; it's not a secret, so it lives outside the vault."""
     sid, s, user = require(request)
-    if body.mode not in THEME_MODES or body.theme not in THEMES:
-        raise HTTPException(400, "Unknown mode or theme")
-    vault.put(f"prefs:{user['id']}", {"mode": body.mode, "theme": body.theme})
+    if body.mode not in THEME_MODES or body.theme not in THEMES or body.size not in TEXT_SIZES:
+        raise HTTPException(400, "Unknown mode, theme or text size")
+    vault.put(f"prefs:{user['id']}", {"mode": body.mode, "theme": body.theme, "size": body.size})
     return {"ok": True}
 
 
