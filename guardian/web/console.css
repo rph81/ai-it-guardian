@@ -423,3 +423,11 @@ footer.foot{margin-top:14px;display:flex;justify-content:space-between;gap:12px;
 @media (max-width:560px){.section,.card{padding:16px 12px}.stage{padding:14px 10px}.page{padding:16px 12px 48px}}
 input[type=range].accent{accent-color:var(--accent);padding:0;border:0;background:none}
 input[type=number].wauto{width:80px}
+/* -- remediation -- */
+.section.danger::before{border-color:var(--crit)}
+.chip.live{border-color:var(--crit);color:var(--text)}.chip.live i{background:var(--crit);animation:blink 1.2s steps(2) infinite}
+.box .kv{display:grid;grid-template-columns:140px minmax(0,1fr);gap:4px 14px;font-size:13.5px;margin-top:6px}
+.box .kv>span:first-child{font:600 10.5px var(--head);letter-spacing:.14em;text-transform:uppercase;color:var(--muted);padding-top:2px}
+@media (max-width:560px){.box .kv{grid-template-columns:1fr}}
+.box h3.stitle{font-size:18px;margin:10px 0 6px}
+ol.steps .keybox{margin-top:6px}

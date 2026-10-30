@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en" data-theme="ember" data-scheme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guardian Fixes</title>
+<script src="/theme.js"></script>
+<link rel="stylesheet" href="/console.css">
+<script src="/passkey.js" defer></script>
+<script src="/remediate.js" defer></script>
+</head>
+<body>
+<div class="shell">
+  <nav class="rail" aria-label="Main">
+    <a class="logo" href="/" aria-label="Guardian home">G</a>
+    <a class="ri" href="/"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Overview</a>
+    <a class="ri on" href="/fix"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 00-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 005.4-5.4l-2.5 2.5-2.5-.5-.5-2.5z"/></svg>Fix</a>
+    <div class="sp"></div>
+    <a class="ri" href="/settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>Settings</a>
+  </nav>
+  <main class="page">
+    <div class="topbar">
+      <div>
+        <div class="crumb"><b>//</b>Guardian / Remediation</div>
+        <h1 class="ptitle">Fix / Mode.</h1>
+        <p class="sub">Guardian proposes fixes from tested recipes. An admin approves each one with a passkey. Every change is backed up first and rolled back if the check fails.</p>
+      </div>
+      <div class="who"><span class="chip" id="chip"><i></i><span id="chip-t">Read-only</span></span><span class="vchip" id="vault-chip"></span>
+        <button class="chip" id="mode-toggle">Dark</button></div>
+    </div>
+    <div class="callout warn hidden" id="note"></div>
+
+    <div class="two">
+      <section class="section danger" aria-labelledby="sw-title">
+        <div class="kicker">Guardian / safety switch</div>
+        <h2 class="stitle" id="sw-title">Remediation / Status.</h2>
+        <div class="row mt16"><span class="val" id="st">OFF</span><span class="note" id="st-note"></span></div>
+        <div class="field"><label for="dur">Turns itself off after</label>
+          <select id="dur" class="wauto"><option value="30">30 minutes</option><option value="60" selected>1 hour</option><option value="240">4 hours</option></select></div>
+        <div class="row mt16"><button class="btn solid" id="on">Turn on · passkey</button><button class="btn danger" id="off">Turn off now</button></div>
+        <ul class="never mt16">
+          <li><b>Admin only</b>, confirmed with a passkey every time it's turned on, and again for every change.</li>
+          <li><b>One change at a time</b>, each approved on its own. A restart of Guardian turns remediation off.</li>
+          <li><b>Fix accounts are separate</b> from the read-only connectors and stored in the vault.</li>
+          <li>Only the recipes below exist. Text found on devices or web pages can't trigger anything.</li>
+        </ul>
+      </section>
+      <section class="section" aria-labelledby="nv-title">
+        <div class="kicker">Guardian / always manual</div>
+        <h2 class="stitle" id="nv-title">Never / Automatic.</h2>
+        <ul class="never mt16" id="never"></ul>
+      </section>
+    </div>
+
+    <section class="section" aria-labelledby="pr-title">
+      <div class="kicker">Guardian / proposed fixes · <span id="run"></span></div>
+      <h2 class="stitle" id="pr-title">Fix / Proposals.</h2>
+      <div id="props"></div>
+    </section>
+
+    <section class="section" aria-labelledby="ch-title">
+      <div class="kicker">Guardian / change records</div>
+      <h2 class="stitle" id="ch-title">Changes.</h2>
+      <div id="changes"><p class="note">No changes yet.</p></div>
+    </section>
+
+    <section class="section admin-only" aria-labelledby="fa-title">
+      <div class="kicker">Guardian / fix accounts</div>
+      <h2 class="stitle" id="fa-title">Fix / Accounts.</h2>
+      <p class="note">For the SSH recipe: a separate user on each server that uses Guardian's key and may run only the commands below with sudo.</p>
+      <ol class="steps">
+        <li>On the server: <span class="mono">sudo adduser --disabled-password --gecos "" guardian-fix</span></li>
+        <li>Add Guardian's public key to <span class="mono">/home/guardian-fix/.ssh/authorized_keys</span>:<div class="keybox" id="pubkey"></div></li>
+        <li>Create <span class="mono">/etc/sudoers.d/guardian-fix</span> (with <span class="mono">sudo visudo -f</span>) containing exactly:<div class="keybox" id="sudoers"></div></li>
+        <li>Add the server here.</li>
+      </ol>
+      <div class="f3"><div><label for="fa-host">Server address</label><input id="fa-host" class="mono" placeholder="192.168.1.80"></div>
+        <div><label for="fa-user">User</label><input id="fa-user" class="mono" value="guardian-fix"></div>
+        <button class="btn primary" id="fa-add">Add</button></div>
+      <div class="tablewrap field"><table><thead><tr><th>Server</th><th>User</th><th>Port</th><th></th></tr></thead><tbody id="fa-rows"></tbody></table></div>
+    </section>
+
+    <section class="section" aria-labelledby="rc-title">
+      <div class="kicker">Guardian / recipes</div>
+      <h2 class="stitle" id="rc-title">Fix / Recipes.</h2>
+      <p class="note">The only changes Guardian can ever make. A recipe becomes active only once it has been tested.</p>
+      <div class="tablewrap field"><table><thead><tr><th>Recipe</th><th>Applies to</th><th>Risk</th><th>Backup / rollback</th><th>Needs</th><th>Status</th></tr></thead><tbody id="recipes"></tbody></table></div>
+    </section>
+  </main>
+</div>
+</body>
+</html>

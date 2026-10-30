@@ -62,8 +62,7 @@ Each run is a folder `runs/<date-time>/`:
 2. **Next**: agents use the connectors (inside view of NAS, hypervisors, servers); more connector sign-in methods
    (Kerberos, WinRM, OAuth with certificates, client certificates, TOTP); Microsoft 365 and Google Workspace;
    RADIUS / TACACS+ / 802.1X checks.
-3. **Later**: remediation mode. Off by default, turned on by an admin with a passkey for a limited time; agents propose
-   fixes from a list of tested recipes, a person approves each one, with a backup and rollback first.
+3. **Now (first recipes)**: remediation on the **Fix** page. Off by default; an admin turns it on with a passkey for 30 min to 4 h and approves each change with a passkey again. Active recipes: close a UPnP port forward, turn off SSH password login (Linux, through a separate `guardian-fix` account with 6 allowed sudo commands). Every change is backed up first, verified, rolled back automatically if the check fails, and recorded (CR-0001…) in the audit log. Firmware, WAN/firewall rules and Guardian's own access path always stay manual.
 
 ## Command line
 

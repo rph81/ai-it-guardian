@@ -285,6 +285,12 @@ your computer or phone), and five colour themes (**Ember**, **Arctic**, **Volt**
 light and a dark version. Your choice is saved to your account, so it follows you to every device. The **Dark/Light**
 button at the top of every page switches quickly.
 
+**Fixes (optional, admins).** The **Fix** page lists what Guardian can fix from the latest run. Remediation is off
+until an admin turns it on (passkey, 30 minutes to 4 hours; a restart turns it off), and every change needs its own
+approval with a passkey. For the SSH recipe, create the `guardian-fix` user on the server and the sudoers file exactly
+as the Fix page shows, then add the server there. Each change is backed up, checked, and rolled back automatically if
+the check fails; **Roll back** undoes it later.
+
 ---
 
 ## 9. Add people (optional)

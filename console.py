@@ -34,6 +34,7 @@ from pydantic import BaseModel
 
 from guardian import auth
 from guardian import chat
+from guardian import remediate
 from guardian import connectors as conn
 from guardian.agents import LAYERS
 from guardian.vault import ROLES, VAULT_ROLES, Vault, VaultLocked
@@ -419,7 +420,8 @@ REPORT_CSP = ("sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inl
               "style-src 'unsafe-inline'; img-src data:")
 STATIC = {"/console.css": ("console.css", "text/css"), "/theme.js": ("theme.js", "text/javascript"), "/console.js": ("console.js", "text/javascript"),
           "/settings.js": ("settings.js", "text/javascript"), "/signin.js": ("signin.js", "text/javascript"),
-          "/passkey.js": ("passkey.js", "text/javascript"), "/agents.js": ("agents.js", "text/javascript")}
+          "/passkey.js": ("passkey.js", "text/javascript"), "/agents.js": ("agents.js", "text/javascript"),
+          "/remediate.js": ("remediate.js", "text/javascript")}
 PAGES = {"/": "console.html", "/settings": "settings.html", "/signin": "signin.html"}
 
 
@@ -462,6 +464,13 @@ def page_console(request: Request):
     if not current(request)[1]:
         return Response(status_code=303, headers={"Location": "/signin"})
     return _page("console.html")
+
+
+@app.get("/fix")
+def page_fix(request: Request):
+    if not current(request)[1]:
+        return Response(status_code=303, headers={"Location": "/signin"})
+    return _page("remediate.html")
 
 
 @app.get("/settings")
@@ -753,6 +762,7 @@ def passkey_verify(body: PasskeyVerify, request: Request):
     was_holder = sid in vault.holders
     vault.update_user(user["id"], last_login=time.time())
     vault.audit(user["email"], "signed-in", f'Passkey "{stored["name"]}"' + (f" after {old.get('provider')}" if old.get("provider") else ""))
+    sessions[new]["fresh_at"] = time.time()                    # remediation asks for a passkey this recent
     if priv is not None:
         sessions[new]["priv"] = (priv, time.time() + 300)          # lets this session add another passkey for 5 minutes
         if not vault.initialized and user["role"] == "admin":
@@ -1197,6 +1207,160 @@ async def run_followup(run_id: str, request: Request):
     if not chat.inbox_waiting(d):
         raise HTTPException(400, "Nothing is waiting")
     return launch("followup", run_id, sid, user)
+
+
+# -- remediation ------------------------------------------------------------------------------------------
+FRESH_SECONDS = 120
+fix_state = {"until": 0, "by": None, "scope": "all"}
+
+
+def fix_on():
+    return fix_state["until"] > time.time()
+
+
+def require_fresh(request):
+    """Admin, vault unlocked by this session, and a passkey confirmed in the last two minutes."""
+    sid, s, user = require(request, "admin", unlocked=True)
+    if time.time() - s.get("fresh_at", 0) > FRESH_SECONDS:
+        raise HTTPException(428, "Confirm with your passkey first")
+    return sid, s, user
+
+
+def fix_hosts():
+    rec = next((r for r in vault.load_records("settings") if r.get("kind") == "fix-accounts"), None) if vault.unlocked else None
+    return (rec or {}).get("hosts", {})
+
+
+def changes():
+    return vault.get("changes", [])
+
+
+def save_change(rec):
+    items = [c for c in changes() if c["id"] != rec["id"]] + [rec]
+    vault.put("changes", items[-200:])
+
+
+def latest_analysed():
+    if not RUNS.exists():
+        return None, {}
+    for d in sorted((d for d in RUNS.iterdir() if RUN_ID.match(d.name)), reverse=True):
+        g = _read_graph(d)
+        if g.get("findings") or (g.get("wan") or {}).get("upnp_port_mappings"):
+            return d.name, g
+    return None, {}
+
+
+@app.get("/api/fix")
+def fix_overview(request: Request):
+    sid, s, user = require(request, "operator")
+    run_id, g = latest_analysed()
+    hosts = fix_hosts()
+    done = {c["proposal"]: c for c in changes() if c["status"] in ("done", "running")}
+    props = remediate.proposals(g, hosts, (g.get("site") or {}).get("collector_ip")) if g else []
+    for p in props:
+        p["change"] = done.get(p["id"], {}).get("id")
+    return {"on": fix_on(), "until": fix_state["until"], "by": fix_state["by"], "run": run_id,
+            "proposals": props, "recipes": remediate.RECIPES, "never": remediate.NEVER, "sudoers": remediate.SUDOERS,
+            "public_key": vault.get("ssh_public_key"), "hosts": hosts if user["role"] == "admin" else {},
+            "changes": sorted(changes(), key=lambda c: -c["created"])[:50], "admin": user["role"] == "admin",
+            "unlocked": sid in vault.holders, "fresh": time.time() - s.get("fresh_at", 0) <= FRESH_SECONDS}
+
+
+class FixOn(BaseModel):
+    minutes: int
+
+
+@app.post("/api/fix/on")
+def fix_turn_on(body: FixOn, request: Request):
+    sid, s, user = require_fresh(request)
+    if body.minutes not in (30, 60, 240):
+        raise HTTPException(400, "Choose 30 minutes, 1 hour or 4 hours")
+    fix_state.update(until=time.time() + body.minutes * 60, by=user["name"])
+    s["fresh_at"] = 0                                    # the next approval needs its own passkey
+    vault.audit(user["email"], "remediation-on", f"For {body.minutes} minutes")
+    return {"on": True, "until": fix_state["until"]}
+
+
+@app.post("/api/fix/off")
+def fix_turn_off(request: Request):
+    sid, s, user = require(request, "admin")
+    fix_state.update(until=0)
+    vault.audit(user["email"], "remediation-off", "Turned off")
+    return {"on": False}
+
+
+class FixAccount(BaseModel):
+    host: str
+    user: str = "guardian-fix"
+    port: int = 22
+    remove: bool = False
+
+
+@app.post("/api/fix/accounts")
+def fix_account(body: FixAccount, request: Request):
+    sid, s, user = require(request, "admin", unlocked=True)
+    if not re.match(r"^\d+\.\d+\.\d+\.\d+$", body.host) or not re.match(r"^[a-z_][a-z0-9_-]{0,31}$", body.user) or not 1 <= body.port <= 65535:
+        raise HTTPException(400, "Check the address, user name and port")
+    rec = next((r for r in vault.load_records("settings") if r.get("kind") == "fix-accounts"), None) or {"kind": "fix-accounts", "hosts": {}}
+    if body.remove:
+        rec["hosts"].pop(body.host, None)
+    else:
+        rec["hosts"][body.host] = {"user": body.user, "port": body.port}
+        conn.guardian_ssh_key(vault)
+    vault.save_record("fix-accounts", "settings", rec)
+    vault.audit(user["email"], "fix-account-" + ("removed" if body.remove else "saved"), body.host)
+    return {"hosts": rec["hosts"]}
+
+
+class FixApply(BaseModel):
+    proposal: str
+
+
+def _run_change(rec, proposal):
+    ctx = remediate.Context(vault, STATE, fix_hosts(), rec)
+    step = ctx.step
+    ctx.step = lambda *a: (step(*a), save_change(rec))     # the page follows each step as it happens
+    remediate.execute(ctx, proposal)
+    save_change(rec)
+    vault.audit(rec["by_email"], "remediation-" + rec["status"], f'{rec["id"]} {rec["title"]}')
+
+
+@app.post("/api/fix/apply")
+def fix_apply(body: FixApply, request: Request):
+    sid, s, user = require_fresh(request)
+    if not fix_on():
+        raise HTTPException(409, "Remediation is off: turn it on first")
+    run_id, g = latest_analysed()
+    p = next((x for x in remediate.proposals(g, fix_hosts(), (g.get("site") or {}).get("collector_ip")) if x["id"] == body.proposal), None)
+    if not p:
+        raise HTTPException(404, "That fix is no longer proposed")
+    if not p["ready"]:
+        raise HTTPException(400, p["blocked"] or "Not ready")
+    if any(c["proposal"] == p["id"] and c["status"] in ("running", "done") for c in changes()):
+        raise HTTPException(409, "Already applied")
+    s["fresh_at"] = 0
+    rec = {"id": "CR-%04d" % (len(changes()) + 1), "proposal": p["id"], "recipe": p["recipe"], "title": p["title"],
+           "target": p["target"], "finding": p["finding"], "run": run_id, "by": user["name"], "by_email": user["email"],
+           "created": time.time(), "status": "approved", "steps": [{"t": time.time(), "step": "approve", "ok": True,
+                                                                    "text": f'Approved by {user["name"]} with a passkey'}]}
+    save_change(rec)
+    vault.audit(user["email"], "remediation-approved", f'{rec["id"]} {p["title"]}')
+    threading.Thread(target=_run_change, args=(rec, p), daemon=True).start()
+    return rec
+
+
+@app.post("/api/fix/changes/{cid}/rollback")
+def fix_rollback(cid: str, request: Request):
+    sid, s, user = require_fresh(request)
+    rec = next((c for c in changes() if c["id"] == cid), None)
+    if not rec or rec["status"] not in ("done", "needs-attention") or not rec.get("backup"):
+        raise HTTPException(400, "Nothing to roll back")
+    s["fresh_at"] = 0
+    ctx = remediate.Context(vault, STATE, fix_hosts(), rec)
+    remediate.rollback(ctx, rec)
+    save_change(rec)
+    vault.audit(user["email"], "remediation-rollback", f'{cid}: {rec["status"]}')
+    return rec
 
 
 # -- connectors -----------------------------------------------------------------------------------------

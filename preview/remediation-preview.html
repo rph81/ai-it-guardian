@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guardian Remediation</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Saira+Semi+Condensed:wght@400;500;600&display=swap">
+<style>
+:root{--bg:#121311;--bg2:#161815;--panel:#1a1c18;--panel2:#20231e;--line:#2d3029;--line2:#3a3e35;--text:#ecede6;--muted:#8e9286;--dim:#62665c;
+  --accent:#f07c3e;--ok:#a9c47c;--warn:#e6b450;--crit:#ef5a4c;--info:#a993e6;--on:#16120d;
+  --head:"Chakra Petch",sans-serif;--body:"Saira Semi Condensed",sans-serif}
+@media (prefers-color-scheme:light){:root{--bg:#f2f1ea;--bg2:#ebe9e0;--panel:#f9f8f3;--panel2:#fff;--line:#dcd9cd;--line2:#c8c4b5;--text:#1c1d18;--muted:#686a5f;--dim:#9a9b8f;
+  --accent:#d35f1f;--ok:#5a8429;--warn:#b7801a;--crit:#cf3a2c;--info:#7458cc;--on:#fff}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 var(--body)}
+.banner{background:var(--accent);color:var(--on);font:600 12px var(--head);letter-spacing:.06em;text-align:center;padding:7px;text-transform:uppercase}
+main{max-width:1180px;margin:0 auto;padding:24px 16px 60px}
+.top{display:flex;justify-content:space-between;align-items:flex-end;gap:14px;flex-wrap:wrap}
+.crumb{font:600 11px var(--head);letter-spacing:.18em;color:var(--muted);text-transform:uppercase}.crumb b{color:var(--accent)}
+h1{font:700 clamp(28px,4.4vw,48px)/1.05 var(--head);text-transform:uppercase;margin:12px 0 6px}
+.sub{color:var(--muted);margin:0}
+h2{font:600 clamp(18px,2vw,24px) var(--head);text-transform:uppercase;letter-spacing:.03em;margin:4px 0}
+.kicker,.lbl{font:600 10.5px var(--head);letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.note{font-size:13px;color:var(--muted);margin:6px 0 0}
+.chip{font:600 11px var(--head);letter-spacing:.1em;text-transform:uppercase;border:1px solid var(--line2);padding:8px 11px;display:inline-flex;gap:8px;align-items:center;background:var(--panel);color:var(--muted)}
+.chip i{width:8px;height:8px;background:var(--dim)}
+.chip.live{border-color:var(--crit);color:var(--text)}.chip.live i{background:var(--crit);animation:b 1.2s steps(2) infinite}
+@keyframes b{50%{opacity:.3}}
+.section{position:relative;border:1px solid var(--line);background:linear-gradient(180deg,var(--panel),var(--bg2));padding:20px 22px;margin-top:20px}
+.section::before{content:"";position:absolute;left:-1px;top:-1px;width:16px;height:16px;border-left:2px solid var(--accent);border-top:2px solid var(--accent)}
+.section.danger::before{border-color:var(--crit)}
+.btn{font:600 12.5px var(--head);letter-spacing:.04em;color:var(--text);background:var(--panel);border:1px solid var(--line2);padding:10px 16px;cursor:pointer}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{border-color:var(--accent);color:var(--accent)}
+.btn.go{background:var(--accent);border-color:var(--accent);color:var(--on)}
+.btn.bad{border-color:var(--crit);color:var(--crit)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.grid2{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:20px}
+@media (max-width:900px){.grid2{grid-template-columns:1fr}}
+.box{background:var(--panel2);border:1px solid var(--line2);padding:14px;position:relative}
+.box::after{content:"";position:absolute;right:9px;top:8px;width:9px;height:2px;background:var(--accent)}
+.state{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.big{font:700 34px var(--head)}
+.off{color:var(--muted)}.on{color:var(--crit)}
+select,input{border:1px solid var(--line2);background:var(--bg2);color:var(--text);padding:9px 11px;font:14px var(--body)}
+label{display:block;margin:12px 0 5px}
+.rules{margin:10px 0 0;padding-left:18px;font-size:13.5px}.rules li{margin:5px 0}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+.tw{overflow-x:auto}table{min-width:720px}
+th{font:600 10px var(--head);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);text-align:left;padding:8px;border-bottom:1px solid var(--line2)}
+td{padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+td b{font-family:var(--head);font-weight:600}
+.tag{font:600 10px var(--head);letter-spacing:.12em;text-transform:uppercase;padding:3px 7px;border:1px solid var(--line2);color:var(--muted);white-space:nowrap}
+.tag.low{color:var(--ok);border-color:var(--ok)}.tag.med{color:var(--warn);border-color:var(--warn)}.tag.high{color:var(--crit);border-color:var(--crit)}
+.tag.manual{color:var(--info);border-color:var(--info)}
+.fix{border:1px solid var(--line2);background:var(--panel2);padding:18px;margin-top:12px}
+.fix h3{font:600 18px var(--head);margin:4px 0 8px;text-transform:uppercase;letter-spacing:.02em}
+.kv{display:grid;grid-template-columns:150px minmax(0,1fr);gap:6px 14px;font-size:13.5px;margin-top:10px}
+@media (max-width:560px){.kv{grid-template-columns:1fr}}
+.kv dt{font:600 10.5px var(--head);letter-spacing:.14em;text-transform:uppercase;color:var(--muted);padding-top:2px}
+.kv dd{margin:0}
+code{font:12.5px ui-monospace,Menlo,monospace;background:var(--bg2);border:1px solid var(--line);padding:1px 5px}
+.steps{display:flex;gap:0;margin-top:16px;flex-wrap:wrap}
+.step{flex:1;min-width:110px;border-top:3px solid var(--line2);padding:8px 8px 0 0;font:600 11px var(--head);letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+.step small{display:block;font:500 11.5px var(--body);letter-spacing:0;text-transform:none;color:var(--muted);margin-top:2px}
+.step.done{border-color:var(--ok);color:var(--ok)}.step.now{border-color:var(--accent);color:var(--accent)}
+.log{font:12px ui-monospace,Menlo,monospace;background:var(--bg2);border:1px solid var(--line);padding:10px 12px;margin-top:12px;min-height:60px;white-space:pre-wrap}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;place-items:center;padding:16px;z-index:5}
+.modal.on{display:grid}
+.mbox{background:var(--panel);border:1px solid var(--accent);padding:24px;max-width:420px;width:100%;text-align:center}
+.bio{width:64px;height:64px;margin:6px auto 12px;border:1px solid var(--accent);display:grid;place-items:center;color:var(--accent);font:700 22px var(--head)}
+</style>
+</head>
+<body>
+<div class="banner">Design preview · remediation (Phase 3) · simulated, nothing is changed</div>
+<main>
+  <div class="top">
+    <div>
+      <div class="crumb"><b>//</b> Guardian / Remediation</div>
+      <h1>Fix / Mode.</h1>
+      <p class="sub">Guardian proposes fixes from tested recipes. You approve each one. Every change is backed up first and can be rolled back.</p>
+    </div>
+    <span class="chip" id="chip"><i></i><span id="chip-t">Read-only</span></span>
+  </div>
+
+  <div class="grid2">
+    <section class="section danger">
+      <div class="kicker">Guardian / safety switch</div>
+      <h2>Remediation / Status.</h2>
+      <div class="state" style="margin-top:12px">
+        <div class="big off" id="st">OFF</div>
+        <div class="note" id="st-note">Guardian is read-only. No device can be changed.</div>
+      </div>
+      <label for="scope" class="lbl">Allowed devices</label>
+      <select id="scope"><option>Only devices with a findings-linked fix (6)</option><option>Router 192.168.1.254 only</option><option>Lab servers group (4)</option></select>
+      <label for="dur" class="lbl">Turns itself off after</label>
+      <select id="dur"><option value="30">30 minutes</option><option value="60" selected>1 hour</option><option value="240">4 hours</option></select>
+      <label for="win" class="lbl">Change window (optional)</label>
+      <select id="win"><option>Any time</option><option>Tue 22:00–23:00 only</option><option>Weekends 08:00–10:00 only</option></select>
+      <div class="row" style="margin-top:16px">
+        <button class="btn go" id="enable">Turn on · admin passkey</button>
+        <button class="btn bad" id="disable" disabled>Turn off now</button>
+      </div>
+      <ul class="rules">
+        <li><b>Admin only</b>, confirmed with a fresh passkey every time it's turned on.</li>
+        <li><b>Each change needs its own approval.</b> Nothing runs in bulk.</li>
+        <li><b>Separate write accounts</b>, stored apart in the vault and unlocked only while this is on. Read-only connectors never change anything.</li>
+        <li>Instructions found on devices or web pages can never trigger a fix: only the fixed recipes below exist.</li>
+      </ul>
+    </section>
+
+    <section class="section">
+      <div class="kicker">Guardian / always manual</div>
+      <h2>Never / Automatic.</h2>
+      <p class="note">Too risky to automate until a recipe is proven on that device. Guardian gives you step-by-step instructions instead.</p>
+      <ul class="rules">
+        <li><b>Firmware flashes</b>: a failed flash can brick the device.</li>
+        <li><b>Router WAN and firewall rules</b>: one mistake cuts the whole site off.</li>
+        <li><b>The SSH or admin path Guardian itself connects through</b>: it could lock itself (and you) out.</li>
+        <li><b>Anything on a device without a backup method.</b></li>
+      </ul>
+      <div class="box" style="margin-top:14px">
+        <div class="lbl">For your customers</div>
+        <p class="note">Each client signs a remediation authorisation and sets a change window. Every fix produces a change record (before, after, who approved, evidence) for their compliance file.</p>
+      </div>
+    </section>
+  </div>
+
+  <section class="section">
+    <div class="kicker">Guardian / proposed fix · from finding F004</div>
+    <h2>Fix / Proposal.</h2>
+    <div class="fix">
+      <div class="row"><span class="tag low">Low risk</span><span class="tag">Recipe: router.upnp.disable</span><span class="tag">Tested on: supported router models</span></div>
+      <h3>Turn off UPnP on the router</h3>
+      <dl class="kv">
+        <dt>Device</dt><dd>Router 192.168.1.254 (model from the scan)</dd>
+        <dt>Why</dt><dd>UPnP let devices open 8 ports to the internet, including BitTorrent on the NAS (F004, high).</dd>
+        <dt>Change</dt><dd>Set <code>UPnP = off</code> through the router's admin API, using the write account <code>guardian-fix</code>.</dd>
+        <dt>Could break</dt><dd>Game consoles and some video-call apps may need manual port forwards. Nothing else on this network uses UPnP today (checked in the last scan).</dd>
+        <dt>Backup first</dt><dd>Full router config export, stored encrypted in the vault.</dd>
+        <dt>Rollback</dt><dd>Automatic if the router stops answering within 2 minutes; otherwise one click (restores the export).</dd>
+        <dt>Then</dt><dd>The Internet perimeter agent re-checks the forwards and closes F004 if they're gone.</dd>
+      </dl>
+      <div class="row" style="margin-top:16px">
+        <button class="btn go" id="approve" disabled>Approve and apply</button>
+        <button class="btn">Reject</button>
+        <button class="btn">Show me how to do it myself</button>
+      </div>
+      <p class="note" id="appr-note">Turn remediation on first.</p>
+      <div class="steps" id="steps">
+        <div class="step" data-s="0">Proposed<small>by the Orchestrator</small></div>
+        <div class="step" data-s="1">Approved<small>passkey</small></div>
+        <div class="step" data-s="2">Backed up<small>config export</small></div>
+        <div class="step" data-s="3">Applied<small>UPnP off</small></div>
+        <div class="step" data-s="4">Verified<small>re-check</small></div>
+      </div>
+      <div class="log" id="log">Waiting for approval.</div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="kicker">Guardian / recipes</div>
+    <h2>Fix / Recipes.</h2>
+    <p class="note">The only changes Guardian can ever make. Each is tested before it's added; new ones start on a test VM.</p>
+    <div class="tw"><table>
+      <thead><tr><th>Recipe</th><th>Applies to</th><th>Risk</th><th>Backup / rollback</th><th>Needs</th></tr></thead>
+      <tbody>
+        <tr><td><b>Turn off UPnP</b></td><td>Supported routers</td><td><span class="tag low">Low</span></td><td>Config export · auto</td><td>Router write account</td></tr>
+        <tr><td><b>Disable SSH password login</b></td><td>Linux servers</td><td><span class="tag med">Medium</span></td><td>sshd_config copy · auto, key login checked first</td><td>Linux fix account (sudo for this one file)</td></tr>
+        <tr><td><b>Turn off SNMPv1/v2c</b></td><td>Printers, switches</td><td><span class="tag low">Low</span></td><td>Settings export · manual</td><td>Device admin account</td></tr>
+        <tr><td><b>Force HTTPS on admin page</b></td><td>Synology DSM, Proxmox</td><td><span class="tag low">Low</span></td><td>Setting snapshot · auto</td><td>NAS / hypervisor fix account</td></tr>
+        <tr><td><b>Close a port forward</b></td><td>Routers</td><td><span class="tag med">Medium</span></td><td>Config export · auto</td><td>Router write account</td></tr>
+        <tr><td><b>Apply OS security updates</b></td><td>Debian/Ubuntu servers</td><td><span class="tag med">Medium</span></td><td>Proxmox snapshot first · one click</td><td>Linux fix account + Proxmox connector</td></tr>
+        <tr><td><b>Update firmware</b></td><td>Any</td><td><span class="tag manual">Manual</span></td><td>Instructions only</td><td>You</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+</main>
+
+<div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="m-t">
+  <div class="mbox"><div class="bio">ID</div><h2 id="m-t">Confirm with your passkey</h2>
+    <p class="note" id="m-n"></p>
+    <div class="row" style="justify-content:center;margin-top:14px"><button class="btn go" id="m-ok">Touch ID ✓ (simulated)</button><button class="btn" id="m-no">Cancel</button></div></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let on = false, left = 0, timer = null, pending = null;
+function ask(text, then) { $("m-n").textContent = text; pending = then; $("modal").classList.add("on"); $("m-ok").focus(); }
+$("m-no").onclick = () => $("modal").classList.remove("on");
+$("m-ok").onclick = () => { $("modal").classList.remove("on"); if (pending) pending(); };
+function paint() {
+  $("st").textContent = on ? "ON" : "OFF"; $("st").className = "big " + (on ? "on" : "off");
+  $("st-note").textContent = on ? `Changes allowed until it turns itself off in ${left} min. Each one still needs approval.` : "Guardian is read-only. No device can be changed.";
+  $("chip").className = "chip" + (on ? " live" : ""); $("chip-t").textContent = on ? `Remediation on · ${left} min` : "Read-only";
+  $("enable").disabled = on; $("disable").disabled = !on; $("approve").disabled = !on;
+  $("appr-note").textContent = on ? "Approving asks for your passkey again." : "Turn remediation on first.";
+}
+$("enable").onclick = () => ask("Turn on remediation for " + $("dur").selectedOptions[0].text + ". Write accounts are unlocked from the vault.", () => {
+  on = true; left = +$("dur").value; paint();
+  timer = setInterval(() => { left--; if (left <= 0) { on = false; clearInterval(timer); } paint(); }, 60000);
+});
+$("disable").onclick = () => { on = false; clearInterval(timer); paint(); };
+function stepTo(n, line) {
+  document.querySelectorAll(".step").forEach(s => { const i = +s.dataset.s; s.className = "step" + (i < n ? " done" : i === n ? " now" : ""); });
+  $("log").textContent += "\n" + line;
+}
+$("approve").onclick = () => ask("Approve: turn off UPnP on 192.168.1.254.", () => {
+  $("approve").disabled = true; $("log").textContent = "";
+  const seq = [[1, "22:04:10  approved by Rabih (passkey)"], [2, "22:04:12  router config exported (41 KB, encrypted in vault)"],
+               [3, "22:04:15  UPnP set to off · router answering"], [4, "22:04:58  Internet perimeter re-check: 0 UPnP forwards"],
+               [5, "22:05:01  F004 resolved · change record CR-0001 saved"]];
+  seq.forEach(([n, t], i) => setTimeout(() => stepTo(n, t), 900 * (i + 1)));
+});
+stepTo(0, ""); $("log").textContent = "Waiting for approval."; paint();
+</script>
+</body>
+</html>
