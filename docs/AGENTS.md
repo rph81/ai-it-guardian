@@ -18,7 +18,7 @@ All agents follow the same rules (the `COMMON` prompt):
 Scanner ─▶ Discovery ─▶ Orchestrator ─▶ Specialists (in parallel, scaled for big sites)
                                             Network · OS & endpoints · Web & APIs · Firmware · Internet perimeter
                                             + through connectors: Active Directory · Microsoft 365 & Entra ID · Device fleet ·
-                                              Patch & configuration
+                                              Azure · Patch & configuration
                                    ─▶ Analysts (one after another)
                                             Risk analyst ─▶ Attack paths ─▶ Compliance
                                    ─▶ Report writer
@@ -48,6 +48,7 @@ several copies for large sites; analysts always run as one copy.
 | **Patch & configuration** | Inside servers and Windows machines, through the Linux SSH, Windows, Synology and Proxmox connectors (see below) | fixed read-only checks, OSV, CVE and end-of-life databases |
 | **Microsoft 365 & Entra ID** | The cloud tenant, through the Microsoft 365 connector (see below) | Microsoft Graph, fixed read-only paths |
 | **Device fleet** | Intune-managed laptops and phones and Defender alerts, through the Microsoft 365 connector | Microsoft Graph, end-of-life database |
+| **Azure** | Azure subscriptions, through the Azure connector (separate app, Reader + Security Reader); see [AZURE.md](AZURE.md) | 29 fixed Resource Graph queries, 22 read-only management paths |
 
 ## Specialists that sign in through a connector (Agents v2, wave 2)
 
@@ -181,6 +182,7 @@ fixed list of paths, never follows paging links to other hosts, and passes only 
 
 ## Coming next
 
-Ticketing (Jira, ServiceNow, Autotask or ConnectWise), then several customers (sites) in one console.
+Compliance PDF with evidence uploads, then RMM / patching integration and more fix recipes.
 | **Microsoft 365 & Entra ID** | Microsoft Secure Score / Defender, Tenable Identity Exposure for Entra, Qualys SaaS posture | Microsoft 365 connector (read-only Graph app) |
 | **Device fleet** | Tenable / Qualys / Rapid7 endpoint agents, Defender Vulnerability Management | Microsoft 365 connector (Intune, Defender) |
+| **Azure** | Defender for Cloud, Wiz, Orca, Prisma Cloud (CSPM) | Azure connector (Reader + Security Reader) |

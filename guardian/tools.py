@@ -197,6 +197,22 @@ class Toolbox:
                     "query": {"type": "object", "additionalProperties": {"type": "string"}},
                     "beta": {"type": "boolean"}, "max_pages": {"type": "integer", "minimum": 1, "maximum": 10}},
                     "required": ["connector", "path"], "additionalProperties": False}},
+            "azure_query": {
+                "description": "Run one fixed Azure Resource Graph query (read-only) over the subscriptions the Azure connector may read. "
+                               "Queries: " + ", ".join(access.AZURE_QUERIES) + ". Optionally narrow to one resource_group or subscription.",
+                "input_schema": {"type": "object", "properties": {
+                    "connector": {"type": "string"}, "query": {"type": "string", "enum": list(access.AZURE_QUERIES)},
+                    "resource_group": {"type": "string"}, "subscription": {"type": "string"}},
+                    "required": ["connector", "query"], "additionalProperties": False}},
+            "azure_get": {
+                "description": "GET one Azure Resource Manager path through the Azure connector (fixed list; api-version is added for you): "
+                               "/subscriptions; per subscription Defender pricings, secure scores, security contacts, auto-provisioning, "
+                               "activity-log diagnostic settings and alerts, locks, classic administrators, Advisor; per resource SQL "
+                               "firewall rules, auditing, databases and TDE; PostgreSQL/MySQL firewall rules; App Service config/web; "
+                               "Key Vault secrets and keys (names and expiry only); blob service properties; one NSG; diagnostic settings "
+                               "of a resource. Example: /subscriptions/<id>/resourceGroups/<rg>/providers/Microsoft.Sql/servers/<name>/firewallRules",
+                "input_schema": {"type": "object", "properties": {"connector": {"type": "string"}, "path": {"type": "string"}},
+                                 "required": ["connector", "path"], "additionalProperties": False}},
             "windows_check": {
                 "description": "Run one fixed, read-only PowerShell check on a Windows machine over WinRM (normal user, not an administrator). Checks: "
                                + ", ".join(access.WINDOWS_CHECKS) + ".",
@@ -415,6 +431,14 @@ class Toolbox:
         self.g.log(self.agent, f"graph_get {path}")
         return access.graph_get(connector, path, query, beta, max_pages)
 
+    def t_azure_query(self, connector, query, resource_group=None, subscription=None):
+        self.g.log(self.agent, f"azure_query {query}" + (f" rg={resource_group}" if resource_group else ""))
+        return access.azure_query(connector, query, resource_group, subscription)
+
+    def t_azure_get(self, connector, path):
+        self.g.log(self.agent, f"azure_get {path}")
+        return access.azure_get(connector, path)
+
     def t_windows_check(self, connector, host, check):
         self.g.log(self.agent, f"windows_check {host} {check}")
         return access.windows_check(connector, host, check)
@@ -592,6 +616,10 @@ def describe(name, args):
         return f'Microsoft 365: {a.get("path")}'
     if name == "windows_check":
         return f'{a.get("host")}: {a.get("check", "").replace("_", " ")}'
+    if name == "azure_query":
+        return f'Azure: {a.get("query", "").replace("_", " ")}' + (f' in {a["resource_group"]}' if a.get("resource_group") else "")
+    if name == "azure_get":
+        return f'Azure: {a.get("path", "").rsplit("/providers/", 1)[-1]}'
     if name == "synology_info":
         return "Synology: DSM version and updates"
     if name == "proxmox_get":
@@ -626,4 +654,4 @@ def describe(name, args):
 # checks that touch the network or the internet (drawn as a pulse on the map); the rest only read the run's data
 ACTIVE = {"probe", "http_get", "tls_inspect", "cve_lookup", "eol_lookup", "web_search", "epss_lookup", "kev_details",
           "ad_query", "linux_check", "linux_vulnerable_packages", "synology_info", "proxmox_get",
-          "graph_get", "windows_check"}
+          "graph_get", "windows_check", "azure_query", "azure_get"}

@@ -246,6 +246,47 @@ Record one finding per issue (asset: 'site'; name the devices in the evidence, a
 open high Defender alerts and unencrypted or non-compliant devices with company data are high; stale devices and missing
 policies medium. If Intune isn't licensed or the permission is missing, record one info finding saying so.""",
     },
+    "azure": {
+        "title": "Azure",
+        "tools": ["list_connectors", "azure_query", "azure_get", "record_finding"],
+        "web": True,
+        "brief": """Your layer: the Microsoft Azure subscriptions, reviewed the way Defender for Cloud, Wiz, Orca and Prisma Cloud
+do, against the CIS Microsoft Azure Foundations Benchmark. You read through the Azure connector (an app with only Reader
+and Security Reader). azure_query runs fixed Resource Graph queries by name (optionally for one resource group or
+subscription); azure_get reads allow-listed management paths. Start with list_connectors, then azure_query
+"subscriptions" and "resource_counts" to see what exists, and only look at what is there:
+- Defender for Cloud: "secure_score", "defender_plans" (plans on Free for servers, storage, SQL, Key Vault, containers,
+  App Service), "defender_recommendations" (unhealthy, by severity), "defender_alerts" (active alerts);
+  azure_get .../providers/Microsoft.Security/securityContacts (who gets alerts).
+- Internet exposure: "public_ips" (which are attached to what), "nsg_open_inbound" (RDP 3389, SSH 22, SMB 445, databases
+  1433/3306/5432, WinRM 5985/5986 or * open to any source), "gateways_and_balancers" (public apps without WAF, no
+  Bastion while VMs have public RDP/SSH), "app_services" (httpsOnly off, public), "storage_accounts" and databases
+  reachable from everywhere. Link exposure to the resource: a VM with a public IP and an open NSG rule is one finding.
+- Network: "nsg_coverage" (subnets without NSG), "flow_logs", "vnets" (DDoS).
+- Storage: "storage_accounts": public blob access, shared key access, https only, minimum TLS below 1.2, public network
+  with default action Allow, cross-tenant replication; azure_get .../blobServices/default for soft delete and versioning.
+- Databases: "sql_servers" (public network, TLS, Entra-only auth), azure_get .../firewallRules (0.0.0.0-255.255.255.255 or
+  0.0.0.0 'allow Azure services'), .../auditingSettings, .../transparentDataEncryption; "open_source_databases".
+- Key Vault: "key_vaults" (purge protection, soft delete, public network, access-policy model); azure_get .../secrets
+  and .../keys for items without expiry or expiring within 30 days (names and dates only).
+- Compute: "vms" (old images, no encryption at host / trusted launch), "vm_extensions" (no Defender / monitoring agent),
+  "disks" (unattached, public network access, no customer-managed or double encryption where required).
+- Identity: "role_assignments" (Owners per subscription, more than 3 Owners, guests or service principals with Owner /
+  Contributor / User Access Administrator at subscription or management group scope), "custom_roles" (wildcard
+  actions), azure_get .../classicAdministrators (classic co-admins should be none).
+- Logging: azure_get .../providers/Microsoft.Insights/diagnosticSettings (activity log exported, retention),
+  .../activityLogAlerts (alerts on policy, NSG, security solution and SQL firewall changes), diagnostic settings on
+  Key Vaults and NSGs.
+- Resilience: "vms_without_backup", "backup_items" (unhealthy or old backups), "recovery_vaults" (soft delete,
+  immutability, redundancy), azure_get .../locks (no delete locks on critical resource groups).
+- Governance: "policy_assignments", "policy_noncompliance", "untagged"; "orphaned_resources" as low / info (cost).
+Record one finding per issue. asset is "azure/<resource name>" for one resource, or "azure" for subscription-wide issues;
+name the subscription and resource group in the evidence, list at most 20 affected resources plus the total. Severity:
+management ports or databases open to the internet, public storage containers with data, Owner rights for guests or
+unknown service principals and active high Defender alerts are critical or high; missing Defender plans, weak TLS, no
+purge protection, no backup of production VMs and missing logging medium; tagging and orphaned resources low or info.
+If a query or path is refused for permission or licence reasons, say what is missing in one info finding.""",
+    },
 }
 CONNECTOR_AGENTS = list(CONNECTOR_BRIEFS)
 LAYERS.update(CONNECTOR_BRIEFS)
@@ -300,7 +341,7 @@ Finish with a short summary: the paths, and which fixes break most of them.""",
         "tools": ["list_findings", "finding_details", "inventory", "control_catalog", "set_controls"],
         "web": False,
         "brief": """Your job: turn this assessment into audit evidence for four frameworks: cis_ig1, iso27001, nis2 and nlpd
-(Swiss data protection). For each framework, read control_catalog and give EVERY control a status with set_controls
+(Swiss data protection), plus cis_azure when the Azure agent ran (list_findings layer "azure"). For each framework, read control_catalog and give EVERY control a status with set_controls
 (batches of up to 100):
 - gap: a finding shows the control is not in place (cite the finding IDs).
 - partial: in place for some devices or accounts but not others, or only partly (cite findings or what was observed).

@@ -1,7 +1,7 @@
 "use strict";
 // Agents tab, live agent map and the Orchestrator chat. Uses $, el, api and me from console.js.
 const Agents = (() => {
-  const ORDER = ["collector", "discovery", "orchestrator", "network", "os", "web", "firmware", "wan", "ad", "m365", "devices", "patch", "risk", "paths", "compliance", "report"];
+  const ORDER = ["collector", "discovery", "orchestrator", "network", "os", "web", "firmware", "wan", "ad", "m365", "devices", "azure", "patch", "risk", "paths", "compliance", "report"];
   const NODES = {
     orchestrator: {x: 400, y: 320, sub: "assigns · relays", center: true},
     collector: {x: 400, y: 70, sub: "program, not AI"},
@@ -30,7 +30,7 @@ const Agents = (() => {
                   record_path: "attack paths", set_controls: "control updates", link_previous: "links to last run",
                   ad_query: "directory queries", linux_check: "server checks", linux_vulnerable_packages: "package scans",
                   synology_info: "NAS reads", proxmox_get: "Proxmox reads",
-                  graph_get: "Microsoft 365 reads", windows_check: "Windows checks"};
+                  graph_get: "Microsoft 365 reads", azure_query: "Azure queries", azure_get: "Azure reads", windows_check: "Windows checks"};
   const NS = "http://www.w3.org/2000/svg";
   const S = {run: null, since: 0, events: [], agents: {}, notes: [], running: false, timer: null, t0: null,
              replay: null, speed: 3, links: {}, selected: null, nfind: 0, nnote: 0, cost: 0, view: null, drill: null};

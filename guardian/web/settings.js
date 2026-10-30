@@ -126,7 +126,7 @@ function renderCatalog() {
   }
   const box = $("catalog");
   box.replaceChildren();
-  for (const cat of ["Identity & productivity", "Infrastructure & storage", "Endpoints & network"]) {
+  for (const cat of ["Identity & productivity", "Cloud", "Infrastructure & storage", "Endpoints & network"]) {
     if (!groups[cat]) continue;
     box.append(el("div", {class: "cat"}, cat), el("div", {class: "cgrid"}, ...groups[cat].map(([type, spec]) => {
       const n = data.connectors.filter(c => c.type === type).length;

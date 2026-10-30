@@ -13,15 +13,17 @@ import subprocess
 import tempfile
 import time
 import urllib.parse
+import urllib.error
+import urllib.request
 
 from . import connectors as conn
 
 _CONNECTORS = []        # [{"id", "type", "name", "fields": {...incl. secrets}, "pin"}]
 _SSH = {"private": None, "path": None}
 _STATE_DIR = None
-TYPES = {"active_directory", "linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "m365", "windows"}
+TYPES = {"active_directory", "linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "m365", "windows", "azure"}
 CONNECTOR_AGENTS = {"ad": ["active_directory"], "patch": ["linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "windows"],
-                    "m365": ["m365"], "devices": ["m365"]}
+                    "m365": ["m365"], "devices": ["m365"], "azure": ["azure"]}
 
 
 def load(data, state_dir):
@@ -443,6 +445,170 @@ def graph_get(cid, path, query=None, beta=False, max_pages=5):
     if len(body) > 30000:
         out.update(rows=json.loads(json.dumps(rows[:max(1, int(len(rows) * 30000 / len(body)))], default=str)), truncated=True)
     return out
+
+
+# -- Microsoft Azure (separate app with Reader + Security Reader) ------------------------------------------
+ARM = "https://management.azure.com"
+# Resource Graph: fixed queries only. The agent picks a name; it can narrow by resource group, never write KQL.
+AZURE_QUERIES = {
+    "subscriptions": "resourcecontainers | where type == 'microsoft.resources/subscriptions' | project subscriptionId, name, state=tostring(properties.state)",
+    "resource_counts": "resources | summarize count() by type | order by count_ desc | take 100",
+    "public_ips": "resources | where type == 'microsoft.network/publicipaddresses' | project name, resourceGroup, subscriptionId, ip=properties.ipAddress, attachedTo=tostring(properties.ipConfiguration.id), natGateway=tostring(properties.natGateway.id), sku=tostring(sku.name)",
+    "nsg_open_inbound": "resources | where type == 'microsoft.network/networksecuritygroups' | mv-expand rule=properties.securityRules | extend p=rule.properties | where p.direction == 'Inbound' and p.access == 'Allow' and (tostring(p.sourceAddressPrefix) in ('*', '0.0.0.0/0', 'Internet', 'Any') or tostring(p.sourceAddressPrefixes) has '\"*\"' or tostring(p.sourceAddressPrefixes) has '0.0.0.0/0') | project nsg=name, resourceGroup, subscriptionId, rule=tostring(rule.name), ports=coalesce(tostring(p.destinationPortRange), tostring(p.destinationPortRanges)), protocol=tostring(p.protocol), priority=toint(p.priority), nics=array_length(properties.networkInterfaces), subnets=array_length(properties.subnets)",
+    "nsg_coverage": "resources | where type == 'microsoft.network/virtualnetworks' | mv-expand subnet=properties.subnets | project vnet=name, resourceGroup, subscriptionId, subnet=tostring(subnet.name), nsg=tostring(subnet.properties.networkSecurityGroup.id)",
+    "flow_logs": "resources | where type == 'microsoft.network/networkwatchers/flowlogs' | project name, target=tostring(properties.targetResourceId), enabled=properties.enabled, retentionDays=properties.retentionPolicy.days",
+    "vnets": "resources | where type == 'microsoft.network/virtualnetworks' | project name, resourceGroup, subscriptionId, ddosProtection=properties.enableDdosProtection, addressSpace=properties.addressSpace.addressPrefixes",
+    "gateways_and_balancers": "resources | where type in~ ('microsoft.network/applicationgateways', 'microsoft.network/loadbalancers', 'microsoft.network/azurefirewalls', 'microsoft.network/bastionhosts') | project type, name, resourceGroup, subscriptionId, sku=tostring(sku.name), waf=properties.webApplicationFirewallConfiguration.enabled, wafPolicy=tostring(properties.firewallPolicy.id)",
+    "vms": "resources | where type == 'microsoft.compute/virtualmachines' | project name, resourceGroup, subscriptionId, location, zones, size=tostring(properties.hardwareProfile.vmSize), os=tostring(properties.storageProfile.osDisk.osType), image=properties.storageProfile.imageReference, power=tostring(properties.extended.instanceView.powerState.code), identity=tostring(identity.type), encryptionAtHost=properties.securityProfile.encryptionAtHost, securityType=tostring(properties.securityProfile.securityType)",
+    "vm_extensions": "resources | where type == 'microsoft.compute/virtualmachines/extensions' | project vm=tostring(split(id, '/')[8]), resourceGroup, name, publisher=tostring(properties.publisher), extType=tostring(properties.type), state=tostring(properties.provisioningState)",
+    "disks": "resources | where type == 'microsoft.compute/disks' | project name, resourceGroup, subscriptionId, state=tostring(properties.diskState), encryption=tostring(properties.encryption.type), networkAccess=tostring(properties.networkAccessPolicy), publicNetwork=tostring(properties.publicNetworkAccess), attachedTo=tostring(managedBy)",
+    "storage_accounts": "resources | where type == 'microsoft.storage/storageaccounts' | project name, resourceGroup, subscriptionId, kind, publicBlobAccess=properties.allowBlobPublicAccess, sharedKeyAccess=properties.allowSharedKeyAccess, httpsOnly=properties.supportsHttpsTrafficOnly, minTls=tostring(properties.minimumTlsVersion), publicNetwork=tostring(properties.publicNetworkAccess), defaultAction=tostring(properties.networkAcls.defaultAction), privateEndpoints=array_length(properties.privateEndpointConnections), infraEncryption=properties.encryption.requireInfrastructureEncryption, crossTenantReplication=properties.allowCrossTenantReplication",
+    "sql_servers": "resources | where type == 'microsoft.sql/servers' | project name, resourceGroup, subscriptionId, publicNetwork=tostring(properties.publicNetworkAccess), minTls=tostring(properties.minimalTlsVersion), entraAdmin=tostring(properties.administrators.login), entraOnlyAuth=properties.administrators.azureADOnlyAuthentication",
+    "open_source_databases": "resources | where type in~ ('microsoft.dbforpostgresql/flexibleservers', 'microsoft.dbformysql/flexibleservers', 'microsoft.documentdb/databaseaccounts') | project type, name, resourceGroup, subscriptionId, publicNetwork=coalesce(tostring(properties.network.publicNetworkAccess), tostring(properties.publicNetworkAccess)), version=tostring(properties.version), backupDays=properties.backup.backupRetentionDays, geoBackup=tostring(properties.backup.geoRedundantBackup), ha=tostring(properties.highAvailability.mode), ipRules=properties.ipRules",
+    "key_vaults": "resources | where type == 'microsoft.keyvault/vaults' | project name, resourceGroup, subscriptionId, softDelete=properties.enableSoftDelete, purgeProtection=properties.enablePurgeProtection, rbacModel=properties.enableRbacAuthorization, publicNetwork=tostring(properties.publicNetworkAccess), defaultAction=tostring(properties.networkAcls.defaultAction), retentionDays=properties.softDeleteRetentionInDays",
+    "app_services": "resources | where type == 'microsoft.web/sites' | project name, kind, resourceGroup, subscriptionId, httpsOnly=properties.httpsOnly, publicNetwork=tostring(properties.publicNetworkAccess), clientCert=properties.clientCertEnabled, identity=tostring(identity.type), state=tostring(properties.state)",
+    "defender_plans": "securityresources | where type == 'microsoft.security/pricings' | project subscriptionId, plan=name, tier=tostring(properties.pricingTier), subPlan=tostring(properties.subPlan)",
+    "secure_score": "securityresources | where type == 'microsoft.security/securescores' | project subscriptionId, current=properties.score.current, max=properties.score.max, percentage=properties.score.percentage",
+    "defender_recommendations": "securityresources | where type == 'microsoft.security/assessments' and tostring(properties.status.code) == 'Unhealthy' | summarize resources=count(), examples=make_set(tostring(properties.resourceDetails.Id), 3) by recommendation=tostring(properties.displayName), severity=tostring(properties.metadata.severity) | order by resources desc | take 150",
+    "defender_alerts": "securityresources | where type == 'microsoft.security/locations/alerts' and tostring(properties.Status) == 'Active' | project subscriptionId, alert=tostring(properties.AlertDisplayName), severity=tostring(properties.Severity), time=tostring(properties.TimeGeneratedUtc), entity=tostring(properties.CompromisedEntity) | take 150",
+    "role_assignments": "authorizationresources | where type == 'microsoft.authorization/roleassignments' | extend roleId=tolower(tostring(properties.roleDefinitionId)) | join kind=leftouter (authorizationresources | where type == 'microsoft.authorization/roledefinitions' | extend roleId=tolower(id), role=tostring(properties.roleName) | project roleId, role) on roleId | project principalId=tostring(properties.principalId), principalType=tostring(properties.principalType), role, scope=tostring(properties.scope) | take 1000",
+    "custom_roles": "authorizationresources | where type == 'microsoft.authorization/roledefinitions' and tostring(properties.type) == 'CustomRole' | project role=tostring(properties.roleName), permissions=properties.permissions, scopes=properties.assignableScopes",
+    "policy_assignments": "policyresources | where type == 'microsoft.authorization/policyassignments' | project name=tostring(properties.displayName), scope=tostring(properties.scope), enforcement=tostring(properties.enforcementMode)",
+    "policy_noncompliance": "policyresources | where type == 'microsoft.policyinsights/policystates' and tostring(properties.complianceState) == 'NonCompliant' | summarize resources=dcount(tostring(properties.resourceId)) by policy=tostring(properties.policyDefinitionName), assignment=tostring(properties.policyAssignmentName) | order by resources desc | take 100",
+    "backup_items": "recoveryservicesresources | where type == 'microsoft.recoveryservices/vaults/backupfabrics/protectioncontainers/protecteditems' | project item=tostring(properties.friendlyName), source=tostring(properties.sourceResourceId), lastBackup=tostring(properties.lastBackupTime), health=tostring(properties.healthStatus), policy=tostring(properties.policyName)",
+    "vms_without_backup": "resources | where type == 'microsoft.compute/virtualmachines' | extend vmId=tolower(id) | join kind=leftouter (recoveryservicesresources | where type == 'microsoft.recoveryservices/vaults/backupfabrics/protectioncontainers/protecteditems' | extend vmId=tolower(tostring(properties.sourceResourceId)), protected=true | project vmId, protected) on vmId | where isnull(protected) | project name, resourceGroup, subscriptionId",
+    "recovery_vaults": "resources | where type == 'microsoft.recoveryservices/vaults' | project name, resourceGroup, subscriptionId, softDelete=tostring(properties.securitySettings.softDeleteSettings.softDeleteState), immutability=tostring(properties.securitySettings.immutabilitySettings.state), redundancy=tostring(properties.redundancySettings.standardTierStorageRedundancy), publicNetwork=tostring(properties.publicNetworkAccess)",
+    "orphaned_resources": "resources | where (type == 'microsoft.compute/disks' and tostring(properties.diskState) == 'Unattached') or (type == 'microsoft.network/publicipaddresses' and isnull(properties.ipConfiguration) and isnull(properties.natGateway)) or (type == 'microsoft.network/networkinterfaces' and isnull(properties.virtualMachine) and isnull(properties.privateEndpoint)) | project type, name, resourceGroup, subscriptionId",
+    "untagged": "resources | where isnull(tags) or array_length(bag_keys(tags)) == 0 | summarize count() by type | order by count_ desc | take 50",
+}
+# Management API: GET only, fixed paths. {s} subscription, {rg} resource group, {n} name; api-version is set here.
+_N = r"[\w.()-]{1,90}"
+_SUB = r"/subscriptions/[0-9a-fA-F-]{36}"
+AZURE_PATHS = [
+    (r"/subscriptions", "2022-12-01"),
+    (_SUB + r"/providers/Microsoft\.Security/pricings", "2024-01-01"),
+    (_SUB + r"/providers/Microsoft\.Security/secureScores", "2020-01-01"),
+    (_SUB + r"/providers/Microsoft\.Security/securityContacts", "2020-01-01-preview"),
+    (_SUB + r"/providers/Microsoft\.Security/autoProvisioningSettings", "2017-08-01-preview"),
+    (_SUB + r"/providers/Microsoft\.Insights/diagnosticSettings", "2021-05-01-preview"),
+    (_SUB + r"/providers/Microsoft\.Insights/activityLogAlerts", "2020-10-01"),
+    (_SUB + r"/providers/Microsoft\.Authorization/locks", "2020-05-01"),
+    (_SUB + r"/providers/Microsoft\.Authorization/classicAdministrators", "2015-07-01"),
+    (_SUB + r"/providers/Microsoft\.Advisor/recommendations", "2023-01-01"),
+    (_SUB + rf"/resourceGroups/{_N}/providers/Microsoft\.Sql/servers/{_N}/firewallRules", "2021-11-01"),
+    (_SUB + rf"/resourceGroups/{_N}/providers/Microsoft\.Sql/servers/{_N}/auditingSettings", "2021-11-01"),
+    (_SUB + rf"/resourceGroups/{_N}/providers/Microsoft\.Sql/servers/{_N}/databases", "2021-11-01"),
+    (_SUB + rf"/resourceGroups/{_N}/providers/Microsoft\.Sql/servers/{_N}/databases/{_N}/transparentDataEncryption", "2021-11-01"),
+    (_SUB + rf"/resourceGroups/{_N}/providers/Microsoft\.DBforPostgreSQL/flexibleServers/{_N}/firewallRules", "2022-12-01"),
+    (_SUB + rf"/resourceGroups/{_N}/providers/Microsoft\.DBforMySQL/flexibleServers/{_N}/firewallRules", "2021-05-01"),
+    (_SUB + rf"/resourceGroups/{_N}/providers/Microsoft\.Web/sites/{_N}/config/web", "2023-01-01"),
+    (_SUB + rf"/resourceGroups/{_N}/providers/Microsoft\.KeyVault/vaults/{_N}/secrets", "2023-07-01"),
+    (_SUB + rf"/resourceGroups/{_N}/providers/Microsoft\.KeyVault/vaults/{_N}/keys", "2023-07-01"),
+    (_SUB + rf"/resourceGroups/{_N}/providers/Microsoft\.Storage/storageAccounts/{_N}/blobServices/default", "2023-01-01"),
+    (_SUB + rf"/resourceGroups/{_N}/providers/Microsoft\.Network/networkSecurityGroups/{_N}", "2023-09-01"),
+    (_SUB + rf"/resourceGroups/{_N}/providers/[A-Za-z]+\.[A-Za-z]+/[A-Za-z]+/{_N}/providers/Microsoft\.Insights/diagnosticSettings", "2021-05-01-preview"),
+]
+RG = re.compile(r"^[\w.()-]{1,90}$")
+_AZ_TOKEN = {}
+
+
+def _azure(c):
+    """(token, subscriptions Guardian may read) for an Azure connector; the token is cached for ~50 minutes."""
+    t = _AZ_TOKEN.get(c["id"])
+    if not t or t[1] < time.time() + 60:
+        token, _ = conn.azure_token(c["fields"])
+        only = conn.azure_subscription_filter(c["fields"])
+        st, d = conn._http(f"{ARM}/subscriptions?api-version=2022-12-01", ssl.create_default_context(), {"Authorization": f"Bearer {token}"})
+        subs = [x["subscriptionId"].lower() for x in (d or {}).get("value", []) if st == 200 and isinstance(d, dict)
+                and (not only or x["subscriptionId"].lower() in only)]
+        t = (token, time.time() + 3000, subs)
+        _AZ_TOKEN[c["id"]] = t
+    return t[0], t[2]
+
+
+def _cap(rows, more, extra=None):
+    body = json.dumps(rows, default=str)
+    out = {"status": 200, "count": len(rows), "more": more, "rows": rows, **(extra or {})}
+    if len(body) > 30000:
+        out.update(rows=json.loads(json.dumps(rows[:max(1, int(len(rows) * 30000 / len(body)))], default=str)), truncated=True)
+    return out
+
+
+def azure_query(cid, query, resource_group=None, subscription=None):
+    """Run one fixed Azure Resource Graph query (read-only) over the subscriptions this connector may read."""
+    c = _get(cid, {"azure"})
+    if query not in AZURE_QUERIES:
+        return {"error": "unknown query", "allowed": sorted(AZURE_QUERIES)}
+    token, subs = _azure(c)
+    if subscription:
+        if subscription.lower() not in subs:
+            return {"error": "that subscription isn't readable by this connector", "subscriptions": subs}
+        subs = [subscription.lower()]
+    if not subs:
+        return {"error": "no readable subscriptions (give the app Reader on them)"}
+    kql = AZURE_QUERIES[query]
+    if resource_group:
+        if not RG.match(resource_group):
+            return {"error": "bad resource group name"}
+        table, rest = kql.split(" | ", 1)
+        kql = f"{table} | where resourceGroup =~ '{resource_group}' | {rest}"
+    rows, skip, pages = [], None, 0
+    while pages < 5:
+        body = {"subscriptions": subs, "query": kql, "options": {"$top": 1000, "resultFormat": "objectArray", **({"$skipToken": skip} if skip else {})}}
+        req = urllib.request.Request(f"{ARM}/providers/Microsoft.ResourceGraph/resources?api-version=2022-10-01", method="POST",
+                                     data=json.dumps(body).encode(), headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json",
+                                                                              "User-Agent": "ai-guardian"})
+        try:
+            with urllib.request.urlopen(req, context=ssl.create_default_context(), timeout=30) as r:
+                d = json.loads(r.read().decode() or "{}")
+        except urllib.error.HTTPError as e:
+            try:
+                err = json.loads(e.read().decode(errors="replace")).get("error", {})
+            except ValueError:
+                err = {}
+            return {"status": e.code, "error": f"{err.get('code', e.code)}: {str(err.get('message', ''))[:300]}", "rows_so_far": rows[:50]}
+        except (urllib.error.URLError, OSError) as e:
+            return {"error": f"Azure unreachable: {getattr(e, 'reason', e)}"}
+        rows.extend(d.get("data") or [])
+        skip = d.get("$skipToken")
+        pages += 1
+        if not skip:
+            break
+    return _cap(rows, bool(skip), {"subscriptions": len(subs)})
+
+
+def azure_get(cid, path):
+    """GET one allow-listed Azure Resource Manager path (read-only)."""
+    c = _get(cid, {"azure"})
+    path = "/" + path.strip().lstrip("/").split("?")[0].rstrip("/")
+    api = next((v for p, v in AZURE_PATHS if re.fullmatch(p, path)), None)
+    if ".." in path or not api:
+        return {"error": "path not in the read-only list", "allowed": [p for p, _ in AZURE_PATHS]}
+    token, subs = _azure(c)
+    m = re.match(r"^/subscriptions/([0-9a-fA-F-]{36})", path)
+    if m and m.group(1).lower() not in subs:
+        return {"error": "that subscription isn't readable by this connector", "subscriptions": subs}
+    url = f"{ARM}{urllib.parse.quote(path)}?api-version={api}"
+    ctx, rows, pages = ssl.create_default_context(), [], 0
+    while url and pages < 5:
+        st, d = conn._http(url, ctx, {"Authorization": f"Bearer {token}"}, timeout=30)
+        pages += 1
+        if st != 200:
+            err = (d or {}).get("error", {}) if isinstance(d, dict) else {}
+            hint = " (the app lacks Reader / Security Reader here, or the feature isn't enabled)" if st in (401, 403) else ""
+            return {"status": st, "error": f"{err.get('code', st)}: {str(err.get('message', d))[:300]}{hint}"}
+        if isinstance(d, dict) and "value" in d:
+            rows.extend(d["value"])
+            url = d.get("nextLink")
+            if url and not url.startswith(ARM + "/"):
+                url = None
+        else:
+            return {"status": st, "data": d}
+    if path == "/subscriptions":
+        rows = [x for x in rows if x.get("subscriptionId", "").lower() in subs]
+    if path.endswith(("/secrets", "/keys")):      # names and expiry only: values never come through the management API
+        rows = [{"name": x.get("name"), "attributes": (x.get("properties") or {}).get("attributes")} for x in rows]
+    return _cap(rows, bool(url))
 
 
 # -- Windows over WinRM (normal user in Remote Management Users) ------------------------------------------

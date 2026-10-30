@@ -36,7 +36,7 @@ def render(graph, out_path=None):
                                                             for s in ("met", "partial", "gap", "not_assessed")},
                            "gaps": [{"id": c, "title": t, "note": done[k][c]["note"], "findings": done[k][c]["findings"]}
                                     for c, t in fw["controls"] if done.get(k, {}).get(c, {}).get("status") == "gap"]}
-                          for k, fw in FRAMEWORKS.items()] if done else []
+                          for k, fw in FRAMEWORKS.items() if not fw.get("optional") or done.get(k)] if done else []
     html = open(TEMPLATE).read().replace("/*__FONTS__*/", font_faces(), 1).replace(
         "/*__DATA__*/null", json.dumps(data, default=str).replace("</", "<\\/"))
     out_path = out_path or os.path.join(graph.run_dir, "report.html")

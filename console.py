@@ -1068,6 +1068,8 @@ def run_compliance(run_id: str, request: Request):
     out = {}
     for key, fw in FRAMEWORKS.items():
         got = done.get(key, {})
+        if fw.get("optional") and not got:
+            continue
         controls = [{"id": c, "title": t, **got.get(c, {"status": "not_assessed", "findings": [], "note": "Not mapped by the Compliance agent."})}
                     for c, t in fw["controls"]]
         out[key] = {"title": fw["title"], "controls": controls, "mapped": bool(got),
@@ -1688,7 +1690,7 @@ def launch(mode, run_id, sid, user, inbox=None):
     return status
 
 
-HANDOFF_TYPES = ("active_directory", "linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "m365", "windows")
+HANDOFF_TYPES = ("active_directory", "linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "m365", "windows", "azure")
 
 
 def connector_handoff():

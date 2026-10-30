@@ -4,6 +4,7 @@ Titles follow the published frameworks; confirm the exact wording against the of
 - CIS Controls v8, Implementation Group 1 (the 56 safeguards meant for every organisation)
 - ISO/IEC 27001:2022 Annex A (93 controls)
 - NIS2 Directive (EU) 2022/2555, Article 21(2) risk-management measures
+- CIS Microsoft Azure Foundations Benchmark, by section (only when the Azure agent ran)
 - Swiss Federal Act on Data Protection (revFADP / nLPD) and its Data Protection Ordinance (DPO / OPDo), data security
 """
 
@@ -116,10 +117,53 @@ NLPD = [
     ("FADP 24", "Notification of data security breaches to the FDPIC as soon as possible"),
 ]
 
+# CIS Microsoft Azure Foundations Benchmark, grouped by its sections. Guardian's own IDs (AZ-<section>.<n>) and
+# paraphrased titles: map them to the official recommendation numbers of the benchmark version you audit against.
+CIS_AZURE = [
+    ("AZ-2.1", "Microsoft Defender for Servers is enabled"), ("AZ-2.2", "Microsoft Defender for Storage is enabled"),
+    ("AZ-2.3", "Microsoft Defender for SQL / databases is enabled"), ("AZ-2.4", "Microsoft Defender for Key Vault is enabled"),
+    ("AZ-2.5", "Microsoft Defender for App Service is enabled"), ("AZ-2.6", "Microsoft Defender for Containers is enabled"),
+    ("AZ-2.7", "Security contact e-mail and alert notifications are configured"),
+    ("AZ-2.8", "High-severity Defender recommendations and alerts are addressed"),
+    ("AZ-3.1", "Storage accounts require secure transfer (HTTPS only)"), ("AZ-3.2", "Storage accounts use TLS 1.2 or later"),
+    ("AZ-3.3", "Public (anonymous) blob access is disabled"), ("AZ-3.4", "Shared key access is disabled where possible"),
+    ("AZ-3.5", "Storage public network access is restricted (default action Deny or private endpoints)"),
+    ("AZ-3.6", "Blob soft delete and versioning are enabled"), ("AZ-3.7", "Cross-tenant replication is disabled"),
+    ("AZ-4.1", "SQL servers are not open to all IP addresses or all Azure services"),
+    ("AZ-4.2", "SQL auditing is enabled with adequate retention"), ("AZ-4.3", "Transparent data encryption is enabled"),
+    ("AZ-4.4", "Microsoft Entra authentication is configured for SQL (Entra-only where possible)"),
+    ("AZ-4.5", "PostgreSQL / MySQL / Cosmos DB public network access is restricted"),
+    ("AZ-4.6", "Database servers enforce TLS 1.2 or later"),
+    ("AZ-5.1", "Activity log is exported to a Log Analytics workspace or storage"),
+    ("AZ-5.2", "Activity log alerts exist for policy, NSG, security solution and SQL firewall changes"),
+    ("AZ-5.3", "Diagnostic logging is enabled for Key Vaults and other critical resources"),
+    ("AZ-5.4", "Network security group flow logs are enabled with retention"),
+    ("AZ-6.1", "RDP is not open to the internet"), ("AZ-6.2", "SSH is not open to the internet"),
+    ("AZ-6.3", "Other management and database ports are not open to the internet"),
+    ("AZ-6.4", "Every subnet has a network security group"), ("AZ-6.5", "Public web applications sit behind a WAF"),
+    ("AZ-6.6", "Unused public IP addresses are removed"),
+    ("AZ-7.1", "VMs use managed, encrypted disks (encryption at host or customer-managed keys where required)"),
+    ("AZ-7.2", "Unattached disks are removed or encrypted with restricted network access"),
+    ("AZ-7.3", "VMs run endpoint protection and receive updates"), ("AZ-7.4", "VMs use supported images and Trusted Launch"),
+    ("AZ-7.5", "Management access to VMs uses Bastion or just-in-time access"),
+    ("AZ-8.1", "Key Vaults have soft delete and purge protection"), ("AZ-8.2", "Key Vaults use the RBAC permission model"),
+    ("AZ-8.3", "Key Vault public network access is restricted"), ("AZ-8.4", "Keys and secrets have expiry dates"),
+    ("AZ-9.1", "App Service apps accept HTTPS only"), ("AZ-9.2", "App Service apps use TLS 1.2 or later"),
+    ("AZ-9.3", "App Service FTP is disabled or FTPS only"), ("AZ-9.4", "App Service apps use managed identities"),
+    ("AZ-10.1", "Few subscription Owners (2-3), no guests with privileged roles"),
+    ("AZ-10.2", "No custom roles with wildcard permissions"), ("AZ-10.3", "No classic co-administrators"),
+    ("AZ-10.4", "Service principals hold least-privilege roles"),
+    ("AZ-11.1", "Critical VMs and databases are backed up"), ("AZ-11.2", "Backup vaults use soft delete and immutability"),
+    ("AZ-11.3", "Delete locks protect critical resource groups"),
+    ("AZ-12.1", "Azure Policy assignments enforce the security baseline"), ("AZ-12.2", "Non-compliant resources are remediated"),
+    ("AZ-12.3", "Resources are tagged with owner and environment"),
+]
+
 FRAMEWORKS = {
     "cis_ig1": {"title": "CIS Controls v8 · IG1", "controls": CIS_IG1},
     "iso27001": {"title": "ISO/IEC 27001:2022 Annex A", "controls": ISO27001},
     "nis2": {"title": "NIS2 Article 21(2)", "controls": NIS2},
     "nlpd": {"title": "Swiss revFADP / nLPD · data security", "controls": NLPD},
+    "cis_azure": {"title": "CIS Microsoft Azure Foundations (by section)", "controls": CIS_AZURE, "optional": True},
 }
 STATUSES = ("met", "partial", "gap", "not_assessed")

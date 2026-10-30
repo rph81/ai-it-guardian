@@ -9,6 +9,7 @@ You watch them work live and can talk to the Orchestrator that coordinates them.
 **The agents, what each one checks and which products it is modelled on: [docs/AGENTS.md](docs/AGENTS.md).**
 **Schedules, alerts and the fix plan: [docs/SCHEDULES-ALERTS.md](docs/SCHEDULES-ALERTS.md).**
 **Ticketing (ServiceNow): [docs/TICKETING.md](docs/TICKETING.md).**
+**Azure posture agent: [docs/AZURE.md](docs/AZURE.md).**
 **On-site collector (sites at customers): [docs/ONSITE-COLLECTOR.md](docs/ONSITE-COLLECTOR.md).**
 
 Nothing on the network is changed. Agents have no shell: only fixed, non-intrusive checks, web requests without
@@ -88,14 +89,17 @@ exposure) and `previous` (the same issue in the previous assessment).
    **Wave 3 (now)**: Microsoft 365 connector with Microsoft 365 & Entra ID and Device fleet agents; Windows (WinRM)
    connector in Patch & configuration.
    **Ticketing**: ServiceNow incidents per finding, auto-created after runs, state synced into the Fix plan.
+   **Azure (now)**: Azure posture agent (Defender for Cloud, exposure, network, storage, databases, Key Vault, VMs,
+   identity, logging, backup, policy) and the CIS Microsoft Azure Foundations framework.
    **On-site collector, phase A (now)**: sites, collector gateway, enrollment, heartbeat, revoke; collector with
    pause / disconnect. Phase B: scans and AI assessments through the collector.
-   **Next waves**: more ticketing systems (ConnectWise PSA, Autotask, HaloPSA, Jira Service Management); several customers (sites) in one console; Azure and AWS posture
-   agents; compliance PDF with evidence uploads; RMM / patching integration and more fix recipes; import of other
-   scanners' results; MITRE ATT&CK mapping; an on-site Guardian collector at the customer that connects back to the
-   central Guardian server; integrations with business systems (SAP S/4HANA, SAP BTP and other leading platforms);
-   remote-site connectivity (built-in VPN client, pending a design review; meanwhile a VPN set up on the Proxmox host
-   can be used).
+   **Next, in this order**: compliance PDF with evidence uploads; RMM / patching integration and more fix recipes;
+   more ticketing systems (ConnectWise PSA, Autotask, HaloPSA, Jira Service Management); several customers (sites)
+   in one console; import of other scanners' results; MITRE ATT&CK mapping; integrations with business systems
+   (SAP S/4HANA, SAP BTP and other leading platforms); medium / low priority gap features; AWS posture agent;
+   on-site collector phases B–D. Then a **final testing phase** against real systems (real AI run, AD, Microsoft 365,
+   Azure, Windows, ServiceNow, alert channels, collector packages, outside penetration test of the gateway).
+   Built-in VPN client: on hold pending a design review (the on-site collector covers most of the need).
 2. **Next**: agents use the connectors (inside view of NAS, hypervisors, servers); more connector sign-in methods
    (Kerberos, WinRM, OAuth with certificates, client certificates, TOTP); Microsoft 365 and Google Workspace;
    RADIUS / TACACS+ / 802.1X checks.

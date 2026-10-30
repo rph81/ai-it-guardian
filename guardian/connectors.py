@@ -135,6 +135,24 @@ CATALOG = {
                    F("client_id", "Application (client) ID", mono=True),
                    F("client_secret", "Client secret", "password", secret=True)],
     },
+    "azure": {
+        "label": "Microsoft Azure", "icon": "AZ", "color": "#0089d6", "category": "Cloud",
+        "status": "available", "multi": True, "always": True,
+        "summary": "Cloud subscriptions",
+        "checks": "Used by the Azure agent: Defender for Cloud score, plans and recommendations, internet exposure, network "
+                  "security groups, storage, databases, Key Vault, VMs and disks, role assignments, logging, backup, policy.",
+        "steps": ["Entra admin center › App registrations › New registration: name Guardian-Azure-Reader, single tenant, no "
+                  "redirect URI. Use a separate app from the Microsoft 365 one, with no Microsoft Graph permissions.",
+                  "Certificates & secrets › New client secret (e.g. 12 months). Copy the value now: it's shown once.",
+                  "Azure portal › Subscriptions (or a management group above them) › Access control (IAM) › Add role "
+                  "assignment: Reader, then again Security Reader, both for Guardian-Azure-Reader. Nothing else.",
+                  "Paste the tenant ID, the application (client) ID and the secret below. Optionally limit Guardian to some "
+                  "subscription IDs. The test lists the subscriptions it can see and warns if the app has any other role."],
+        "fields": [F("tenant_id", "Tenant ID", placeholder="00000000-0000-0000-0000-000000000000", mono=True),
+                   F("client_id", "Application (client) ID", mono=True),
+                   F("client_secret", "Client secret", "password", secret=True),
+                   F("subscriptions", "Only these subscription IDs (optional, space-separated)", mono=True)],
+    },
     "google_workspace": {"label": "Google Workspace", "icon": "GW", "color": "#34a853", "category": "Identity & productivity",
                          "status": "planned", "always": True, "summary": "Cloud identity", "checks": "2-step verification, admins, sharing settings, third-party apps."},
     "vmware": {"label": "VMware vSphere / ESXi", "icon": "VM", "color": "#5b7f3a", "category": "Infrastructure & storage",
@@ -642,13 +660,13 @@ def _test_email(f):
 WRITE_GRAPH = re.compile(r"(ReadWrite|\.Write|\.Send|\.Manage|FullControl|\.Create|\.Delete)", re.I)
 
 
-def graph_token(f):
-    """Client-credentials token for Microsoft Graph. Returns (token, roles)."""
+def graph_token(f, scope="https://graph.microsoft.com/.default"):
+    """Client-credentials token for Microsoft Graph (or another Microsoft API scope). Returns (token, roles)."""
     if not re.fullmatch(r"[0-9a-fA-F-]{36}", f.get("tenant_id") or "") or not re.fullmatch(r"[0-9a-fA-F-]{36}", f.get("client_id") or ""):
         raise Result("error", "Tenant ID and client ID are GUIDs like 00000000-0000-0000-0000-000000000000.")
     st, r = _http(f"https://login.microsoftonline.com/{f['tenant_id']}/oauth2/v2.0/token", ssl.create_default_context(),
                   data={"grant_type": "client_credentials", "client_id": f["client_id"], "client_secret": f["client_secret"],
-                        "scope": "https://graph.microsoft.com/.default"})
+                        "scope": scope})
     if st != 200 or not isinstance(r, dict) or "access_token" not in r:
         msg = (r or {}).get("error_description", "") if isinstance(r, dict) else str(r)
         raise Result("error", "Sign-in refused: " + (msg.split("\r\n")[0][:200] or f"error {st}"))
@@ -656,6 +674,62 @@ def graph_token(f):
     payload = r["access_token"].split(".")[1]
     claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
     return r["access_token"], sorted(claims.get("roles") or [])
+
+
+AZURE_SCOPE = "https://management.azure.com/.default"
+AZURE_READ_ROLES = {"Reader", "Security Reader"}
+GUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def azure_token(f):
+    """Token for Azure Resource Manager. Returns (token, object id of the app's service principal)."""
+    import base64
+    token, _ = graph_token(f, AZURE_SCOPE)
+    payload = token.split(".")[1]
+    claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+    return token, claims.get("oid", "")
+
+
+def azure_subscription_filter(f):
+    subs = [x.lower() for x in (f.get("subscriptions") or "").replace(",", " ").split() if x]
+    bad = [x for x in subs if not GUID.match(x)]
+    if bad:
+        raise Result("error", "Subscription IDs are GUIDs: " + ", ".join(bad[:3]))
+    return set(subs)
+
+
+def _test_azure(f):
+    only = azure_subscription_filter(f)
+    token, oid = azure_token(f)
+    ctx = ssl.create_default_context()
+    h = {"Authorization": f"Bearer {token}"}
+    st, d = _http("https://management.azure.com/subscriptions?api-version=2022-12-01", ctx, h)
+    if st != 200 or not isinstance(d, dict):
+        raise Result("error", f"Signed in, but listing subscriptions failed ({st})")
+    subs = [x for x in d.get("value", []) if not only or x.get("subscriptionId", "").lower() in only]
+    if not subs:
+        return _done("warn", "Signed in, but no subscriptions are visible",
+                     ["Give the app Reader and Security Reader on your subscriptions (Access control › Add role assignment)."])
+    details = [f"{len(subs)} subscription(s): " + ", ".join(f"{x.get('displayName')} ({x.get('state')})" for x in subs[:10])]
+    roles, worst = set(), "ok"
+    for sub in subs[:20]:
+        sid = sub["subscriptionId"]
+        st, ra = _http(f"https://management.azure.com/subscriptions/{sid}/providers/Microsoft.Authorization/roleAssignments"
+                       f"?api-version=2022-04-01&$filter=assignedTo('{oid}')", ctx, h)
+        for a in (ra or {}).get("value", []) if st == 200 and isinstance(ra, dict) else []:
+            rid = (a.get("properties") or {}).get("roleDefinitionId", "")
+            st2, rd = _http(f"https://management.azure.com{rid}?api-version=2022-04-01", ctx, h)
+            if st2 == 200 and isinstance(rd, dict):
+                roles.add((rd.get("properties") or {}).get("roleName", rid.rsplit("/", 1)[-1]))
+    details.append("Roles: " + (", ".join(sorted(roles)) if roles else "none found (Reader and Security Reader are needed)"))
+    extra = sorted(roles - AZURE_READ_ROLES)
+    if extra:
+        return _done("warn", "Connected, with a warning", details + ["Remove these roles: Guardian only needs Reader and "
+                                                                    "Security Reader: " + ", ".join(extra)])
+    if "Security Reader" not in roles:
+        worst = "warn"
+        details.append("Security Reader is missing: Defender for Cloud results will be incomplete.")
+    return _done(worst, "Connected" if worst == "ok" else "Connected, with a warning", details + (["All roles are read-only"] if worst == "ok" else []))
 
 
 def _test_m365(f):
@@ -716,6 +790,7 @@ def test(ctype, fields, pin=None, state_dir=None, vault=None):
         "active_directory": lambda: _test_ad(fields, pin),
         "email_domain": lambda: _test_email(fields),
         "m365": lambda: _test_m365(fields),
+        "azure": lambda: _test_azure(fields),
         "windows": lambda: _test_windows(fields),
     }
     if ctype not in tests:
