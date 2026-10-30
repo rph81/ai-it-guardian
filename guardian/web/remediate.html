@@ -68,7 +68,8 @@
     <section class="section admin-only" aria-labelledby="fa-title">
       <div class="kicker">Guardian / fix accounts</div>
       <h2 class="stitle" id="fa-title">Fix / Accounts.</h2>
-      <p class="note">For the SSH recipe: a separate user on each server that uses Guardian's key and may run only the commands below with sudo.</p>
+      <h3 class="gap">Linux servers (SSH)</h3>
+      <p class="note">A separate user on each server that uses Guardian's key and may run only the commands below with sudo. If the server is a Proxmox VM or container, give its guest (e.g. <span class="mono">pve1/qemu/101</span>) so Guardian takes a snapshot before updates.</p>
       <ol class="steps">
         <li>On the server: <span class="mono">sudo adduser --disabled-password --gecos "" guardian-fix</span></li>
         <li>Add Guardian's public key to <span class="mono">/home/guardian-fix/.ssh/authorized_keys</span>:<div class="keybox" id="pubkey"></div></li>
@@ -77,8 +78,38 @@
       </ol>
       <div class="f3"><div><label for="fa-host">Server address</label><input id="fa-host" class="mono" placeholder="192.168.1.80"></div>
         <div><label for="fa-user">User</label><input id="fa-user" class="mono" value="guardian-fix"></div>
-        <button class="btn primary" id="fa-add">Add</button></div>
-      <div class="tablewrap field"><table><thead><tr><th>Server</th><th>User</th><th>Port</th><th></th></tr></thead><tbody id="fa-rows"></tbody></table></div>
+        <div><label for="fa-guest">Proxmox guest (optional)</label><input id="fa-guest" class="mono" placeholder="pve1/qemu/101"></div></div>
+      <div class="row mt16"><button class="btn primary" id="fa-add">Add</button></div>
+      <div class="tablewrap field"><table><thead><tr><th>Server</th><th>User</th><th>Port</th><th>Proxmox guest</th><th></th></tr></thead><tbody id="fa-rows"></tbody></table></div>
+
+      <h3 class="gap">Proxmox snapshots (optional)</h3>
+      <p class="note">A Proxmox API token that may only take and roll back snapshots: Datacenter › Permissions › Roles › Create <span class="mono">GuardianSnapshot</span> with <span class="mono">VM.Snapshot, VM.Snapshot.Rollback, VM.Audit</span>; user <span class="mono">guardian-fix@pve</span>, API token <span class="mono">snapshots</span> (privilege separation on), give the token that role on the guests. <span id="px-state"></span></p>
+      <div class="f3"><div><label for="px-host">Proxmox host</label><input id="px-host" class="mono" placeholder="192.168.1.10"></div>
+        <div><label for="px-id">Token ID</label><input id="px-id" class="mono" placeholder="guardian-fix@pve!snapshots"></div>
+        <div><label for="px-secret">Token secret</label><input id="px-secret" type="password" autocomplete="new-password" placeholder="unchanged"></div></div>
+      <div class="row mt16"><button class="btn primary" id="px-save">Save</button><button class="btn ghost danger" id="px-del">Remove</button></div>
+
+      <h3 class="gap">Windows (WinRM, agentless)</h3>
+      <p class="note">A separate account in the machine's local <b>Administrators</b> group (installing updates and changing the firewall need it), used only for approved fixes. WinRM over HTTPS (5986) must be on. Not the read-only Windows connector account.</p>
+      <div class="f3"><div><label for="wf-host">Machine address</label><input id="wf-host" class="mono" placeholder="192.168.1.20"></div>
+        <div><label for="wf-user">User</label><input id="wf-user" class="mono" placeholder="HOST\guardian-fix"></div>
+        <div><label for="wf-pass">Password</label><input id="wf-pass" type="password" autocomplete="new-password" placeholder="unchanged"></div></div>
+      <div class="row mt16"><label class="check"><input type="checkbox" id="wf-tls"> Verify the TLS certificate</label><button class="btn primary" id="wf-add">Add</button></div>
+      <div class="tablewrap field"><table><thead><tr><th>Machine</th><th>User</th><th>Port</th><th></th></tr></thead><tbody id="wf-rows"></tbody></table></div>
+
+      <h3 class="gap">Microsoft 365 fix app</h3>
+      <p class="note">A separate app registration (e.g. <span class="mono">Guardian-Fix</span>), not the read-only Microsoft 365 connector. Application permissions, nothing else: <span class="mono" id="m-allowed"></span>. Grant admin consent. Guardian refuses an app with other permissions. <span id="m-state"></span></p>
+      <div class="f3"><div><label for="m-tenant">Tenant ID</label><input id="m-tenant" class="mono"></div>
+        <div><label for="m-client">Application (client) ID</label><input id="m-client" class="mono"></div>
+        <div><label for="m-secret">Client secret</label><input id="m-secret" type="password" autocomplete="new-password" placeholder="unchanged"></div></div>
+      <div class="row mt16"><button class="btn primary" id="m-save">Check and save</button><button class="btn ghost danger" id="m-del">Remove</button></div>
+
+      <h3 class="gap">NinjaOne patch jobs</h3>
+      <p class="note">A second NinjaOne API client (e.g. <span class="mono">Guardian-Patch</span>) with the <b>Management</b> and <b>Control</b> scopes, used only for approved patch jobs. The read-only NinjaOne connector (Settings › Connectors) stays separate. <span id="n-state"></span></p>
+      <div class="f3"><div><label for="n-region">Region</label><select id="n-region"><option value="eu">eu</option><option value="app">app (US)</option><option value="oc">oc</option><option value="ca">ca</option><option value="us2">us2</option></select></div>
+        <div><label for="n-client">Client ID</label><input id="n-client" class="mono"></div>
+        <div><label for="n-secret">Client secret</label><input id="n-secret" type="password" autocomplete="new-password" placeholder="unchanged"></div></div>
+      <div class="row mt16"><button class="btn primary" id="n-save">Check and save</button><button class="btn ghost danger" id="n-del">Remove</button></div>
     </section>
 
     <section class="section" aria-labelledby="rc-title">

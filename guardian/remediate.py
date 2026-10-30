@@ -12,11 +12,15 @@ import time
 from pathlib import Path
 
 from . import connectors as conn
+from . import fixes
+from .fixes import Failed
 
 SSHD_DROPIN = "/etc/ssh/sshd_config.d/00-guardian.conf"
 SSHD_SETTING = "PasswordAuthentication no\nKbdInteractiveAuthentication no\n"
-SUDOERS = ("guardian-fix ALL=(root) NOPASSWD: /usr/bin/tee " + SSHD_DROPIN + ", /usr/bin/cat " + SSHD_DROPIN +
-           ", /usr/bin/rm -f " + SSHD_DROPIN + ", /usr/sbin/sshd -t, /usr/bin/systemctl reload ssh, /usr/bin/systemctl reload sshd")
+SUDOERS = ('Defaults:guardian-fix env_keep += "DEBIAN_FRONTEND"\n'
+           "guardian-fix ALL=(root) NOPASSWD: /usr/bin/tee " + SSHD_DROPIN + ", /usr/bin/cat " + SSHD_DROPIN +
+           ", /usr/bin/rm -f " + SSHD_DROPIN + ", /usr/sbin/sshd -t, /usr/bin/systemctl reload ssh, /usr/bin/systemctl reload sshd"
+           + fixes.SUDOERS_EXTRA)
 
 RECIPES = {
     "upnp.delete": {
@@ -42,12 +46,10 @@ RECIPES = {
                     "backup": "Settings export", "rollback": "Manual", "needs": "Device admin account", "breaks": ""},
     "https.force": {"title": "Force HTTPS on admin pages", "applies": "Synology DSM, Proxmox", "risk": "low", "status": "planned",
                     "backup": "Setting snapshot", "rollback": "Automatic", "needs": "NAS / hypervisor fix account", "breaks": ""},
-    "os.security_updates": {"title": "Apply OS security updates", "applies": "Debian/Ubuntu servers", "risk": "medium",
-                            "status": "planned", "backup": "Proxmox snapshot first", "rollback": "One click",
-                            "needs": "Linux fix account + Proxmox connector", "breaks": ""},
     "firmware.update": {"title": "Update firmware", "applies": "Any device", "risk": "high", "status": "manual",
                         "backup": "Instructions only", "rollback": "Manual", "needs": "You", "breaks": ""},
 }
+RECIPES.update(fixes.RECIPES)
 
 NEVER = ["Firmware flashes: a failed flash can brick the device.",
          "Router WAN and firewall rules: one mistake cuts the whole site off.",
@@ -65,8 +67,9 @@ def parse_mapping(line):
     return {"proto": proto.upper(), "external": int(ext), "ip": ip, "internal": int(port), "description": desc[:60]}
 
 
-def proposals(graph, fix_hosts, collector_ip=None):
-    """Fixes Guardian can offer for this run, each tied to what it found."""
+def proposals(graph, fix, collector_ip=None):
+    """Fixes Guardian can offer for this run, each tied to what it found. `fix` is the vault's fix-accounts record."""
+    fix_hosts = (fix or {}).get("hosts") or {}
     findings = [f for f in graph.get("findings") or [] if f.get("status") != "resolved"]
     upnp_finding = next((f["id"] for f in findings if "upnp" in (f.get("title", "") + f.get("evidence", "")).lower()), None)
     out = []
@@ -90,14 +93,17 @@ def proposals(graph, fix_hosts, collector_ip=None):
             out.append({"id": f"sshpw:{ip}", "recipe": "linux.ssh_password_off", "target": ip,
                         "title": f"Turn off SSH password login on {ip}", "why": f'{f["id"]}: {f.get("title", "")}',
                         "finding": f["id"], "params": {"host": ip}, "ready": blocked is None, "blocked": blocked})
-    return out
+    return out + fixes.proposals(graph, fix, collector_ip)
 
 
 class Context:
     """What a recipe may use. `run` is replaceable so the recipes can be tested without touching a device."""
 
-    def __init__(self, vault, state_dir, fix_hosts, record, run=None):
+    def __init__(self, vault, state_dir, fix_hosts, record, run=None, fix=None, winrm_factory=None, wait=None):
         self.vault, self.state_dir, self.fix_hosts, self.record = vault, Path(state_dir), fix_hosts, record
+        self.fix = fix or {"hosts": fix_hosts}
+        self.winrm_factory, self.m365_token = winrm_factory, None
+        self.wait = wait or (lambda seconds: seconds)          # tests shorten the waits
         self.run = run or (lambda cmd, timeout=60, stdin=None: subprocess.run(cmd, input=stdin, capture_output=True, text=True, timeout=timeout))
 
     def step(self, name, ok, text):
@@ -111,10 +117,6 @@ class Context:
                    "-o", "StrictHostKeyChecking=accept-new", "-o", f"UserKnownHostsFile={self.state_dir / 'ssh' / 'known_hosts'}",
                    f'{acct.get("user") or "guardian-fix"}@{host}', command]
             return self.run(cmd, timeout=timeout, stdin=stdin)
-
-
-class Failed(Exception):
-    pass
 
 
 def _check(r, what):
@@ -191,7 +193,12 @@ def sshpw_rollback(ctx, b):
 
 
 STEPS = {"upnp.delete": (upnp_backup, upnp_apply, upnp_verify, upnp_rollback),
-         "linux.ssh_password_off": (sshpw_backup, sshpw_apply, sshpw_verify, sshpw_rollback)}
+         "linux.ssh_password_off": (sshpw_backup, sshpw_apply, sshpw_verify, sshpw_rollback), **fixes.STEPS}
+ERRORS = (Failed, conn.Result, subprocess.TimeoutExpired, OSError)
+
+
+def _why(e):
+    return e if isinstance(e, ERRORS) else f"{type(e).__name__}: {e}"
 _one_at_a_time = threading.Lock()
 
 
@@ -204,8 +211,8 @@ def execute(ctx, proposal):
         try:
             rec["backup"] = backup_f(ctx, proposal["params"])
             ctx.step("backup", True, "Backup saved")
-        except (Failed, conn.Result, subprocess.TimeoutExpired, OSError) as e:
-            ctx.step("backup", False, e)
+        except Exception as e:                             # noqa: BLE001 - always end in a known state
+            ctx.step("backup", False, _why(e))
             rec["status"] = "not-applied"
             return rec
         try:
@@ -213,14 +220,14 @@ def execute(ctx, proposal):
             ctx.step("apply", True, "Change applied")
             ctx.step("verify", True, verify_f(ctx, proposal["params"]))
             rec["status"] = "done"
-        except (Failed, conn.Result, subprocess.TimeoutExpired, OSError) as e:
-            ctx.step("verify" if any(s["step"] == "apply" for s in rec["steps"]) else "apply", False, e)
+        except Exception as e:                             # noqa: BLE001 - always end in a known state
+            ctx.step("verify" if any(s["step"] == "apply" for s in rec["steps"]) else "apply", False, _why(e))
             try:
                 rollback_f(ctx, rec["backup"])
                 ctx.step("rollback", True, "Rolled back to the backup")
                 rec["status"] = "rolled-back"
-            except (Failed, conn.Result, subprocess.TimeoutExpired, OSError) as e2:
-                ctx.step("rollback", False, e2)
+            except Exception as e2:                            # noqa: BLE001 - always end in a known state
+                ctx.step("rollback", False, _why(e2))
                 rec["status"] = "needs-attention"
         return rec
 
@@ -231,7 +238,7 @@ def rollback(ctx, record):
             STEPS[record["recipe"]][3](ctx, record["backup"])
             ctx.step("rollback", True, "Rolled back on request")
             record["status"] = "rolled-back"
-        except (Failed, conn.Result, subprocess.TimeoutExpired, OSError, KeyError) as e:
-            ctx.step("rollback", False, e)
+        except Exception as e:                             # noqa: BLE001
+            ctx.step("rollback", False, _why(e))
             record["status"] = "needs-attention"
     return record

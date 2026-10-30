@@ -43,6 +43,7 @@ from guardian import ticketing
 from guardian import sitestore
 from guardian import evidence
 from guardian import comppdf
+from guardian import fixes
 from guardian import connectors as conn
 from guardian.agents import ANALYSTS, LAYERS
 from guardian.controls import FRAMEWORKS, STATUSES as CONTROL_STATUSES
@@ -1875,7 +1876,7 @@ def launch(mode, run_id, sid, user, inbox=None):
     return status
 
 
-HANDOFF_TYPES = ("active_directory", "linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "m365", "windows", "azure")
+HANDOFF_TYPES = ("active_directory", "linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "m365", "windows", "azure", "ninjaone")
 
 
 def connector_handoff():
@@ -2188,9 +2189,17 @@ def require_fresh(request):
     return sid, s, user
 
 
-def fix_hosts():
+def fix_record():
     rec = next((r for r in vault.load_records("settings") if r.get("kind") == "fix-accounts"), None) if vault.unlocked else None
-    return (rec or {}).get("hosts", {})
+    return rec or {"kind": "fix-accounts", "hosts": {}}
+
+
+def fix_hosts():
+    return fix_record().get("hosts", {})
+
+
+def save_fix_record(rec):
+    vault.save_record("fix-accounts", "settings", rec)
 
 
 def changes():
@@ -2218,12 +2227,19 @@ def fix_overview(request: Request):
     run_id, g = latest_analysed()
     hosts = fix_hosts()
     done = {c["proposal"]: c for c in changes() if c["status"] in ("done", "running")}
-    props = remediate.proposals(g, hosts, (g.get("site") or {}).get("collector_ip")) if g else []
+    fix = fix_record()
+    props = remediate.proposals(g, fix, (g.get("site") or {}).get("collector_ip")) if g else []
     for p in props:
         p["change"] = done.get(p["id"], {}).get("id")
     return {"on": fix_on(), "until": fix_state["until"], "by": fix_state["by"], "run": run_id,
             "proposals": props, "recipes": remediate.RECIPES, "never": remediate.NEVER, "sudoers": remediate.SUDOERS,
             "public_key": vault.get("ssh_public_key"), "hosts": hosts if user["role"] == "admin" else {},
+            "windows": {h: {k: v for k, v in a.items() if k != "password"} for h, a in (fix.get("windows") or {}).items()} if user["role"] == "admin" else {},
+            "m365": {"client_id": (fix.get("m365") or {}).get("client_id"), "tenant_id": (fix.get("m365") or {}).get("tenant_id"),
+                     "roles": (fix.get("m365") or {}).get("roles", [])} if user["role"] == "admin" and fix.get("m365") else None,
+            "ninja": {"region": fix["ninja"]["region"], "client_id": fix["ninja"]["client_id"]} if user["role"] == "admin" and fix.get("ninja") else None,
+            "proxmox": {"host": fix["proxmox"]["host"], "token_id": fix["proxmox"]["token_id"]} if user["role"] == "admin" and fix.get("proxmox") else None,
+            "m365_allowed": sorted(fixes.M365_ALLOWED),
             "changes": sorted(changes(), key=lambda c: -c["created"])[:50], "admin": user["role"] == "admin",
             "unlocked": sid in vault.holders, "fresh": time.time() - s.get("fresh_at", 0) <= FRESH_SECONDS}
 
@@ -2255,6 +2271,7 @@ class FixAccount(BaseModel):
     host: str
     user: str = "guardian-fix"
     port: int = 22
+    guest: str = ""
     remove: bool = False
 
 
@@ -2263,23 +2280,149 @@ def fix_account(body: FixAccount, request: Request):
     sid, s, user = require(request, "admin", unlocked=True)
     if not re.match(r"^\d+\.\d+\.\d+\.\d+$", body.host) or not re.match(r"^[a-z_][a-z0-9_-]{0,31}$", body.user) or not 1 <= body.port <= 65535:
         raise HTTPException(400, "Check the address, user name and port")
-    rec = next((r for r in vault.load_records("settings") if r.get("kind") == "fix-accounts"), None) or {"kind": "fix-accounts", "hosts": {}}
+    if body.guest and not re.fullmatch(r"[\w.-]{1,63}/(qemu|lxc)/\d{2,9}", body.guest):
+        raise HTTPException(400, "The Proxmox guest looks like node/qemu/101 or node/lxc/105")
+    rec = fix_record()
+    rec.setdefault("hosts", {})
     if body.remove:
         rec["hosts"].pop(body.host, None)
     else:
-        rec["hosts"][body.host] = {"user": body.user, "port": body.port}
+        rec["hosts"][body.host] = {"user": body.user, "port": body.port, **({"guest": body.guest} if body.guest else {})}
         conn.guardian_ssh_key(vault)
-    vault.save_record("fix-accounts", "settings", rec)
+    save_fix_record(rec)
     vault.audit(user["email"], "fix-account-" + ("removed" if body.remove else "saved"), body.host)
     return {"hosts": rec["hosts"]}
 
 
+class FixWindows(BaseModel):
+    host: str
+    user: str = ""
+    password: Optional[str] = None
+    port: int = 5986
+    verify_tls: bool = False
+    remove: bool = False
+
+
+@app.post("/api/fix/windows")
+def fix_windows(body: FixWindows, request: Request):
+    """A Windows fix account (member of the local Administrators group) used over WinRM / HTTPS only for approved fixes."""
+    sid, s, user = require(request, "admin", unlocked=True)
+    if not re.match(r"^\d+\.\d+\.\d+\.\d+$", body.host) or not 1 <= body.port <= 65535:
+        raise HTTPException(400, "Check the address and port")
+    rec = fix_record()
+    win = rec.setdefault("windows", {})
+    if body.remove:
+        win.pop(body.host, None)
+    else:
+        if not re.fullmatch(r"[\w.\\@-]{1,104}", body.user):
+            raise HTTPException(400, "User looks like guardian-fix, HOST\\guardian-fix or guardian-fix@corp.example")
+        old = win.get(body.host, {})
+        pw = body.password or old.get("password")
+        if not pw:
+            raise HTTPException(400, "Enter the password")
+        win[body.host] = {"user": body.user, "password": pw, "port": body.port, "verify_tls": body.verify_tls}
+    save_fix_record(rec)
+    vault.audit(user["email"], "fix-windows-" + ("removed" if body.remove else "saved"), body.host)
+    return {"ok": True}
+
+
+class FixM365(BaseModel):
+    tenant_id: str = ""
+    client_id: str = ""
+    client_secret: Optional[str] = None
+    remove: bool = False
+
+
+@app.post("/api/fix/m365")
+def fix_m365(body: FixM365, request: Request):
+    """The separate Microsoft 365 fix app. Saved only if its permissions are within Guardian's short list."""
+    sid, s, user = require(request, "admin", unlocked=True)
+    rec = fix_record()
+    if body.remove:
+        rec.pop("m365", None)
+    else:
+        f = {"tenant_id": body.tenant_id.strip(), "client_id": body.client_id.strip(),
+             "client_secret": body.client_secret or (rec.get("m365") or {}).get("client_secret", "")}
+        try:
+            _, roles = conn.graph_token(f)
+        except conn.Result as e:
+            raise HTTPException(400, e.message)
+        extra = sorted(set(roles) - fixes.M365_ALLOWED)
+        if extra:
+            raise HTTPException(400, "The fix app has permissions Guardian doesn't use; remove them: " + ", ".join(extra))
+        rec["m365"] = {**f, "roles": roles}
+    save_fix_record(rec)
+    vault.audit(user["email"], "fix-m365-" + ("removed" if body.remove else "saved"), body.client_id[:40])
+    return {"ok": True, "roles": (rec.get("m365") or {}).get("roles", [])}
+
+
+class FixNinja(BaseModel):
+    region: str = "eu"
+    client_id: str = ""
+    client_secret: Optional[str] = None
+    remove: bool = False
+
+
+@app.post("/api/fix/ninja")
+def fix_ninja(body: FixNinja, request: Request):
+    sid, s, user = require(request, "admin", unlocked=True)
+    rec = fix_record()
+    if body.remove:
+        rec.pop("ninja", None)
+    else:
+        f = {"region": body.region, "client_id": body.client_id.strip(),
+             "client_secret": body.client_secret or (rec.get("ninja") or {}).get("client_secret", "")}
+        try:
+            fixes.ninja_token(f, "management control")
+        except fixes.Failed as e:
+            raise HTTPException(400, str(e))
+        rec["ninja"] = f
+    save_fix_record(rec)
+    vault.audit(user["email"], "fix-ninja-" + ("removed" if body.remove else "saved"), body.region)
+    return {"ok": True}
+
+
+class FixProxmox(BaseModel):
+    host: str = ""
+    port: int = 8006
+    token_id: str = ""
+    token_secret: Optional[str] = None
+    verify_tls: bool = False
+    remove: bool = False
+
+
+@app.post("/api/fix/proxmox")
+def fix_proxmox(body: FixProxmox, request: Request):
+    """A Proxmox token allowed to take and roll back snapshots, used before Linux updates on Proxmox guests."""
+    sid, s, user = require(request, "admin", unlocked=True)
+    rec = fix_record()
+    if body.remove:
+        rec.pop("proxmox", None)
+    else:
+        if not re.fullmatch(r"[\w.-]{1,253}", body.host) or not re.fullmatch(r"[\w.@-]{1,64}![\w.-]{1,64}", body.token_id):
+            raise HTTPException(400, "Host like 192.168.1.10, token ID like guardian-fix@pve!snapshots")
+        secret = body.token_secret or (rec.get("proxmox") or {}).get("token_secret", "")
+        try:
+            ctx, pin = conn._tls_context(body.host, body.port, body.verify_tls, None)
+        except conn.Result as e:
+            raise HTTPException(400, e.message)
+        st, v = conn._http(f"https://{body.host}:{body.port}/api2/json/version", ctx, {"Authorization": f"PVEAPIToken={body.token_id}={secret}"})
+        if st != 200:
+            raise HTTPException(400, "Proxmox refused the token")
+        rec["proxmox"] = {"host": body.host, "port": body.port, "token_id": body.token_id, "token_secret": secret,
+                          "verify_tls": body.verify_tls, "pin": pin}
+    save_fix_record(rec)
+    vault.audit(user["email"], "fix-proxmox-" + ("removed" if body.remove else "saved"), body.host)
+    return {"ok": True}
+
+
 class FixApply(BaseModel):
     proposal: str
+    reboot: bool = False
 
 
 def _run_change(rec, proposal):
-    ctx = remediate.Context(vault, STATE, fix_hosts(), rec)
+    ctx = remediate.Context(vault, STATE, fix_hosts(), rec, fix=fix_record())
     step = ctx.step
     ctx.step = lambda *a: (step(*a), save_change(rec))     # the page follows each step as it happens
     remediate.execute(ctx, proposal)
@@ -2293,11 +2436,13 @@ def fix_apply(body: FixApply, request: Request):
     if not fix_on():
         raise HTTPException(409, "Remediation is off: turn it on first")
     run_id, g = latest_analysed()
-    p = next((x for x in remediate.proposals(g, fix_hosts(), (g.get("site") or {}).get("collector_ip")) if x["id"] == body.proposal), None)
+    p = next((x for x in remediate.proposals(g, fix_record(), (g.get("site") or {}).get("collector_ip")) if x["id"] == body.proposal), None)
     if not p:
         raise HTTPException(404, "That fix is no longer proposed")
     if not p["ready"]:
         raise HTTPException(400, p["blocked"] or "Not ready")
+    if p["recipe"] == "windows.updates_install":
+        p["params"]["reboot"] = body.reboot
     if any(c["proposal"] == p["id"] and c["status"] in ("running", "done") for c in changes()):
         raise HTTPException(409, "Already applied")
     s["fresh_at"] = 0
@@ -2318,7 +2463,7 @@ def fix_rollback(cid: str, request: Request):
     if not rec or rec["status"] not in ("done", "needs-attention") or not rec.get("backup"):
         raise HTTPException(400, "Nothing to roll back")
     s["fresh_at"] = 0
-    ctx = remediate.Context(vault, STATE, fix_hosts(), rec)
+    ctx = remediate.Context(vault, STATE, fix_hosts(), rec, fix=fix_record())
     remediate.rollback(ctx, rec)
     save_change(rec)
     vault.audit(user["email"], "remediation-rollback", f'{cid}: {rec["status"]}')

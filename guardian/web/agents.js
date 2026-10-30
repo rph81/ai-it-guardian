@@ -30,7 +30,7 @@ const Agents = (() => {
                   record_path: "attack paths", set_controls: "control updates", link_previous: "links to last run",
                   ad_query: "directory queries", linux_check: "server checks", linux_vulnerable_packages: "package scans",
                   synology_info: "NAS reads", proxmox_get: "Proxmox reads",
-                  graph_get: "Microsoft 365 reads", azure_query: "Azure queries", azure_get: "Azure reads", windows_check: "Windows checks"};
+                  graph_get: "Microsoft 365 reads", azure_query: "Azure queries", ninja_query: "NinjaOne reads", azure_get: "Azure reads", windows_check: "Windows checks"};
   const NS = "http://www.w3.org/2000/svg";
   const S = {run: null, since: 0, events: [], agents: {}, notes: [], running: false, timer: null, t0: null,
              replay: null, speed: 3, links: {}, selected: null, nfind: 0, nnote: 0, cost: 0, view: null, drill: null};

@@ -11,6 +11,7 @@ You watch them work live and can talk to the Orchestrator that coordinates them.
 **Ticketing (ServiceNow): [docs/TICKETING.md](docs/TICKETING.md).**
 **Azure posture agent: [docs/AZURE.md](docs/AZURE.md).**
 **Compliance evidence and PDF: [docs/COMPLIANCE.md](docs/COMPLIANCE.md).**
+**Fixes and patching (agentless and NinjaOne): [docs/FIXES.md](docs/FIXES.md).**
 **On-site collector (sites at customers): [docs/ONSITE-COLLECTOR.md](docs/ONSITE-COLLECTOR.md).**
 
 Nothing on the network is changed. Agents have no shell: only fixed, non-intrusive checks, web requests without
@@ -94,13 +95,14 @@ exposure) and `previous` (the same issue in the previous assessment).
    identity, logging, backup, policy) and the CIS Microsoft Azure Foundations framework.
    **Compliance pack (now)**: evidence uploads per control (encrypted, with validity), your own status and notes,
    compliance PDF and evidence pack (ZIP with checksums).
+   **Fixes and patching (now)**: agentless Linux and Windows updates and hardening, Microsoft 365 fixes through a
+   separate fix app, NinjaOne patch status and patch jobs; Proxmox snapshots before Linux updates.
    **On-site collector, phase A (now)**: sites, collector gateway, enrollment, heartbeat, revoke; collector with
    pause / disconnect. Phase B: scans and AI assessments through the collector.
-   **Next, in this order**: RMM / patching integration and more fix recipes;
-   more ticketing systems (ConnectWise PSA, Autotask, HaloPSA, Jira Service Management); several customers (sites)
+   **Next, in this order**: more ticketing systems (ConnectWise PSA, Autotask, HaloPSA, Jira Service Management); several customers (sites)
    in one console; import of other scanners' results; MITRE ATT&CK mapping; integrations with business systems
    (SAP S/4HANA, SAP BTP and other leading platforms); medium / low priority gap features; AWS posture agent;
-   on-site collector phases B–D. Then a **final testing phase** against real systems (real AI run, AD, Microsoft 365,
+   on-site collector phases B–D. Then a **final testing phase** against real systems (real AI run, AD, Microsoft 365, fix recipes, NinjaOne,
    Azure, Windows, ServiceNow, alert channels, collector packages, outside penetration test of the gateway).
    Built-in VPN client: on hold pending a design review (the on-site collector covers most of the need).
 2. **Next**: agents use the connectors (inside view of NAS, hypervisors, servers); more connector sign-in methods

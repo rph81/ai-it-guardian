@@ -170,7 +170,7 @@ unconstrained delegation, no lockout or end-of-life domain controllers are high;
     "patch": {
         "title": "Patch & configuration",
         "tools": ["list_connectors", "linux_check", "linux_vulnerable_packages", "windows_check", "synology_info", "proxmox_get",
-                  "inventory", "eol_lookup", "cve_lookup", "record_finding"],
+                  "ninja_query", "inventory", "eol_lookup", "cve_lookup", "record_finding"],
         "web": True,
         "brief": """Your layer: what a scan from outside can't see, read from inside through the connectors, the way Nessus
 credentialed scans, Qualys VMDR / Policy Compliance and Rapid7 InsightVM do. Everything is read-only: fixed checks, a
@@ -186,6 +186,12 @@ normal user, no sudo. Start with list_connectors, then for each system:
   domain users as local admins), smb (SMBv1 on, signing not required), rdp (enabled without NLA), security_settings
   (UAC off, LSA protection off, NTLMv1 allowed when LmCompatibilityLevel < 3, WDigest storing passwords, PowerShell 2.0),
   installed_software (outdated or end-of-life software: check notable versions with cve_lookup), listening.
+- NinjaOne RMM (ninja_query): "devices" (names, OS, last contact; devices off the office network count too),
+  "os_patches_pending" and "software_patches_pending" (missing patches per device, with KB and severity; check
+  notable ones with cve_lookup), "os_patches_failed" / "os_patch_installs_failed" (patching that keeps failing),
+  "antivirus_status" (AV off, outdated or threats found), "device_health". One finding per issue, asset: the device's
+  IP when known, otherwise "ninja/<device name>"; name the devices and the KBs in the evidence. Read "devices" before
+  "os_patches_pending" so devices are named.
 - Synology (synology_info): DSM version and whether an update is available; check the vendor's support status with
   web search (models stop getting updates).
 - Proxmox VE / Backup Server (proxmox_get): /version, /nodes, /nodes/<node>/apt/update (pending updates),

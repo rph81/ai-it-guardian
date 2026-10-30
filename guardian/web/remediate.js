@@ -49,7 +49,16 @@ function render() {
   $("pubkey").textContent = d.public_key || "Created when you add the first server.";
   $("sudoers").textContent = d.sudoers;
   $("fa-rows").replaceChildren(...Object.entries(d.hosts).map(([h, a]) => el("tr", {}, el("td", {class: "mono"}, h), el("td", {class: "mono"}, a.user),
-    el("td", {}, String(a.port)), el("td", {}, el("button", {class: "btn ghost danger sm", onclick: () => account({host: h, remove: true})}, "Remove")))));
+    el("td", {}, String(a.port)), el("td", {class: "mono"}, a.guest || "—"), el("td", {}, el("button", {class: "btn ghost danger sm", onclick: () => account({host: h, remove: true})}, "Remove")))));
+  $("wf-rows").replaceChildren(...Object.entries(d.windows || {}).map(([h, a]) => el("tr", {}, el("td", {class: "mono"}, h), el("td", {class: "mono"}, a.user),
+    el("td", {}, String(a.port)), el("td", {}, el("button", {class: "btn ghost danger sm", onclick: () => post("/api/fix/windows", {host: h, remove: true})}, "Remove")))));
+  $("m-allowed").textContent = (d.m365_allowed || []).join(", ");
+  $("m-state").textContent = d.m365 ? `Saved: app ${d.m365.client_id}, ${d.m365.roles.length} permission(s).` : "Not set up.";
+  if (d.m365) { $("m-tenant").value = d.m365.tenant_id || ""; $("m-client").value = d.m365.client_id || ""; }
+  $("n-state").textContent = d.ninja ? `Saved: ${d.ninja.region}, client ${d.ninja.client_id}.` : "Not set up.";
+  if (d.ninja) { $("n-region").value = d.ninja.region; $("n-client").value = d.ninja.client_id; }
+  $("px-state").textContent = d.proxmox ? `Saved: ${d.proxmox.token_id} on ${d.proxmox.host}.` : "Not set up: Linux updates run without a snapshot.";
+  if (d.proxmox) { $("px-host").value = d.proxmox.host; $("px-id").value = d.proxmox.token_id; }
   const running = d.changes.some(c => c.status === "running" || c.status === "approved");
   clearTimeout(timer); timer = setTimeout(load, running ? 2000 : 30000);
 }
@@ -59,7 +68,11 @@ function proposal(p) {
   const acts = el("div", {class: "row mt16"});
   if (p.change) acts.append(el("span", {class: "tag ok"}, `Applied · ${p.change}`));
   else if (!p.ready) acts.append(el("span", {class: "tag warn"}, p.blocked));
-  else if (data.admin) acts.append(el("button", {class: "btn solid", disabled: !data.on, onclick: () => approve(p)}, data.on ? "Approve and apply · passkey" : "Turn remediation on first"));
+  else if (data.admin) {
+    const rb = p.recipe === "windows.updates_install" ? el("input", {type: "checkbox"}) : null;
+    if (rb) acts.append(el("label", {class: "check"}, rb, "Restart if needed (15 min warning)"));
+    acts.append(el("button", {class: "btn solid", disabled: !data.on, onclick: () => approve(p, rb && rb.checked)}, data.on ? "Approve and apply · passkey" : "Turn remediation on first"));
+  }
   else acts.append(el("span", {class: "note"}, "An admin approves fixes."));
   return el("div", {class: "box field"},
     el("div", {class: "row"}, el("span", {class: "tag " + (RISK[r.risk] || "")}, `${r.risk} risk`), el("span", {class: "tag"}, p.recipe), p.finding ? el("span", {class: "tag"}, p.finding) : null),
@@ -79,9 +92,12 @@ function change(c) {
     can ? el("div", {class: "row mt16"}, el("button", {class: "btn danger sm", onclick: () => undo(c)}, "Roll back · passkey")) : null);
 }
 
-async function approve(p) {
+async function approve(p, reboot) {
   if (!confirm(`Apply "${p.title}"?\n\nGuardian backs up first and rolls back automatically if the check fails.`)) return;
-  if (await confirmed(() => api("/api/fix/apply", {proposal: p.id}))) load();
+  if (await confirmed(() => api("/api/fix/apply", {proposal: p.id, reboot: !!reboot}))) load();
+}
+async function post(path, body) {
+  try { await api(path, body); load(); } catch (e) { alert(e.message); }
 }
 async function undo(c) {
   if (!confirm(`Roll back ${c.id}: "${c.title}"?`)) return;
@@ -94,7 +110,15 @@ $("on").addEventListener("click", async () => {
   if (await confirmed(() => api("/api/fix/on", {minutes: +$("dur").value}))) load();
 });
 $("off").addEventListener("click", async () => { try { await api("/api/fix/off", {}); load(); } catch (e) { alert(e.message); } });
-$("fa-add").addEventListener("click", () => account({host: $("fa-host").value.trim(), user: $("fa-user").value.trim() || "guardian-fix"}));
+$("fa-add").addEventListener("click", () => account({host: $("fa-host").value.trim(), user: $("fa-user").value.trim() || "guardian-fix", guest: $("fa-guest").value.trim()}));
+$("wf-add").addEventListener("click", () => post("/api/fix/windows", {host: $("wf-host").value.trim(), user: $("wf-user").value.trim(),
+  password: $("wf-pass").value || null, verify_tls: $("wf-tls").checked}).then(() => { $("wf-pass").value = ""; }));
+$("m-save").addEventListener("click", () => post("/api/fix/m365", {tenant_id: $("m-tenant").value, client_id: $("m-client").value, client_secret: $("m-secret").value || null}).then(() => { $("m-secret").value = ""; }));
+$("m-del").addEventListener("click", () => confirm("Remove the Microsoft 365 fix app from Guardian?") && post("/api/fix/m365", {remove: true}));
+$("n-save").addEventListener("click", () => post("/api/fix/ninja", {region: $("n-region").value, client_id: $("n-client").value, client_secret: $("n-secret").value || null}).then(() => { $("n-secret").value = ""; }));
+$("n-del").addEventListener("click", () => confirm("Remove the NinjaOne patch credentials?") && post("/api/fix/ninja", {remove: true}));
+$("px-save").addEventListener("click", () => post("/api/fix/proxmox", {host: $("px-host").value.trim(), token_id: $("px-id").value.trim(), token_secret: $("px-secret").value || null}).then(() => { $("px-secret").value = ""; }));
+$("px-del").addEventListener("click", () => confirm("Remove the Proxmox snapshot token?") && post("/api/fix/proxmox", {remove: true}));
 
 async function load() {
   try { data = await api("/api/fix"); render(); }

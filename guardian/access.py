@@ -21,8 +21,8 @@ from . import connectors as conn
 _CONNECTORS = []        # [{"id", "type", "name", "fields": {...incl. secrets}, "pin"}]
 _SSH = {"private": None, "path": None}
 _STATE_DIR = None
-TYPES = {"active_directory", "linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "m365", "windows", "azure"}
-CONNECTOR_AGENTS = {"ad": ["active_directory"], "patch": ["linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "windows"],
+TYPES = {"active_directory", "linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "m365", "windows", "azure", "ninjaone"}
+CONNECTOR_AGENTS = {"ad": ["active_directory"], "patch": ["linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "windows", "ninjaone"],
                     "m365": ["m365"], "devices": ["m365"], "azure": ["azure"]}
 
 
@@ -609,6 +609,50 @@ def azure_get(cid, path):
     if path.endswith(("/secrets", "/keys")):      # names and expiry only: values never come through the management API
         rows = [{"name": x.get("name"), "attributes": (x.get("properties") or {}).get("attributes")} for x in rows]
     return _cap(rows, bool(url))
+
+
+# -- NinjaOne (read-only API app, monitoring scope) -------------------------------------------------------------
+NINJA_QUERIES = {
+    "devices": ("/v2/devices-detailed", {}),
+    "os_patches_pending": ("/v2/queries/os-patches", {"status": "PENDING"}),
+    "os_patches_failed": ("/v2/queries/os-patches", {"status": "FAILED"}),
+    "os_patch_installs_failed": ("/v2/queries/os-patch-installs", {"status": "FAILED"}),
+    "software_patches_pending": ("/v2/queries/software-patches", {"status": "PENDING"}),
+    "antivirus_status": ("/v2/queries/antivirus-status", {}),
+    "device_health": ("/v2/queries/device-health", {}),
+}
+_NJ = {}
+
+
+def ninja_query(cid, name):
+    """One fixed NinjaOne read; follows the cursor for up to 5 pages of 1000."""
+    from . import fixes
+    c = _get(cid, {"ninjaone"})
+    if name not in NINJA_QUERIES:
+        return {"error": "unknown query", "allowed": sorted(NINJA_QUERIES)}
+    t = _NJ.get(cid)
+    if not t or t[2] < time.time() + 60:
+        try:
+            host, tok = fixes.ninja_token(c["fields"], "monitoring")
+        except fixes.Failed as e:
+            return {"error": str(e)}
+        t = _NJ[cid] = (host, tok, time.time() + 3000)
+    host, tok, _ = t
+    path, params = NINJA_QUERIES[name]
+    rows, cursor = [], None
+    for _ in range(5):
+        q = {**params, "pageSize": 1000, **({"cursor": cursor} if cursor else {})}
+        st, d = conn._http(f"https://{host}{path}?{urllib.parse.urlencode(q)}", ssl.create_default_context(), {"Authorization": f"Bearer {tok}"}, timeout=30)
+        if st != 200:
+            return {"status": st, "error": str(d)[:300]}
+        if isinstance(d, list):
+            rows += d
+            break
+        rows += (d or {}).get("results", [])
+        cursor = ((d or {}).get("cursor") or {}).get("name")
+        if not cursor or not (d or {}).get("results"):
+            break
+    return _cap(rows, bool(cursor), {"query": name})
 
 
 # -- Windows over WinRM (normal user in Remote Management Users) ------------------------------------------

@@ -153,6 +153,21 @@ CATALOG = {
                    F("client_secret", "Client secret", "password", secret=True),
                    F("subscriptions", "Only these subscription IDs (optional, space-separated)", mono=True)],
     },
+    "ninjaone": {
+        "label": "NinjaOne (RMM)", "icon": "N1", "color": "#2b6cb0", "category": "Endpoints & network",
+        "status": "available", "multi": False, "always": True,
+        "summary": "Patch and device status from your RMM",
+        "checks": "Used by the Patch & configuration agent: managed devices (also off the office network), pending and "
+                  "failed OS and software patches, antivirus status, device health. Read-only; patch jobs use separate "
+                  "credentials on the Fix page.",
+        "steps": ["NinjaOne › Administration › Apps › API › Client app IDs › Add: application platform 'API Services "
+                  "(machine-to-machine)', name Guardian-Read, scope Monitoring only, grant type Client credentials.",
+                  "Copy the client ID and the client secret (shown once).",
+                  "Region: app (US), eu, oc, ca or us2: the start of your NinjaOne address, e.g. eu.ninjarmm.com → eu."],
+        "fields": [F("region", "Region", placeholder="eu", mono=True, default="eu"),
+                   F("client_id", "Client ID", mono=True),
+                   F("client_secret", "Client secret", "password", secret=True)],
+    },
     "google_workspace": {"label": "Google Workspace", "icon": "GW", "color": "#34a853", "category": "Identity & productivity",
                          "status": "planned", "always": True, "summary": "Cloud identity", "checks": "2-step verification, admins, sharing settings, third-party apps."},
     "vmware": {"label": "VMware vSphere / ESXi", "icon": "VM", "color": "#5b7f3a", "category": "Infrastructure & storage",
@@ -698,6 +713,20 @@ def azure_subscription_filter(f):
     return set(subs)
 
 
+def _test_ninjaone(f):
+    from . import fixes
+    try:
+        host, tok = fixes.ninja_token(f, "monitoring")
+    except fixes.Failed as e:
+        raise Result("error", str(e))
+    st, orgs = _http(f"https://{host}/v2/organizations", ssl.create_default_context(), {"Authorization": f"Bearer {tok}"})
+    st2, devs = _http(f"https://{host}/v2/devices?pageSize=1000", ssl.create_default_context(), {"Authorization": f"Bearer {tok}"})
+    if st != 200:
+        raise Result("error", f"Signed in, but reading organizations failed ({st})")
+    details = [f"{len(orgs or [])} organization(s), {len(devs or []) if st2 == 200 else '?'} device(s) visible"]
+    return _done("ok", "Connected (monitoring scope)", details)
+
+
 def _test_azure(f):
     only = azure_subscription_filter(f)
     token, oid = azure_token(f)
@@ -791,6 +820,7 @@ def test(ctype, fields, pin=None, state_dir=None, vault=None):
         "email_domain": lambda: _test_email(fields),
         "m365": lambda: _test_m365(fields),
         "azure": lambda: _test_azure(fields),
+        "ninjaone": lambda: _test_ninjaone(fields),
         "windows": lambda: _test_windows(fields),
     }
     if ctype not in tests:

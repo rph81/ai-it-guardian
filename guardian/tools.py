@@ -213,6 +213,11 @@ class Toolbox:
                                "of a resource. Example: /subscriptions/<id>/resourceGroups/<rg>/providers/Microsoft.Sql/servers/<name>/firewallRules",
                 "input_schema": {"type": "object", "properties": {"connector": {"type": "string"}, "path": {"type": "string"}},
                                  "required": ["connector", "path"], "additionalProperties": False}},
+            "ninja_query": {
+                "description": "Run one fixed read on the NinjaOne RMM connector: " + ", ".join(access.NINJA_QUERIES) + ".",
+                "input_schema": {"type": "object", "properties": {
+                    "connector": {"type": "string"}, "query": {"type": "string", "enum": list(access.NINJA_QUERIES)}},
+                    "required": ["connector", "query"], "additionalProperties": False}},
             "windows_check": {
                 "description": "Run one fixed, read-only PowerShell check on a Windows machine over WinRM (normal user, not an administrator). Checks: "
                                + ", ".join(access.WINDOWS_CHECKS) + ".",
@@ -439,6 +444,24 @@ class Toolbox:
         self.g.log(self.agent, f"azure_get {path}")
         return access.azure_get(connector, path)
 
+    def t_ninja_query(self, connector, query):
+        self.g.log(self.agent, f"ninja_query {query}")
+        r = access.ninja_query(connector, query)
+        rows = r.get("rows") or []
+        with self.g.lock:
+            nj = self.g.data.setdefault("ninja", {})
+            if query == "devices":
+                nj["names"] = {str(d.get("id")): d.get("systemName") or d.get("displayName") for d in rows if d.get("id") is not None}
+            if query == "os_patches_pending":     # what the Fix page can offer as NinjaOne patch jobs
+                by = {}
+                for p in rows:
+                    d = by.setdefault(str(p.get("deviceId")), {"id": p.get("deviceId"), "count": 0, "critical": 0})
+                    d["count"] += 1
+                    d["critical"] += str(p.get("severity", "")).lower() == "critical"
+                names = nj.get("names", {})
+                nj["devices_with_pending"] = [{**d, "name": names.get(k)} for k, d in by.items() if d["id"] is not None]
+        return r
+
     def t_windows_check(self, connector, host, check):
         self.g.log(self.agent, f"windows_check {host} {check}")
         return access.windows_check(connector, host, check)
@@ -616,6 +639,8 @@ def describe(name, args):
         return f'Microsoft 365: {a.get("path")}'
     if name == "windows_check":
         return f'{a.get("host")}: {a.get("check", "").replace("_", " ")}'
+    if name == "ninja_query":
+        return f'NinjaOne: {a.get("query", "").replace("_", " ")}'
     if name == "azure_query":
         return f'Azure: {a.get("query", "").replace("_", " ")}' + (f' in {a["resource_group"]}' if a.get("resource_group") else "")
     if name == "azure_get":
@@ -654,4 +679,4 @@ def describe(name, args):
 # checks that touch the network or the internet (drawn as a pulse on the map); the rest only read the run's data
 ACTIVE = {"probe", "http_get", "tls_inspect", "cve_lookup", "eol_lookup", "web_search", "epss_lookup", "kev_details",
           "ad_query", "linux_check", "linux_vulnerable_packages", "synology_info", "proxmox_get",
-          "graph_get", "windows_check", "azure_query", "azure_get"}
+          "graph_get", "windows_check", "azure_query", "azure_get", "ninja_query"}
