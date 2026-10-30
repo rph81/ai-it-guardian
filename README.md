@@ -24,6 +24,7 @@ credentials, and public vulnerability lookups (NVD, CISA KEV, endoflife.date).
 | **Vault** (`guardian/vault.py`) | Users, passkeys (with PRF), encrypted secrets (API keys, connector passwords, SSH key), tamper-evident audit log. |
 | **Sign-in** (`guardian/auth.py`) | Passkeys (Touch ID, Face ID, Windows Hello, security keys); optionally Google / Microsoft accounts. Roles: viewer, operator, admin. |
 | **Connectors** (`guardian/connectors.py`) | Read-only accounts on systems (Synology, Proxmox, Linux SSH, SNMPv3, AD, e-mail domain…), suggested from the scan. Tested and stored now; used by agents in a later phase. |
+| **Code scan** (`guardian/codescan.py`, `/code`) | Paste a public GitHub link: Guardian reads one archive of that commit in memory (never runs it), applies static rules (install scripts, hidden code, exfiltration, credential theft, leaked keys, risky Actions, binaries, typosquats), checks dependencies with OSV (CVEs and known malware), and the Code agent reviews the flagged files and gives a verdict. Runs in its own process with memory, CPU and time limits. |
 | **Report** (`guardian/report.py`) | One self-contained HTML file: score, summary, fix-first list, findings with evidence. |
 
 ## What it costs to run
@@ -55,6 +56,8 @@ Each run is a folder `runs/<date-time>/`:
 - Text found on the network (banners, pages, device names) is passed to agents as data, never as instructions.
 - The chat can't send orders by itself: it proposes them, and an operator confirms.
 - API keys are given to a run in memory only; agents never see them or connector passwords.
+- Code scans never execute repository code. The Code agent's only tools read files from the archive and record findings
+  (no shell, network or web search); text in the code addressed to reviewers is flagged, not obeyed; secrets found are masked.
 
 ## Roadmap
 

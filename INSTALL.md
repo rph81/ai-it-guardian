@@ -291,6 +291,16 @@ approval with a passkey. For the SSH recipe, create the `guardian-fix` user on t
 as the Fix page shows, then add the server there. Each change is backed up, checked, and rolled back automatically if
 the check fails; **Roll back** undoes it later.
 
+**Code scan (optional).** The **Code** page checks a public GitHub repository before you install or deploy it. Paste
+the link (for example `https://github.com/owner/repository`, optionally a branch, tag or commit) and press **Scan
+repository**. Guardian downloads one archive of that commit and reads it in memory; it never installs, builds or runs
+anything from it. Static checks look for install-time scripts, hidden code, outbound connections, credential theft,
+leaked keys, risky GitHub Actions, binaries and look-alike dependency names; dependencies are checked against the OSV
+database (known vulnerabilities and known malicious packages). With the vault unlocked and an Anthropic key set, the
+Code agent then reads the flagged files and gives the verdict (Malicious, Suspicious, Review or No issues), usually for
+$0.10–$1. Without a key you still get the static and dependency checks. Private repositories aren't supported.
+The container needs outbound HTTPS to `api.github.com`, `codeload.github.com` and `api.osv.dev` for this.
+
 ---
 
 ## 9. Add people (optional)
@@ -368,6 +378,7 @@ read -rsp "API key: " K && ANTHROPIC_API_KEY=$K ./venv/bin/python run.py; unset 
 | `/opt/ai-guardian/console/guardian.db` | users, passkeys, encrypted vault (connectors, API keys, SSH key), audit log |
 | `/opt/ai-guardian/console/acme/` | certificate and acme-dns account |
 | `/opt/ai-guardian/runs/<date-time>/` | each run: `graph.json` (all data), `events.jsonl` (agent map), `chat.json`, `report.html` |
+| `/opt/ai-guardian/runs/code/<date-time-id>/` | each code scan: `scan.json` (result and evidence), `scan.log` |
 | `/opt/ai-guardian/.env` | non-secret settings (model, effort, agents on/off) |
 | `/etc/default/ai-guardian` | hostname and certificate e-mail |
 | services | `ai-guardian-console` (the console), `guardian-cert.timer` (daily renewal check) |

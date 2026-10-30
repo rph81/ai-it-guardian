@@ -421,7 +421,7 @@ REPORT_CSP = ("sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inl
 STATIC = {"/console.css": ("console.css", "text/css"), "/theme.js": ("theme.js", "text/javascript"), "/console.js": ("console.js", "text/javascript"),
           "/settings.js": ("settings.js", "text/javascript"), "/signin.js": ("signin.js", "text/javascript"),
           "/passkey.js": ("passkey.js", "text/javascript"), "/agents.js": ("agents.js", "text/javascript"),
-          "/remediate.js": ("remediate.js", "text/javascript")}
+          "/remediate.js": ("remediate.js", "text/javascript"), "/code.js": ("code.js", "text/javascript")}
 PAGES = {"/": "console.html", "/settings": "settings.html", "/signin": "signin.html"}
 
 
@@ -471,6 +471,13 @@ def page_fix(request: Request):
     if not current(request)[1]:
         return Response(status_code=303, headers={"Location": "/signin"})
     return _page("remediate.html")
+
+
+@app.get("/code")
+def page_code(request: Request):
+    if not current(request)[1]:
+        return Response(status_code=303, headers={"Location": "/signin"})
+    return _page("code.html")
 
 
 @app.get("/settings")
@@ -1366,6 +1373,176 @@ def fix_rollback(cid: str, request: Request):
 
 
 # -- connectors -----------------------------------------------------------------------------------------
+# -- code scan: check a public GitHub repository for malicious code -------------------------------------
+CODE_DIR = RUNS / "code"
+SCAN_ID = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{4}$")
+SCAN_TIMEOUT = 20 * 60
+
+
+class CodeJob:
+    proc = None
+    scan_id = None
+
+
+codejob = CodeJob()
+
+
+def scan_dir(scan_id):
+    if not SCAN_ID.match(scan_id or ""):
+        raise HTTPException(404, "No such scan")
+    d = CODE_DIR / scan_id
+    if not (d / "scan.json").exists():
+        raise HTTPException(404, "No such scan")
+    return d
+
+
+def read_scan(d):
+    try:
+        return json.loads((d / "scan.json").read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def scan_limits():
+    """Runs in the scan process before it starts: caps memory, CPU time and open files."""
+    import resource
+    for limit, value in ((resource.RLIMIT_AS, 3 * 2**30), (resource.RLIMIT_CPU, SCAN_TIMEOUT), (resource.RLIMIT_NOFILE, 256)):
+        try:
+            resource.setrlimit(limit, (value, value))
+        except (ValueError, OSError):                               # not every limit exists on every OS
+            pass
+
+
+async def run_scan(cmd, env, d):
+    try:
+        codejob.proc = await asyncio.create_subprocess_exec(
+            *cmd, cwd=str(BASE), env=env, stdout=asyncio.subprocess.DEVNULL, stderr=open(d / "scan.log", "wb"),
+            start_new_session=True, preexec_fn=scan_limits)
+        env.clear()
+        try:
+            await asyncio.wait_for(codejob.proc.wait(), SCAN_TIMEOUT)
+        except asyncio.TimeoutError:
+            os.killpg(codejob.proc.pid, signal.SIGKILL)
+            await codejob.proc.wait()
+    except Exception as e:                                          # noqa: BLE001 - recorded in the scan
+        (d / "scan.log").write_text(f"could not run: {e}")
+    data = read_scan(d)
+    if data and data.get("status") == "running":                    # killed, timed out or crashed
+        data.update(status="failed", finished=time.time(),
+                    error=data.get("error") or ("Stopped" if codejob.scan_id is None else "The scan stopped unexpectedly or took longer than 20 minutes"))
+        (d / "scan.json").write_text(json.dumps(data))
+    codejob.proc = codejob.scan_id = None
+
+
+def scan_row(d):
+    data = read_scan(d)
+    if not data:
+        return None
+    counts = {}
+    for f in data.get("findings") or []:
+        if not f.get("dismissed") and (f.get("ai") or {}).get("verdict") != "false_positive":
+            counts[f["sev"]] = counts.get(f["sev"], 0) + 1
+    return {"id": data["id"], "repo": data.get("repo"), "sha": (data.get("sha") or "")[:7], "ref": data.get("ref"),
+            "by": data.get("by"), "started": data.get("started"), "status": data.get("status"),
+            "verdict": (data.get("verdict") or {}).get("word"), "counts": counts, "cost": data.get("cost"), "error": data.get("error")}
+
+
+@app.get("/api/code")
+def code_overview(request: Request):
+    sid, s, user = require(request)
+    CODE_DIR.mkdir(parents=True, exist_ok=True)
+    rows = [r for r in (scan_row(d) for d in sorted(CODE_DIR.iterdir(), reverse=True)[:100] if SCAN_ID.match(d.name)) if r]
+    return {"scans": rows, "running": codejob.scan_id, "role": user["role"],
+            "ai_ready": sid in vault.holders and bool(api_keys().get("anthropic")),
+            "unlocked": sid in vault.holders}
+
+
+class CodeScanBody(BaseModel):
+    url: str
+    ref: Optional[str] = None
+    ai: bool = True
+    deps: bool = True
+
+
+@app.post("/api/code/scan")
+async def code_scan(body: CodeScanBody, request: Request):
+    sid, s, user = require(request, "operator")
+    from guardian import codescan
+    try:
+        owner, repo, ref = codescan.parse_url(body.url, body.ref)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if codejob.scan_id:
+        raise HTTPException(409, "A code scan is already running")
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LANG": "C.UTF-8", "PYTHONUNBUFFERED": "1",
+           "HOME": str(BASE), **{k: v for k, v in os.environ.items() if k.startswith("GUARDIAN_")}}
+    ai = body.ai
+    if ai:
+        key = api_keys().get("anthropic") if sid in vault.holders else None
+        if key:
+            env["ANTHROPIC_API_KEY"] = key                          # handed over in memory, never written to disk
+            vault.audit(user["email"], "secret-used", "API key for a code scan")
+    scan_id = time.strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(2)
+    d = CODE_DIR / scan_id
+    d.mkdir(parents=True)
+    (d / "scan.json").write_text(json.dumps({                        # placeholder until the scan writes its own
+        "id": scan_id, "url": f"https://github.com/{owner}/{repo}", "repo": f"{owner}/{repo}", "ref": ref, "by": user["name"],
+        "started": time.time(), "status": "running", "stage": "fetch", "stages": {}, "findings": [], "deps_requested": body.deps}))
+    cmd = [PYTHON, "-m", "guardian.codescan", str(d), f"https://github.com/{owner}/{repo}", "--by", user["name"]]
+    if ref:
+        cmd += ["--ref", ref]
+    if not ai:
+        cmd.append("--no-ai")
+    if not body.deps:
+        cmd.append("--no-deps")
+    codejob.scan_id = scan_id
+    vault.audit(user["email"], "code-scan", f"{owner}/{repo}" + (f" @ {ref}" if ref else ""))
+    asyncio.create_task(run_scan(cmd, env, d))
+    return {"id": scan_id}
+
+
+@app.post("/api/code/stop")
+async def code_stop(request: Request):
+    sid, s, user = require(request, "operator")
+    if not codejob.proc:
+        raise HTTPException(409, "No code scan is running")
+    codejob.scan_id = None
+    os.killpg(codejob.proc.pid, signal.SIGKILL)
+    vault.audit(user["email"], "code-scan-stopped", "")
+    return {"ok": True}
+
+
+@app.get("/api/code/{scan_id}")
+def code_result(scan_id: str, request: Request, download: int = 0):
+    require(request)
+    d = scan_dir(scan_id)
+    if download:
+        return FileResponse(d / "scan.json", media_type="application/json",
+                            headers={"Content-Disposition": f'attachment; filename="guardian-code-scan-{scan_id}.json"'})
+    return read_scan(d) or {}
+
+
+class Dismiss(BaseModel):
+    dismissed: bool
+
+
+@app.post("/api/code/{scan_id}/findings/{n}")
+def code_dismiss(scan_id: str, n: int, body: Dismiss, request: Request):
+    sid, s, user = require(request, "operator")
+    d = scan_dir(scan_id)
+    if codejob.scan_id == scan_id:
+        raise HTTPException(409, "Wait for the scan to finish")
+    data = read_scan(d)
+    f = next((f for f in data.get("findings") or [] if f.get("n") == n), None)
+    if not f:
+        raise HTTPException(404, "No such finding")
+    f["dismissed"] = body.dismissed
+    f["dismissed_by"] = user["name"] if body.dismissed else None
+    (d / "scan.json").write_text(json.dumps(data))
+    vault.audit(user["email"], "code-finding", f"{'Marked' if body.dismissed else 'Unmarked'} as false positive: {data.get('repo')} #{n} {f['title'][:80]}")
+    return {"ok": True}
+
+
 @app.get("/api/connectors")
 def connectors_overview(request: Request):
     sid, s, user = require(request, "operator")
