@@ -1381,7 +1381,7 @@ def launch(mode, run_id, sid, user, inbox=None):
     if mode in ("full", "resume", "followup"):
         stdin = connector_handoff()
         if stdin:
-            vault.audit(user["email"], "secret-used", "Connectors for the Active Directory and Patch & configuration agents")
+            vault.audit(user["email"], "secret-used", "Connectors for the connector agents (AD, Microsoft 365, devices, patch & configuration)")
     if inbox:
         chat.send_to_inbox(run_dir(run_id), inbox, user["name"])
     status = start_job(mode, run_id, user["name"], extra, stdin=stdin)
@@ -1389,7 +1389,7 @@ def launch(mode, run_id, sid, user, inbox=None):
     return status
 
 
-HANDOFF_TYPES = ("active_directory", "linux_ssh", "synology", "proxmox_ve", "proxmox_bs")
+HANDOFF_TYPES = ("active_directory", "linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "m365", "windows")
 
 
 def connector_handoff():

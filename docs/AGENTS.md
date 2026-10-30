@@ -17,7 +17,8 @@ All agents follow the same rules (the `COMMON` prompt):
 ```
 Scanner ─▶ Discovery ─▶ Orchestrator ─▶ Specialists (in parallel, scaled for big sites)
                                             Network · OS & endpoints · Web & APIs · Firmware · Internet perimeter
-                                            + through connectors: Active Directory · Patch & configuration
+                                            + through connectors: Active Directory · Microsoft 365 & Entra ID · Device fleet ·
+                                              Patch & configuration
                                    ─▶ Analysts (one after another)
                                             Risk analyst ─▶ Attack paths ─▶ Compliance
                                    ─▶ Report writer
@@ -44,7 +45,9 @@ several copies for large sites; analysts always run as one copy.
 | **Firmware** | Installed firmware vs the vendor's latest release, end of support, known-exploited firmware CVEs | HTTP GET, CVE lookup, web search |
 | **Internet perimeter** | Public IP as seen by Shodan InternetDB, UPnP port forwards, mapped to the device behind them | public-IP data, CVE lookup |
 | **Active Directory** | The Windows domain, through the AD connector (see below) | fixed read-only LDAP queries |
-| **Patch & configuration** | Inside servers, through the Linux SSH, Synology and Proxmox connectors (see below) | fixed read-only checks, OSV, CVE and end-of-life databases |
+| **Patch & configuration** | Inside servers and Windows machines, through the Linux SSH, Windows, Synology and Proxmox connectors (see below) | fixed read-only checks, OSV, CVE and end-of-life databases |
+| **Microsoft 365 & Entra ID** | The cloud tenant, through the Microsoft 365 connector (see below) | Microsoft Graph, fixed read-only paths |
+| **Device fleet** | Intune-managed laptops and phones and Defender alerts, through the Microsoft 365 connector | Microsoft Graph, end-of-life database |
 
 ## Specialists that sign in through a connector (Agents v2, wave 2)
 
@@ -76,6 +79,7 @@ nothing is cracked or attacked). **Needs:** the Active Directory connector, a no
 | System | Checks (all read-only) |
 |---|---|
 | Linux (SSH as a normal user, no sudo) | `os_release`, `pending_updates` (incl. security updates and package-list age), `reboot_required`, `auto_updates`, `packages` + `linux_vulnerable_packages` (every installed package against OSV for Debian, Ubuntu LTS, Alpine), `ssh_config`, `listening`, `firewall`, `users`, `services`, `disk_encryption`, `time_sync`, `kernel_hardening` |
+| Windows (WinRM over HTTPS, a member of Remote Management Users, not an admin) | `os`, `updates` (installed hotfixes), `update_settings`, `pending_reboot`, `defender`, `firewall`, `bitlocker` (often needs more rights: reported as not readable), `local_admins`, `smb`, `rdp`, `security_settings` (UAC, LSA protection, NTLM level, WDigest, PowerShell 2.0), `installed_software`, `listening` |
 | Synology DSM (non-admin user) | DSM version, model, update status where the account may read it |
 | Proxmox VE / Backup Server (read-only token) | A fixed list of GET paths: version, node status, pending apt updates, subscription, certificates, firewall options, cluster resources, backup jobs, users, storage, guest configs; on PBS datastores, verify, prune and sync jobs |
 
@@ -156,10 +160,27 @@ When an operator sends an order from the chat or presses **Re-check** on a findi
 follow-up and updates the finding (`update_finding`: resolved with evidence, or still open with new evidence). The
 analysts then run again in update mode, so priorities, attack paths and the compliance map reflect the change.
 
-## Coming next (Agents v2, wave 3)
+### Microsoft 365 & Entra ID (`m365`) and Device fleet (`devices`) — Agents v2, wave 3
 
-| Agent | Modelled on | Needs |
-|---|---|---|
-| Windows in **Patch & configuration** | Nessus / Qualys credentialed Windows checks | Windows (WinRM) connector |
+**Modelled on:** Microsoft Secure Score / Defender for Cloud, Tenable Identity Exposure for Entra ID, Qualys SaaS posture
+(M365); the endpoint agents of Tenable, Qualys and Rapid7 and Defender Vulnerability Management (Device fleet).
+**Needs:** the Microsoft 365 connector: an Entra app registration with **read-only application permissions**
+(Organization.Read.All, Directory.Read.All, Policy.Read.All, RoleManagement.Read.Directory, User.Read.All,
+Application.Read.All, AuditLog.Read.All, Reports.Read.All, SecurityEvents.Read.All, SecurityAlert.Read.All,
+MailboxSettings.Read, DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All) and a client
+secret. The connector test reads the permissions granted to the app and warns if any can change things.
+
+| Agent | Looks at |
+|---|---|
+| Microsoft 365 & Entra ID | MFA registration and enforcement, security defaults and Conditional Access, legacy-authentication sign-ins, number and kind of admins (standing vs eligible), stale accounts and guests, guest and consent policies, third-party apps and their permissions, inbox rules forwarding mail outside, Secure Score, open security alerts |
+| Device fleet | Intune devices that are non-compliant, unencrypted, not checked in for 30+ days, jailbroken; end-of-life OS versions; missing compliance policies; Entra devices outside Intune; open Defender alerts |
+
+Some data needs Entra ID P1 (MFA registration report, sign-in logs, Conditional Access) or Intune licences; when a read is
+refused, the agent records one info finding saying what is missing instead of guessing. The Graph tool reads only a
+fixed list of paths, never follows paging links to other hosts, and passes only standard query options.
+
+## Coming next
+
+Ticketing (Jira, ServiceNow, Autotask or ConnectWise), then several customers (sites) in one console.
 | **Microsoft 365 & Entra ID** | Microsoft Secure Score / Defender, Tenable Identity Exposure for Entra, Qualys SaaS posture | Microsoft 365 connector (read-only Graph app) |
 | **Device fleet** | Tenable / Qualys / Rapid7 endpoint agents, Defender Vulnerability Management | Microsoft 365 connector (Intune, Defender) |

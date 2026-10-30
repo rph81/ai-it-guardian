@@ -185,6 +185,25 @@ class Toolbox:
                                "cluster resources and backup jobs, users, storage, guests and their config; for PBS also datastores, verify, sync and prune jobs).",
                 "input_schema": {"type": "object", "properties": {"connector": {"type": "string"}, "path": {"type": "string"}},
                                  "required": ["connector", "path"], "additionalProperties": False}},
+            "graph_get": {
+                "description": "Read one Microsoft Graph path through the Microsoft 365 connector (GET only, fixed list of paths: organization, "
+                               "domains, licences, users, groups, directory roles and assignments, Conditional Access, security defaults, "
+                               "authorization and authentication-method policies, MFA registration report, sign-in and audit logs, apps, "
+                               "service principals and consents, Secure Score, security alerts and incidents, Intune managed devices, "
+                               "compliance policies and configurations, devices). query may set $select, $filter, $top, $expand, $orderby, "
+                               "$count, $search. beta=true uses the beta API.",
+                "input_schema": {"type": "object", "properties": {
+                    "connector": {"type": "string"}, "path": {"type": "string"},
+                    "query": {"type": "object", "additionalProperties": {"type": "string"}},
+                    "beta": {"type": "boolean"}, "max_pages": {"type": "integer", "minimum": 1, "maximum": 10}},
+                    "required": ["connector", "path"], "additionalProperties": False}},
+            "windows_check": {
+                "description": "Run one fixed, read-only PowerShell check on a Windows machine over WinRM (normal user, not an administrator). Checks: "
+                               + ", ".join(access.WINDOWS_CHECKS) + ".",
+                "input_schema": {"type": "object", "properties": {
+                    "connector": {"type": "string"}, "host": {"type": "string"},
+                    "check": {"type": "string", "enum": list(access.WINDOWS_CHECKS)}},
+                    "required": ["connector", "host", "check"], "additionalProperties": False}},
             # -- analyst tools: they read the run's findings and enrich them; nothing touches the network except the
             # EPSS and KEV feeds -------------------------------------------------------------------------------------
             "list_findings": {
@@ -392,6 +411,14 @@ class Toolbox:
         self.g.log(self.agent, f"linux_vulnerable_packages {host}")
         return access.linux_vulnerable_packages(connector, host)
 
+    def t_graph_get(self, connector, path, query=None, beta=False, max_pages=5):
+        self.g.log(self.agent, f"graph_get {path}")
+        return access.graph_get(connector, path, query, beta, max_pages)
+
+    def t_windows_check(self, connector, host, check):
+        self.g.log(self.agent, f"windows_check {host} {check}")
+        return access.windows_check(connector, host, check)
+
     def t_synology_info(self, connector):
         return access.synology_info(connector)
 
@@ -561,6 +588,10 @@ def describe(name, args):
         return f'{a.get("host")}: {a.get("check", "").replace("_", " ")}'
     if name == "linux_vulnerable_packages":
         return f'{a.get("host")}: packages against OSV'
+    if name == "graph_get":
+        return f'Microsoft 365: {a.get("path")}'
+    if name == "windows_check":
+        return f'{a.get("host")}: {a.get("check", "").replace("_", " ")}'
     if name == "synology_info":
         return "Synology: DSM version and updates"
     if name == "proxmox_get":
@@ -594,4 +625,5 @@ def describe(name, args):
 
 # checks that touch the network or the internet (drawn as a pulse on the map); the rest only read the run's data
 ACTIVE = {"probe", "http_get", "tls_inspect", "cve_lookup", "eol_lookup", "web_search", "epss_lookup", "kev_details",
-          "ad_query", "linux_check", "linux_vulnerable_packages", "synology_info", "proxmox_get"}
+          "ad_query", "linux_check", "linux_vulnerable_packages", "synology_info", "proxmox_get",
+          "graph_get", "windows_check"}

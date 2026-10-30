@@ -19,8 +19,9 @@ from . import connectors as conn
 _CONNECTORS = []        # [{"id", "type", "name", "fields": {...incl. secrets}, "pin"}]
 _SSH = {"private": None, "path": None}
 _STATE_DIR = None
-TYPES = {"active_directory", "linux_ssh", "synology", "proxmox_ve", "proxmox_bs"}
-CONNECTOR_AGENTS = {"ad": ["active_directory"], "patch": ["linux_ssh", "synology", "proxmox_ve", "proxmox_bs"]}
+TYPES = {"active_directory", "linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "m365", "windows"}
+CONNECTOR_AGENTS = {"ad": ["active_directory"], "patch": ["linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "windows"],
+                    "m365": ["m365"], "devices": ["m365"]}
 
 
 def load(data, state_dir):
@@ -382,3 +383,110 @@ def ad_query(cid, query, days=90):
         return result
     finally:
         lc.unbind()
+
+
+# -- Microsoft Graph (application with read-only permissions) ----------------------------------------------
+GRAPH_PATHS = [
+    r"/organization", r"/domains", r"/subscribedSkus", r"/users", r"/users/[\w.@-]+", r"/users/[\w.@-]+/memberOf",
+    r"/users/[\w.@-]+/mailboxSettings", r"/users/[\w.@-]+/mailFolders/inbox/messageRules", r"/groups",
+    r"/directoryRoles", r"/directoryRoles/[\w-]+/members", r"/roleManagement/directory/roleAssignments",
+    r"/roleManagement/directory/roleEligibilitySchedules", r"/identity/conditionalAccess/policies",
+    r"/identity/conditionalAccess/namedLocations", r"/policies/identitySecurityDefaultsEnforcementPolicy",
+    r"/policies/authorizationPolicy", r"/policies/authenticationMethodsPolicy", r"/policies/adminConsentRequestPolicy",
+    r"/reports/authenticationMethods/userRegistrationDetails", r"/auditLogs/signIns", r"/auditLogs/directoryAudits",
+    r"/applications", r"/servicePrincipals", r"/servicePrincipals/[\w-]+/appRoleAssignments", r"/oauth2PermissionGrants",
+    r"/security/secureScores", r"/security/secureScoreControlProfiles", r"/security/alerts_v2", r"/security/incidents",
+    r"/deviceManagement/managedDevices", r"/deviceManagement/managedDevices/[\w-]+", r"/deviceManagement/deviceCompliancePolicies",
+    r"/deviceManagement/deviceConfigurations", r"/deviceManagement/managedDeviceOverview",
+    r"/deviceManagement/windowsAutopilotDeviceIdentities", r"/devices",
+]
+GRAPH_QUERY = {"$select", "$filter", "$top", "$expand", "$orderby", "$count", "$search"}
+_GRAPH_TOKEN = {}
+
+
+def _graph_token(c):
+    t = _GRAPH_TOKEN.get(c["id"])
+    if t and t[1] > time.time() + 60:
+        return t[0]
+    token, _ = conn.graph_token(c["fields"])
+    _GRAPH_TOKEN[c["id"]] = (token, time.time() + 3000)
+    return token
+
+
+def graph_get(cid, path, query=None, beta=False, max_pages=5):
+    """GET one allow-listed Microsoft Graph path, following up to max_pages of results."""
+    c = _get(cid, {"m365"})
+    path = "/" + path.strip().lstrip("/").split("?")[0]
+    if ".." in path or not any(re.fullmatch(p, path) for p in GRAPH_PATHS):
+        return {"error": "path not in the read-only list", "allowed": GRAPH_PATHS}
+    q = {k: str(v)[:500] for k, v in (query or {}).items() if k in GRAPH_QUERY}
+    url = f"https://graph.microsoft.com/{'beta' if beta else 'v1.0'}{urllib.parse.quote(path)}" + (("?" + urllib.parse.urlencode(q)) if q else "")
+    headers = {"Authorization": f"Bearer {_graph_token(c)}", "ConsistencyLevel": "eventual"}
+    ctx = ssl.create_default_context()
+    rows, pages = [], 0
+    while url and pages < max(1, min(10, int(max_pages))):
+        st, d = conn._http(url, ctx, headers)
+        pages += 1
+        if st != 200:
+            err = (d or {}).get("error", {}) if isinstance(d, dict) else {}
+            hint = " (the app lacks a permission, or the tenant's licence doesn't include this report)" if st in (401, 403) else ""
+            return {"status": st, "error": f"{err.get('code', st)}: {str(err.get('message', d))[:300]}{hint}", "rows_so_far": rows[:50]}
+        if isinstance(d, dict) and "value" in d:
+            rows.extend(d["value"])
+            url = d.get("@odata.nextLink")
+            if url and not url.startswith("https://graph.microsoft.com/"):
+                url = None
+        else:
+            return {"status": st, "data": d}
+    body = json.dumps(rows, default=str)
+    out = {"status": 200, "count": len(rows), "more": bool(url), "rows": rows}
+    if len(body) > 30000:
+        out.update(rows=json.loads(json.dumps(rows[:max(1, int(len(rows) * 30000 / len(body)))], default=str)), truncated=True)
+    return out
+
+
+# -- Windows over WinRM (normal user in Remote Management Users) ------------------------------------------
+WINDOWS_CHECKS = {
+    "os": "$o=Get-CimInstance Win32_OperatingSystem; $o | Select-Object Caption,Version,BuildNumber,OSArchitecture,LastBootUpTime,InstallDate | ConvertTo-Json",
+    "updates": "Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 30 HotFixID,Description,InstalledOn | ConvertTo-Json",
+    "update_settings": ("$au='HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU'; "
+                        "[pscustomobject]@{Policy=(Get-ItemProperty $au -EA SilentlyContinue | Select-Object NoAutoUpdate,AUOptions,ScheduledInstallDay);"
+                        "Service=(Get-Service wuauserv).StartType.ToString()} | ConvertTo-Json -Depth 3"),
+    "pending_reboot": ("[pscustomobject]@{CBS=(Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootPending');"
+                       "WindowsUpdate=(Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\WindowsUpdate\\Auto Update\\RebootRequired')} | ConvertTo-Json"),
+    "defender": ("Get-MpComputerStatus -EA SilentlyContinue | Select-Object AMServiceEnabled,AntivirusEnabled,RealTimeProtectionEnabled,"
+                 "BehaviorMonitorEnabled,IsTamperProtected,AntivirusSignatureLastUpdated,QuickScanEndTime,AMRunningMode | ConvertTo-Json"),
+    "firewall": "Get-NetFirewallProfile | Select-Object Name,Enabled,DefaultInboundAction,DefaultOutboundAction | ConvertTo-Json",
+    "bitlocker": "try { Get-BitLockerVolume -EA Stop | Select-Object MountPoint,VolumeStatus,ProtectionStatus,EncryptionMethod | ConvertTo-Json } catch { 'not readable with this account' }",
+    "local_admins": "Get-LocalGroupMember -SID S-1-5-32-544 -EA SilentlyContinue | Select-Object Name,ObjectClass,PrincipalSource | ConvertTo-Json",
+    "smb": "Get-SmbServerConfiguration | Select-Object EnableSMB1Protocol,EnableSMB2Protocol,RequireSecuritySignature,EncryptData | ConvertTo-Json",
+    "rdp": ("$t='HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server'; [pscustomobject]@{"
+            "Denied=(Get-ItemProperty $t).fDenyTSConnections; NLA=(Get-ItemProperty \"$t\\WinStations\\RDP-Tcp\").UserAuthentication} | ConvertTo-Json"),
+    "security_settings": ("$l='HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa'; [pscustomobject]@{"
+                          "UAC=(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System').EnableLUA;"
+                          "LsaRunAsPPL=(Get-ItemProperty $l).RunAsPPL; LmCompatibilityLevel=(Get-ItemProperty $l).LmCompatibilityLevel;"
+                          "WDigest=(Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\WDigest' -EA SilentlyContinue).UseLogonCredential;"
+                          "PowerShellV2=((Get-WindowsOptionalFeature -Online -FeatureName MicrosoftWindowsPowerShellV2 -EA SilentlyContinue).State)} | ConvertTo-Json"),
+    "installed_software": ("Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',"
+                           "'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*' -EA SilentlyContinue | "
+                           "Where-Object DisplayName | Select-Object DisplayName,DisplayVersion,Publisher | Sort-Object DisplayName -Unique | "
+                           "Select-Object -First 300 | ConvertTo-Json"),
+    "listening": "Get-NetTCPConnection -State Listen | Select-Object LocalAddress,LocalPort -Unique | Sort-Object LocalPort | ConvertTo-Json",
+}
+
+
+def windows_check(cid, host, check):
+    c = _get(cid, {"windows"})
+    f = c["fields"]
+    if host not in (f.get("hosts") or "").split():
+        raise ValueError(f"{host} isn't one of this connector's machines")
+    if check not in WINDOWS_CHECKS:
+        raise ValueError("unknown check")
+    import winrm
+    s = winrm.Session(f"https://{host}:{int(f.get('port') or 5986)}/wsman", auth=(f["username"], f["password"]), transport="ntlm",
+                      server_cert_validation="validate" if f.get("verify_tls") else "ignore", operation_timeout_sec=60, read_timeout_sec=90)
+    r = s.run_ps(WINDOWS_CHECKS[check])
+    out, err = r.std_out.decode(errors="replace"), r.std_err.decode(errors="replace")
+    if r.status_code != 0 and not out.strip():
+        return {"error": re.sub(r"<[^>]+>", " ", err)[:400] or f"exit {r.status_code}"}
+    return {"host": host, "check": check, "output": out[:24000], **({"truncated": True} if len(out) > 24000 else {})}

@@ -301,8 +301,8 @@ Code agent then reads the flagged files and gives the verdict (Malicious, Suspic
 $0.10–$1. Without a key you still get the static and dependency checks. Private repositories aren't supported.
 The container needs outbound HTTPS to `api.github.com`, `codeload.github.com` and `api.osv.dev` for this.
 
-**Look inside your systems (optional).** Add connectors in **Settings › Connectors**: Active Directory, Linux
-servers (SSH), Synology, Proxmox VE / Backup Server. The **Active Directory** and **Patch & configuration** agents then
+**Look inside your systems (optional).** Add connectors in **Settings › Connectors**: Active Directory, Microsoft 365 /
+Entra ID, Windows (WinRM), Linux servers (SSH), Synology, Proxmox VE / Backup Server (each shows its setup steps). The **Active Directory** and **Patch & configuration** agents then
 use them during AI assessments: missing security updates, vulnerable packages, admin and Kerberos weaknesses, hardening.
 Connectors are only handed to a run while the vault is unlocked, so start AI assessments while you're signed in.
 For Linux, test the connector in Settings first: Guardian then trusts that server's SSH host key. Details: [docs/AGENTS.md](docs/AGENTS.md).
@@ -437,6 +437,7 @@ read -rsp "API key: " K && ANTHROPIC_API_KEY=$K ./venv/bin/python run.py; unset 
 - **Secrets are encrypted** with a key that is only in memory while someone with a passkey has unlocked the vault.
   Reading the files on disk, or a backup of them, gives nothing usable.
 - **No inbound internet access** is needed or opened. Outbound: Anthropic API, NVD, CISA, FIRST (EPSS), endoflife.date,
-  Shodan InternetDB, Let's Encrypt, acme-dns.io, and the alert channels you set up (your SMTP server, Teams, Slack, webhook).
+  Shodan InternetDB, Let's Encrypt, acme-dns.io, login.microsoftonline.com and graph.microsoft.com (if you use the
+  Microsoft 365 connector), and the alert channels you set up (your SMTP server, Teams, Slack, webhook).
 - Every sign-in, setting change, secret use and agent order is in the tamper-evident audit log
   (Settings → Security & vault → Audit log).

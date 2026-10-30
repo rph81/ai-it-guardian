@@ -116,16 +116,46 @@ CATALOG = {
         "fields": [F("domain", "Domain", placeholder="example.com", mono=True),
                    F("dkim_selectors", "DKIM selectors (optional)", placeholder="selector1, google", mono=True)],
     },
-    "m365": {"label": "Microsoft 365 / Entra ID", "icon": "M365", "color": "#0078d4", "category": "Identity & productivity",
-             "status": "planned", "always": True, "summary": "Cloud identity", "checks": "MFA coverage, admin roles, guest users, mail forwarding rules."},
+    "m365": {
+        "label": "Microsoft 365 / Entra ID", "icon": "M365", "color": "#0078d4", "category": "Identity & productivity",
+        "status": "available", "multi": True, "always": True,
+        "summary": "Cloud identity, mail and devices",
+        "checks": "Used by the Microsoft 365 & Entra ID agent (MFA, admins, Conditional Access, legacy sign-in, guests, app "
+                  "consents, mail forwarding, Secure Score) and the Device fleet agent (Intune compliance, encryption, "
+                  "updates, Defender alerts).",
+        "steps": ["Entra admin center › App registrations › New registration: name Guardian, single tenant, no redirect URI.",
+                  "API permissions › Add › Microsoft Graph › Application permissions, all read-only: Organization.Read.All, "
+                  "Directory.Read.All, Policy.Read.All, RoleManagement.Read.Directory, User.Read.All, Application.Read.All, "
+                  "AuditLog.Read.All, Reports.Read.All, SecurityEvents.Read.All, SecurityAlert.Read.All, MailboxSettings.Read, "
+                  "DeviceManagementManagedDevices.Read.All, DeviceManagementConfiguration.Read.All. Then Grant admin consent.",
+                  "Certificates & secrets › New client secret (e.g. 12 months). Copy the value now: it's shown once.",
+                  "Paste the tenant ID, the application (client) ID and the secret below. The test warns you if the app "
+                  "has any permission that can change things."],
+        "fields": [F("tenant_id", "Tenant ID", placeholder="00000000-0000-0000-0000-000000000000", mono=True),
+                   F("client_id", "Application (client) ID", mono=True),
+                   F("client_secret", "Client secret", "password", secret=True)],
+    },
     "google_workspace": {"label": "Google Workspace", "icon": "GW", "color": "#34a853", "category": "Identity & productivity",
                          "status": "planned", "always": True, "summary": "Cloud identity", "checks": "2-step verification, admins, sharing settings, third-party apps."},
     "vmware": {"label": "VMware vSphere / ESXi", "icon": "VM", "color": "#5b7f3a", "category": "Infrastructure & storage",
                "status": "planned", "summary": "Hypervisor", "checks": "Host versions, VM inventory, exposed services."},
     "docker": {"label": "Docker / Kubernetes", "icon": "D", "color": "#1d63ed", "category": "Infrastructure & storage",
                "status": "planned", "summary": "Containers", "checks": "Exposed APIs, outdated images, containers running as root."},
-    "windows": {"label": "Windows (WinRM)", "icon": "WIN", "color": "#0284c7", "category": "Endpoints & network",
-                "status": "planned", "summary": "Windows PCs and servers", "checks": "Patch level, antivirus status, local admins, shares."},
+    "windows": {
+        "label": "Windows (WinRM)", "icon": "WIN", "color": "#0284c7", "category": "Endpoints & network",
+        "status": "available", "multi": True,
+        "summary": "Windows PCs and servers",
+        "checks": "Used by the Patch & configuration agent: OS build and installed updates, pending reboot, Defender, "
+                  "firewall, BitLocker, local admins, SMB, RDP, UAC and LSA settings, installed software.",
+        "steps": ["Create a normal domain or local user, e.g. svc-guardian (not an administrator).",
+                  "Add it to the local group 'Remote Management Users' on each machine (a Group Policy can do this for many).",
+                  "Make sure WinRM over HTTPS (port 5986) is on: winrm quickconfig -transport:https, or by Group Policy.",
+                  "List the machines below. Some checks (BitLocker) need more rights and are reported as 'not readable'."],
+        "fields": [F("hosts", "Machines (one per line)", "textarea", mono=True, placeholder="192.168.1.20\nsrv-files.corp.local"),
+                   F("username", "Username", placeholder="CORP\\svc-guardian", mono=True),
+                   F("password", "Password", "password", secret=True),
+                   F("port", "Port", "number", default=5986, mono=True), VERIFY],
+    },
     "firewall": {"label": "Firewall API (pfSense, OPNsense, FortiGate, UniFi)", "icon": "FW", "color": "#dc2626",
                  "category": "Endpoints & network", "status": "planned", "summary": "Firewalls", "checks": "Rules, firmware, VPN settings."},
 }
@@ -609,6 +639,71 @@ def _test_email(f):
     return _done("warn" if weak else "ok", "Records read" + (": protection is incomplete" if weak else ""), details)
 
 
+WRITE_GRAPH = re.compile(r"(ReadWrite|\.Write|\.Send|\.Manage|FullControl|\.Create|\.Delete)", re.I)
+
+
+def graph_token(f):
+    """Client-credentials token for Microsoft Graph. Returns (token, roles)."""
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", f.get("tenant_id") or "") or not re.fullmatch(r"[0-9a-fA-F-]{36}", f.get("client_id") or ""):
+        raise Result("error", "Tenant ID and client ID are GUIDs like 00000000-0000-0000-0000-000000000000.")
+    st, r = _http(f"https://login.microsoftonline.com/{f['tenant_id']}/oauth2/v2.0/token", ssl.create_default_context(),
+                  data={"grant_type": "client_credentials", "client_id": f["client_id"], "client_secret": f["client_secret"],
+                        "scope": "https://graph.microsoft.com/.default"})
+    if st != 200 or not isinstance(r, dict) or "access_token" not in r:
+        msg = (r or {}).get("error_description", "") if isinstance(r, dict) else str(r)
+        raise Result("error", "Sign-in refused: " + (msg.split("\r\n")[0][:200] or f"error {st}"))
+    import base64
+    payload = r["access_token"].split(".")[1]
+    claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+    return r["access_token"], sorted(claims.get("roles") or [])
+
+
+def _test_m365(f):
+    token, roles = graph_token(f)
+    st, org = _http("https://graph.microsoft.com/v1.0/organization?$select=displayName,verifiedDomains", ssl.create_default_context(),
+                    {"Authorization": f"Bearer {token}"})
+    name = ((org or {}).get("value") or [{}])[0].get("displayName", "your tenant") if isinstance(org, dict) else "your tenant"
+    details = [f"Signed in to {name}", f"{len(roles)} application permissions: " + (", ".join(roles) if roles else "none (grant admin consent)")]
+    writes = [r for r in roles if WRITE_GRAPH.search(r)]
+    if writes:
+        return _done("warn", "Connected, with a warning", details + ["These permissions can change things; remove them: " + ", ".join(writes)])
+    if not roles:
+        return _done("warn", "Connected, but no permissions", details)
+    return _done("ok", "Connected", details + ["All permissions are read-only"])
+
+
+def _test_windows(f):
+    try:
+        import winrm
+    except ImportError:
+        raise Result("error", "The WinRM library isn't installed in the container (pip install pywinrm).")
+    hosts = [h for h in (f.get("hosts") or "").split() if h]
+    if not hosts:
+        raise Result("error", "Add at least one machine.")
+    details, worst = [], "ok"
+    for h in hosts:
+        try:
+            s = winrm.Session(f"https://{h}:{int(f.get('port') or 5986)}/wsman", auth=(f["username"], f["password"]), transport="ntlm",
+                              server_cert_validation="validate" if f.get("verify_tls") else "ignore", operation_timeout_sec=20, read_timeout_sec=30)
+            r = s.run_ps("$o=Get-CimInstance Win32_OperatingSystem; \"$($o.Caption) $($o.Version)\"; "
+                         "([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole('Administrators')")
+            out = r.std_out.decode(errors="replace").split()
+            if r.status_code != 0:
+                details.append(f"{h}: {r.std_err.decode(errors='replace')[:160]}")
+                worst = "error"
+                continue
+            admin = out[-1].lower() == "true" if out else False
+            msg = f"{h}: {' '.join(out[:-1])}"
+            if admin:
+                msg += " · this account is an administrator; use a member of Remote Management Users instead"
+                worst = "warn" if worst == "ok" else worst
+            details.append(msg)
+        except Exception as e:                                       # noqa: BLE001 - reported per machine
+            details.append(f"{h}: {str(e)[:160]}")
+            worst = "error"
+    return _done(worst, {"ok": "Connected", "warn": "Connected, with a warning", "error": "Some machines didn't answer"}[worst], details)
+
+
 def test(ctype, fields, pin=None, state_dir=None, vault=None):
     """Run a connection test. Returns (level, message, details, pin)."""
     tests = {
@@ -620,6 +715,8 @@ def test(ctype, fields, pin=None, state_dir=None, vault=None):
         "snmp": lambda: _test_snmp(fields),
         "active_directory": lambda: _test_ad(fields, pin),
         "email_domain": lambda: _test_email(fields),
+        "m365": lambda: _test_m365(fields),
+        "windows": lambda: _test_windows(fields),
     }
     if ctype not in tests:
         return "error", "This connector can't be tested yet.", [], pin
@@ -671,6 +768,9 @@ def validate(ctype, fields):
         out["hosts"] = "\n".join(hs)
     if out.get("url") and not re.match(r"^https?://[A-Za-z0-9.\-:\[\]]+(:\d+)?/?$", out["url"]):
         raise ValueError("The address must look like http://192.168.1.89 or https://ha.example.com:8123")
+    for g in ("tenant_id", "client_id"):
+        if out.get(g) and not re.fullmatch(r"[0-9a-fA-F-]{36}", out[g]):
+            raise ValueError(f"{g.replace('_', ' ').capitalize()} must be a GUID")
     if out.get("domain") and not re.match(r"^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$", out["domain"]):
         raise ValueError("Enter a domain like example.com")
     return out

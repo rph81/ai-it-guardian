@@ -169,7 +169,7 @@ unconstrained delegation, no lockout or end-of-life domain controllers are high;
     },
     "patch": {
         "title": "Patch & configuration",
-        "tools": ["list_connectors", "linux_check", "linux_vulnerable_packages", "synology_info", "proxmox_get",
+        "tools": ["list_connectors", "linux_check", "linux_vulnerable_packages", "windows_check", "synology_info", "proxmox_get",
                   "inventory", "eol_lookup", "cve_lookup", "record_finding"],
         "web": True,
         "brief": """Your layer: what a scan from outside can't see, read from inside through the connectors, the way Nessus
@@ -180,6 +180,12 @@ normal user, no sudo. Start with list_connectors, then for each system:
   linux_vulnerable_packages (OSV advisories for installed packages), ssh_config (root login, password login,
   old ciphers), firewall, listening, users (extra uid 0 accounts, who can sudo), disk_encryption, time_sync,
   kernel_hardening. Compare against CIS Benchmark expectations and say which rule each finding relates to.
+- Windows (windows_check): os (then eol_lookup "windows" / "windows-server"), updates (latest installed hotfix date:
+  older than ~45 days means patching has stalled), update_settings, pending_reboot, defender (real-time protection off,
+  signatures older than 3 days, tamper protection off), firewall (a profile off), bitlocker, local_admins (extra admins,
+  domain users as local admins), smb (SMBv1 on, signing not required), rdp (enabled without NLA), security_settings
+  (UAC off, LSA protection off, NTLMv1 allowed when LmCompatibilityLevel < 3, WDigest storing passwords, PowerShell 2.0),
+  installed_software (outdated or end-of-life software: check notable versions with cve_lookup), listening.
 - Synology (synology_info): DSM version and whether an update is available; check the vendor's support status with
   web search (models stop getting updates).
 - Proxmox VE / Backup Server (proxmox_get): /version, /nodes, /nodes/<node>/apt/update (pending updates),
@@ -189,6 +195,56 @@ Record one finding per issue per system (asset: the system's IP). Missing securi
 (check with cve_lookup: KEV is in the result) or an end-of-life OS are high; missing updates in general medium; hardening
 gaps medium or low. When a check is refused or not available to the read-only account, say so in an info finding only
 if it hides something important.""",
+    },
+    "m365": {
+        "title": "Microsoft 365 & Entra ID",
+        "tools": ["list_connectors", "graph_get", "record_finding"],
+        "web": True,
+        "brief": """Your layer: the Microsoft 365 / Entra ID tenant, where small businesses most often get breached. You read it
+through the Microsoft 365 connector (an app with read-only Graph permissions), the way Microsoft Secure Score / Defender
+for Cloud, Tenable Identity Exposure for Entra and Qualys SaaS posture do. Start with list_connectors, then:
+- /organization, /subscribedSkus (which licences: Entra ID P1/P2 decides what Conditional Access and reports exist).
+- MFA: /reports/authenticationMethods/userRegistrationDetails (users not MFA-registered, admins without MFA; needs P1) and
+  /policies/authenticationMethodsPolicy (weak methods such as SMS / voice enabled).
+- Security defaults (/policies/identitySecurityDefaultsEnforcementPolicy) and Conditional Access
+  (/identity/conditionalAccess/policies): is MFA required for all users and for admins, is legacy authentication blocked,
+  are there broad exclusions, policies in report-only mode.
+- Legacy sign-ins: /auditLogs/signIns with $filter on clientAppUsed (e.g. 'Exchange ActiveSync', 'IMAP4', 'POP3',
+  'Authenticated SMTP', 'Other clients') over the last days (needs P1).
+- Admins: /roleManagement/directory/roleAssignments with $expand=principal: how many Global Administrators (2-4 is
+  right), admins that are also daily mail users, guest or service accounts with admin roles, standing vs eligible (PIM).
+- Users: /users with $select=displayName,userPrincipalName,accountEnabled,userType,createdDateTime,signInActivity
+  (stale enabled accounts, guests, guests with access), /policies/authorizationPolicy (who can invite guests, user consent
+  to apps, users can register apps).
+- Apps: /servicePrincipals and /oauth2PermissionGrants (third-party apps with broad delegated or application permissions,
+  e.g. Mail.Read, Files.ReadWrite.All).
+- Mail: for admins and a sample of users, /users/{id}/mailFolders/inbox/messageRules (rules forwarding or redirecting
+  mail outside the organisation, or deleting mail: a classic sign of compromise).
+- /security/secureScores ($top=1) and /security/alerts_v2 (open high-severity alerts).
+Record one finding per issue (asset: 'site'). Name users and admins in the evidence (at most 20, plus the total).
+Severity: admins without MFA, no MFA enforcement at all, legacy authentication allowed, external forwarding rules and
+over-privileged unknown apps are high or critical; hygiene issues medium or low. If a request is refused for licence or
+permission reasons, say what is missing in one info finding instead of guessing.""",
+    },
+    "devices": {
+        "title": "Device fleet",
+        "tools": ["list_connectors", "graph_get", "eol_lookup", "record_finding"],
+        "web": True,
+        "brief": """Your layer: the laptops, desktops and phones managed by Microsoft Intune (and seen by Microsoft Defender),
+including devices that are rarely on the office network: the coverage Tenable, Qualys and Rapid7 get from their endpoint
+agents. Read through the Microsoft 365 connector. Start with list_connectors, then:
+- /deviceManagement/managedDevices with $select=deviceName,operatingSystem,osVersion,complianceState,isEncrypted,
+  lastSyncDateTime,managedDeviceOwnerType,userPrincipalName,jailBroken,model: non-compliant devices, unencrypted devices,
+  devices not checked in for 30+ days, jailbroken or rooted phones, personal devices with company data.
+- OS versions: end-of-life Windows, macOS, iOS and Android versions (eol_lookup with "windows", "macos", "ios",
+  "android"), and Windows builds that are far behind.
+- /deviceManagement/deviceCompliancePolicies and /deviceManagement/deviceConfigurations: is there a compliance policy at
+  all for each platform, does it require encryption, a minimum OS version and a password.
+- /deviceManagement/managedDeviceOverview for totals; /devices for Entra-registered devices not in Intune.
+- /security/alerts_v2 with $filter=status ne 'resolved': open Defender alerts per device.
+Record one finding per issue (asset: 'site'; name the devices in the evidence, at most 20, plus the total). Severity:
+open high Defender alerts and unencrypted or non-compliant devices with company data are high; stale devices and missing
+policies medium. If Intune isn't licensed or the permission is missing, record one info finding saying so.""",
     },
 }
 CONNECTOR_AGENTS = list(CONNECTOR_BRIEFS)
