@@ -514,3 +514,5 @@ tr.cs-click{cursor:pointer}tr.cs-click:hover td{background:var(--panel2)}
 .co-row.cs-met{border-left-color:var(--ok)}.co-row.cs-partial{border-left-color:var(--med)}.co-row.cs-gap{border-left-color:var(--crit)}
 .co-id{font:600 12px var(--mono);color:var(--muted)}
 .tag.co-met{color:var(--ok);border-color:var(--ok)}.tag.co-partial{color:var(--med);border-color:var(--med)}.tag.co-gap{color:var(--crit);border-color:var(--crit)}
+
+pre.code{margin:0;background:var(--bg2);border:1px solid var(--line);padding:12px 14px;overflow-x:auto;font:12.5px/1.6 var(--mono);white-space:pre}

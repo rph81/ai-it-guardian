@@ -42,8 +42,9 @@ function showSection() {
   if (s === "appearance") renderAppearance();
   if (s === "schedules" && typeof Schedule !== "undefined") Schedule.load();
   if (s === "ticketing" && typeof Ticketing !== "undefined") Ticketing.load();
+  if (s === "sites" && typeof Sites !== "undefined") Sites.load();
 }
-const SECTIONS = ["connectors", "users", "security", "account", "ai", "scope", "schedules", "ticketing", "appearance"];
+const SECTIONS = ["connectors", "users", "security", "account", "ai", "scope", "sites", "schedules", "ticketing", "appearance"];
 window.addEventListener("hashchange", showSection);
 
 // -- connectors -----------------------------------------------------------------------
@@ -322,7 +323,7 @@ $("ai-form").addEventListener("submit", async e => {
 
 // -- me, vault --------------------------------------------------------------------------
 let me = null;
-const ADMIN_ONLY = ["users", "security", "ai", "schedules", "ticketing"];
+const ADMIN_ONLY = ["users", "security", "ai", "sites", "schedules", "ticketing"];
 const allowed = s => s === "appearance" || me.role === "admin" || (me.role === "operator" ? !ADMIN_ONLY.includes(s) : s === "account");
 function renderMe() {
   $("me").textContent = `${me.name} · ${me.role}`;

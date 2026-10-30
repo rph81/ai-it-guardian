@@ -1,0 +1,39 @@
+[Unit]
+Description=Guardian site collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=guardian-collector
+Group=guardian-collector
+Environment=GUARDIAN_COLLECTOR_DATA=/var/lib/guardian-collector
+ExecStart=/opt/guardian-collector/venv/bin/python /opt/guardian-collector/guardian_collector.py run
+Restart=always
+RestartSec=10
+UMask=0077
+LimitCORE=0
+# Network scans (phase B) need raw sockets; nothing else.
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/guardian-collector
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK AF_PACKET
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

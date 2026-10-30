@@ -10,6 +10,7 @@
 <script src="/settings.js" defer></script>
 <script src="/schedule.js" defer></script>
 <script src="/ticketing.js" defer></script>
+<script src="/sites.js" defer></script>
 </head>
 <body>
 <div class="shell">
@@ -42,6 +43,7 @@
       <a href="#account" data-s="account">My account</a>
       <a href="#ai" data-s="ai" class="admin-only">AI agents</a>
       <a href="#scope" data-s="scope">Scan scope</a>
+      <a href="#sites" data-s="sites">Sites &amp; collectors</a>
       <a href="#schedules" data-s="schedules">Schedules &amp; alerts</a>
       <a href="#ticketing" data-s="ticketing">Ticketing</a>
       <a href="#appearance" data-s="appearance">Appearance</a>
@@ -262,6 +264,28 @@
             <span class="note m0" id="n-result"></span></div>
           <p class="note" id="n-last"></p>
         </form>
+      </section>
+      <section class="stack hidden" id="s-sites">
+        <div class="card">
+          <div class="sechead"><h2>Sites</h2><span class="note m0" id="si-gw"></span></div>
+          <p class="note">A site is a customer network. "This network" is assessed by this server; other sites through a small collector installed at the customer, which only connects out to Guardian's collector gateway. Remote scans and assessments come in the next phase; this one sets up sites, enrollment and the connection.</p>
+          <div class="tablewrap field"><table><thead><tr><th>Site</th><th>Collector</th><th>Last seen</th><th>Scope (set on site)</th><th></th></tr></thead><tbody id="si-rows"></tbody></table></div>
+        </div>
+        <form class="card" id="si-add">
+          <h2>Add a site</h2>
+          <div class="f3 field"><div><label for="si-name">Site name</label><input id="si-name" maxlength="80" placeholder="Zürich office" required></div>
+            <div><label for="si-cust">Customer</label><input id="si-cust" maxlength="120" placeholder="Muster AG"></div>
+            <div class="row" style="align-items:flex-end"><button class="btn primary" type="submit">Add site</button></div></div>
+        </form>
+        <div class="card hidden" id="si-install">
+          <div class="sechead"><h2 id="si-ititle">Install the collector</h2><button class="btn sm" type="button" id="si-iclose">Close</button></div>
+          <p class="note" id="si-inote"></p>
+          <div class="f3 field"><div><label for="si-scope">Customer subnets (fills the commands; the customer can change them)</label><input id="si-scope" class="mono" placeholder="10.20.0.0/22, 10.20.8.0/24"></div></div>
+          <div class="seg field" id="si-tabs"><button type="button" aria-pressed="true" data-k="linux">Linux app</button><button type="button" aria-pressed="false" data-k="docker">Docker</button><button type="button" aria-pressed="false" data-k="vm">VM appliance</button></div>
+          <pre class="code field" id="si-cmd"></pre>
+          <div class="row mt16"><button class="btn" type="button" id="si-copy">Copy</button><button class="btn danger" type="button" id="si-cancel">Cancel code</button></div>
+          <p class="help" id="si-help"></p>
+        </div>
       </section>
       <section class="stack hidden" id="s-ticketing">
         <form class="card" id="tk-form">

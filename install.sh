@@ -28,7 +28,7 @@ apt-get install -y -qq nmap arp-scan miniupnpc openssl python3 python3-venv ca-c
 echo "==> Copying Guardian to $DEST"
 mkdir -p "$DEST"
 cp -r "$SRC/guardian" "$DEST/"
-cp "$SRC/run.py" "$SRC/console.py" "$SRC/requirements.txt" "$SRC/.env.example" \
+cp "$SRC/run.py" "$SRC/console.py" "$SRC/gateway.py" "$SRC/requirements.txt" "$SRC/.env.example" \
    "$SRC/acme-dns-hook.py" "$SRC/guardian-cert.sh" "$SRC/guardian-cert-setup.sh" "$DEST/"
 chmod 755 "$DEST/run.py" "$DEST/acme-dns-hook.py" "$DEST/guardian-cert.sh" "$DEST/guardian-cert-setup.sh"
 find "$DEST/guardian" -name __pycache__ -prune -exec rm -rf {} +
@@ -47,17 +47,24 @@ set_conf() { grep -q "^$1=" "$CONF" && sed -i "s|^$1=.*|$1=$2|" "$CONF" || echo 
 [ -n "$EMAIL" ] && set_conf ACME_EMAIL "$EMAIL"
 grep -q "^GUARDIAN_HOSTNAME=" "$CONF" || echo "Note: no --hostname given yet; the console uses a self-signed certificate until you set one." >&2
 
+echo "==> Collector gateway user and data"
+id guardian-gw >/dev/null 2>&1 || useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin guardian-gw
+install -d -m 700 -o guardian-gw -g guardian-gw "$DEST/gateway"
+[ -f "$DEST/gateway/gateway.db" ] && chown guardian-gw:guardian-gw "$DEST/gateway"/gateway.db*
+
 echo "==> Services"
-cp "$SRC/ai-guardian-console.service" "$SRC/guardian-cert.service" "$SRC/guardian-cert.timer" /etc/systemd/system/
+cp "$SRC/ai-guardian-gateway.service" "$SRC/ai-guardian-console.service" "$SRC/guardian-cert.service" "$SRC/guardian-cert.timer" /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable -q ai-guardian-console
 systemctl restart ai-guardian-console
+systemctl enable -q ai-guardian-gateway
+systemctl restart ai-guardian-gateway
 [ -f "$DEST/console/acme/acme-dns.json" ] && systemctl enable -q --now guardian-cert.timer
 
 sleep 3
 IP=$(hostname -I | awk '{print $1}')
 echo
-echo "Installed. Console service: $(systemctl is-active ai-guardian-console)"
+echo "Installed. Console service: $(systemctl is-active ai-guardian-console) · collector gateway: $(systemctl is-active ai-guardian-gateway) (port 8444)"
 if [ -f "$DEST/console/setup-code" ]; then
   echo "First-time setup code: $(cat "$DEST/console/setup-code")"
 fi

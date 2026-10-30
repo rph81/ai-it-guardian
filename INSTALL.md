@@ -321,6 +321,11 @@ key; read the trade-off on that page). Step-by-step channel setup: [docs/SCHEDUL
 **Ticketing (optional, admins).** **Settings › Ticketing**: a ServiceNow integration user (itil role) to open an
 incident per finding, automatically after each AI assessment if you want. Setup: [docs/TICKETING.md](docs/TICKETING.md).
 
+**Collector gateway.** The installer also starts `ai-guardian-gateway` on port **8444**, as its own user
+(`guardian-gw`) with a strict systemd sandbox. It serves only on-site collectors and is reached from your LAN until
+you decide how to publish it. **Settings › Sites & collectors** adds customer sites and creates one-time enrollment
+codes. Details: [docs/ONSITE-COLLECTOR.md](docs/ONSITE-COLLECTOR.md).
+
 ---
 
 ## 9. Add people (optional)

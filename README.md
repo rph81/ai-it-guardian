@@ -9,6 +9,7 @@ You watch them work live and can talk to the Orchestrator that coordinates them.
 **The agents, what each one checks and which products it is modelled on: [docs/AGENTS.md](docs/AGENTS.md).**
 **Schedules, alerts and the fix plan: [docs/SCHEDULES-ALERTS.md](docs/SCHEDULES-ALERTS.md).**
 **Ticketing (ServiceNow): [docs/TICKETING.md](docs/TICKETING.md).**
+**On-site collector (sites at customers): [docs/ONSITE-COLLECTOR.md](docs/ONSITE-COLLECTOR.md).**
 
 Nothing on the network is changed. Agents have no shell: only fixed, non-intrusive checks, web requests without
 credentials, and public vulnerability lookups (NVD, CISA KEV, FIRST EPSS, endoflife.date).
@@ -87,6 +88,8 @@ exposure) and `previous` (the same issue in the previous assessment).
    **Wave 3 (now)**: Microsoft 365 connector with Microsoft 365 & Entra ID and Device fleet agents; Windows (WinRM)
    connector in Patch & configuration.
    **Ticketing**: ServiceNow incidents per finding, auto-created after runs, state synced into the Fix plan.
+   **On-site collector, phase A (now)**: sites, collector gateway, enrollment, heartbeat, revoke; collector with
+   pause / disconnect. Phase B: scans and AI assessments through the collector.
    **Next waves**: more ticketing systems (ConnectWise PSA, Autotask, HaloPSA, Jira Service Management); several customers (sites) in one console; Azure and AWS posture
    agents; compliance PDF with evidence uploads; RMM / patching integration and more fix recipes; import of other
    scanners' results; MITRE ATT&CK mapping; an on-site Guardian collector at the customer that connects back to the

@@ -10,6 +10,7 @@ operators unlock the vault with their passkey; viewers only read reports. On fir
 code in console/setup-code creates the first admin:  cat /opt/ai-guardian/console/setup-code
 """
 import asyncio
+import base64
 import collections
 import csv
 import ctypes
@@ -37,6 +38,7 @@ from guardian import chat
 from guardian import remediate
 from guardian import notify
 from guardian import ticketing
+from guardian import sitestore
 from guardian import connectors as conn
 from guardian.agents import ANALYSTS, LAYERS
 from guardian.controls import FRAMEWORKS, STATUSES as CONTROL_STATUSES
@@ -442,7 +444,7 @@ STATIC = {"/console.css": ("console.css", "text/css"), "/theme.js": ("theme.js",
           "/passkey.js": ("passkey.js", "text/javascript"), "/agents.js": ("agents.js", "text/javascript"),
           "/remediate.js": ("remediate.js", "text/javascript"), "/code.js": ("code.js", "text/javascript"),
           "/plan.js": ("plan.js", "text/javascript"), "/schedule.js": ("schedule.js", "text/javascript"),
-          "/ticketing.js": ("ticketing.js", "text/javascript")}
+          "/ticketing.js": ("ticketing.js", "text/javascript"), "/sites.js": ("sites.js", "text/javascript")}
 PAGES = {"/": "console.html", "/settings": "settings.html", "/signin": "signin.html"}
 
 
@@ -452,11 +454,15 @@ async def _startup():
     setup_code()
     asyncio.create_task(autolock_loop())
     asyncio.create_task(scheduler_loop())
+    try:
+        sites_db()                       # the gateway needs the job key before the first collector enrolls
+    except Exception as e:                                         # noqa: BLE001 - the console must start anyway
+        print(f"Sites database unavailable: {e}", file=sys.stderr, flush=True)
 
 
 @app.middleware("http")
 async def guard(request: Request, call_next):
-    if request.method == "POST":
+    if request.method not in ("GET", "HEAD"):
         # Cross-site requests can't set this header without a CORS preflight, which is never allowed.
         if request.headers.get("x-guardian") != "1":
             return JSONResponse({"detail": "Bad request"}, status_code=403)
@@ -1473,6 +1479,138 @@ def ticket_sync(run_id: str, request: Request):
         return sync_tickets(run_id)
     except ticketing.TicketError as e:
         raise HTTPException(502, str(e))
+
+
+# -- sites and on-site collectors (phase A) ------------------------------------------------------------
+GATEWAY_DATA = Path(os.environ.get("GUARDIAN_GATEWAY_DATA", BASE / "gateway"))
+GATEWAY_USER = "guardian-gw"
+JOB_KEY = STATE / "job-signing.key"
+_site_store = None
+_site_lock = threading.Lock()
+
+
+def job_pubkey():
+    """The key collectors use to check jobs (phase B). Its private half stays here; the gateway never has it."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    if not JOB_KEY.exists():
+        k = Ed25519PrivateKey.generate()
+        fd = os.open(JOB_KEY, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(k.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+    k = serialization.load_pem_private_key(JOB_KEY.read_bytes(), None)
+    raw = k.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def sites_db():
+    """The database shared with the gateway. It belongs to the gateway's user so both services can write it."""
+    global _site_store
+    with _site_lock:
+        if _site_store is None:
+            GATEWAY_DATA.mkdir(mode=0o700, exist_ok=True)
+            db = GATEWAY_DATA / "gateway.db"
+            if not db.exists():
+                os.close(os.open(db, os.O_WRONLY | os.O_CREAT, 0o600))
+            if os.geteuid() == 0:
+                try:
+                    import pwd
+                    pw = pwd.getpwnam(GATEWAY_USER)
+                    for p in (GATEWAY_DATA, db):
+                        os.chown(p, pw.pw_uid, pw.pw_gid)
+                except KeyError:
+                    pass
+            _site_store = sitestore.Store(db)
+            _site_store.set_meta("job_pubkey", job_pubkey())
+        return _site_store
+
+
+def gateway_info():
+    host = site()[0]
+    url = os.environ.get("GUARDIAN_GATEWAY_URL") or f"https://{host}:{os.environ.get('GUARDIAN_GATEWAY_PORT', '8444')}"
+    cert = GATEWAY_DATA / "tls-cert.pem"
+    try:
+        pin = sitestore.spki_pin(cert) if cert.exists() else None
+    except (OSError, ValueError):
+        pin = None
+    return {"url": url, "pin": pin}
+
+
+def site_or_404(site_id):
+    st = sites_db().site(site_id)
+    if not st:
+        raise HTTPException(404, "No such site")
+    return st
+
+
+@app.get("/api/sites")
+def sites_list(request: Request):
+    require(request, "operator")
+    return {"sites": sites_db().sites(), "gateway": gateway_info(), "now": time.time()}
+
+
+@app.get("/api/sites/{site_id}/events")
+def site_events(site_id: str, request: Request):
+    require(request, "operator")
+    site_or_404(site_id)
+    return {"events": sites_db().events(site_id)}
+
+
+class SiteBody(BaseModel):
+    name: str
+    customer: str = ""
+
+
+@app.post("/api/sites")
+def sites_add(body: SiteBody, request: Request):
+    sid, s, user = require(request, "admin")
+    name, customer = body.name.strip(), body.customer.strip()
+    if not 1 <= len(name) <= 80 or len(customer) > 120 or any(ord(c) < 32 for c in name + customer):
+        raise HTTPException(400, "Give the site a name (up to 80 characters)")
+    new = sites_db().add_site(name, customer)
+    vault.audit(user["email"], "site-added", f"{new} {name}")
+    return {"id": new}
+
+
+@app.delete("/api/sites/{site_id}")
+def sites_delete(site_id: str, request: Request):
+    sid, s, user = require(request, "admin")
+    st = site_or_404(site_id)
+    if site_id == sitestore.LOCAL_SITE:
+        raise HTTPException(400, "This network can't be removed")
+    sites_db().delete_site(site_id)
+    vault.audit(user["email"], "site-deleted", f"{site_id} {st['name']} (its collector is revoked)")
+    return {"ok": True}
+
+
+@app.post("/api/sites/{site_id}/enroll")
+def sites_enroll(site_id: str, request: Request):
+    sid, s, user = require_fresh(request)
+    st = site_or_404(site_id)
+    if site_id == sitestore.LOCAL_SITE:
+        raise HTTPException(400, "This network is assessed by the server itself")
+    code, expires = sites_db().create_code(site_id, user["email"])
+    s["fresh_at"] = 0
+    vault.audit(user["email"], "collector-code", f"{site_id} {st['name']}: one-time enrollment code, valid 24 h")
+    return {"code": code, "expires": expires, **gateway_info()}
+
+
+@app.delete("/api/sites/{site_id}/enroll")
+def sites_enroll_cancel(site_id: str, request: Request):
+    sid, s, user = require(request, "admin")
+    site_or_404(site_id)
+    sites_db().cancel_code(site_id)
+    vault.audit(user["email"], "collector-code-cancelled", site_id)
+    return {"ok": True}
+
+
+@app.post("/api/sites/{site_id}/revoke")
+def sites_revoke(site_id: str, request: Request):
+    sid, s, user = require(request, "admin")
+    st = site_or_404(site_id)
+    n = sites_db().revoke(site_id)
+    vault.audit(user["email"], "collector-revoked", f"{site_id} {st['name']}")
+    return {"revoked": n}
 
 
 # -- console --------------------------------------------------------------------------------------------

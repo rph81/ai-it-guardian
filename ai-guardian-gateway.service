@@ -1,0 +1,44 @@
+[Unit]
+Description=AI IT Guardian collector gateway (the only service meant to face the internet)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=guardian-gw
+Group=guardian-gw
+WorkingDirectory=/opt/ai-guardian
+EnvironmentFile=-/etc/default/ai-guardian
+Environment=GUARDIAN_GATEWAY_DATA=/opt/ai-guardian/gateway
+ExecStart=/opt/ai-guardian/venv/bin/python /opt/ai-guardian/gateway.py
+Restart=on-failure
+RestartSec=5
+UMask=0077
+LimitCORE=0
+# Nothing but its own data folder is writable, and the console's state, runs and .env are invisible to it.
+ReadWritePaths=/opt/ai-guardian/gateway
+InaccessiblePaths=-/opt/ai-guardian/console -/opt/ai-guardian/runs -/opt/ai-guardian/.env
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+
+[Install]
+WantedBy=multi-user.target

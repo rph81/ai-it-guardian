@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Collector Status Page</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Saira+Semi+Condensed:wght@400;500;600&display=swap">
+<style>
+:root{--bg:#121311;--bg2:#161815;--panel:#1a1c18;--panel2:#20231e;--line:#2d3029;--line2:#3a3e35;--text:#ecede6;--muted:#8e9286;--dim:#62665c;
+  --accent:#f07c3e;--ok:#a9c47c;--warn:#e6b450;--high:#f07c3e;--crit:#ef5a4c;--low:#7fb7c9;--info:#a993e6;--new:#7fd1b9;--on:#16120d;
+  --head:"Chakra Petch",sans-serif;--body:"Saira Semi Condensed",sans-serif;--mono:ui-monospace,Menlo,monospace}
+@media (prefers-color-scheme:light){:root{--bg:#f2f1ea;--bg2:#ebe9e0;--panel:#f9f8f3;--panel2:#fff;--line:#dcd9cd;--line2:#c8c4b5;--text:#1c1d18;--muted:#686a5f;--dim:#9a9b8f;
+  --accent:#d35f1f;--ok:#5a8429;--warn:#b7801a;--high:#d35f1f;--crit:#cf3a2c;--low:#3f7f96;--info:#7458cc;--new:#1f8a6d;--on:#fff}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 var(--body)}
+.banner{background:var(--accent);color:var(--on);font:600 12px var(--head);letter-spacing:.06em;text-align:center;padding:7px;text-transform:uppercase}
+main{max-width:1240px;margin:0 auto;padding:24px 16px 60px}
+.crumb{font:600 11px var(--head);letter-spacing:.18em;color:var(--muted);text-transform:uppercase}.crumb b{color:var(--accent)}
+h1{font:700 clamp(28px,4.4vw,48px)/1.05 var(--head);text-transform:uppercase;margin:12px 0 6px}
+.sub{color:var(--muted);margin:0;max-width:820px}
+h2{font:600 clamp(18px,2vw,24px) var(--head);text-transform:uppercase;letter-spacing:.03em;margin:4px 0}
+h3{font:600 15.5px var(--head);margin:6px 0 4px}
+.kicker{font:600 10.5px var(--head);letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.note{font-size:13px;color:var(--muted);margin:6px 0 0}
+.section{position:relative;border:1px solid var(--line);background:linear-gradient(180deg,var(--panel),var(--bg2));padding:20px 22px;margin-top:20px}
+.section::before{content:"";position:absolute;left:-1px;top:-1px;width:16px;height:16px;border-left:2px solid var(--accent);border-top:2px solid var(--accent)}
+.tag{display:inline-block;font:600 10px var(--head);letter-spacing:.12em;text-transform:uppercase;padding:3px 7px;border:1px solid var(--line2);color:var(--muted);white-space:nowrap}
+.tag.new{color:var(--new);border-color:var(--new)}.tag.crit{color:var(--crit);border-color:var(--crit)}.tag.high{color:var(--high);border-color:var(--high)}
+.tag.med{color:var(--warn);border-color:var(--warn)}.tag.ok{color:var(--ok);border-color:var(--ok)}.tag.info{color:var(--info);border-color:var(--info)}.tag.low{color:var(--low);border-color:var(--low)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-top:14px}
+.card{border:1px solid var(--line2);background:var(--panel2);padding:14px;position:relative}
+.card.new{border-color:color-mix(in srgb,var(--new) 60%,var(--line2))}
+.card .what{font-size:13.5px;margin:6px 0}
+.card dl{display:grid;grid-template-columns:86px minmax(0,1fr);gap:4px 10px;font-size:12.5px;margin:8px 0 0}
+.card dt{font:600 10px var(--head);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding-top:2px}.card dd{margin:0}
+.card ul{margin:6px 0 0;padding-left:18px;font-size:12.5px}.card li{margin:2px 0}
+.pipe{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:0;margin-top:14px}
+@media (max-width:900px){.pipe{grid-template-columns:1fr 1fr}}
+.st{border-top:3px solid var(--line2);padding:9px 10px 0 0;font:600 11px var(--head);letter-spacing:.08em;text-transform:uppercase}
+.st small{display:block;font:500 12px var(--body);letter-spacing:0;text-transform:none;color:var(--muted);margin-top:3px}
+.st.n{border-color:var(--new)}.st.n b{color:var(--new)}
+.two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}
+@media (max-width:900px){.two{grid-template-columns:1fr}}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+.tw{overflow-x:auto}table.wide{min-width:760px}
+th{font:600 10px var(--head);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);text-align:left;padding:8px;border-bottom:1px solid var(--line2)}
+td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+.f{border:1px solid var(--line2);border-left:3px solid var(--crit);background:var(--panel2);padding:14px 16px;margin-top:12px}
+.f.h{border-left-color:var(--high)}
+.prio{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);margin-top:10px}
+.prio div{background:var(--panel);padding:9px}.prio b{display:block;font:700 18px var(--head)}.prio span{font:600 9.5px var(--head);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.path{display:flex;flex-wrap:wrap;gap:0;margin-top:12px;align-items:stretch}
+.step{flex:1;min-width:150px;border:1px solid var(--line2);background:var(--bg2);padding:10px;font-size:12.5px;position:relative}
+.step+.step{margin-left:18px}
+.step+.step::before{content:"\25B6";position:absolute;left:-15px;top:50%;transform:translateY(-50%);color:var(--accent);font-size:11px}
+.step b{font:600 11px var(--head);letter-spacing:.06em;text-transform:uppercase;display:block;margin-bottom:3px}
+.step.choke{border-color:var(--accent);box-shadow:inset 0 -2px 0 var(--accent)}
+.ctl{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;margin-top:12px}
+.ctl div{border:1px solid var(--line2);padding:8px;font-size:12px;background:var(--panel2)}
+.ctl div b{display:block;font:600 11px var(--head)}
+.ctl .m{border-left:3px solid var(--ok)}.ctl .p{border-left:3px solid var(--warn)}.ctl .g{border-left:3px solid var(--crit)}.ctl .na{border-left:3px solid var(--dim);color:var(--muted)}
+.bar{height:8px;background:var(--line);margin-top:6px;display:flex}.bar i{display:block;height:100%}
+.btn{font:600 12px var(--head);letter-spacing:.04em;color:var(--text);background:var(--panel);border:1px solid var(--line2);padding:7px 12px;cursor:pointer}
+.btn.go{background:var(--accent);border-color:var(--accent);color:var(--on)}
+select,input{border:1px solid var(--line2);background:var(--bg2);color:var(--text);padding:7px 9px;font:13px var(--body)}
+.wave{border-left:3px solid var(--accent);padding:4px 0 4px 14px;margin-top:14px}
+.wave h3{margin:0}
+.q{border:1px dashed var(--accent);padding:12px 14px;margin-top:20px;font-size:13.5px}
+.q b{font-family:var(--head);color:var(--accent)}
+code{font:12px var(--mono);background:var(--bg2);border:1px solid var(--line);padding:1px 5px}
+
+.flow{display:grid;grid-template-columns:minmax(0,1fr) 140px minmax(0,1fr);gap:0;align-items:stretch;margin-top:14px}
+@media (max-width:820px){.flow{grid-template-columns:1fr}.arrow{min-height:70px}}
+.box{border:1px solid var(--line2);background:var(--panel2);padding:14px}
+.box ul{margin:8px 0 0;padding-left:18px;font-size:13px}
+.arrow{display:flex;flex-direction:column;justify-content:center;align-items:center;font:600 10.5px var(--head);letter-spacing:.1em;text-transform:uppercase;color:var(--accent);text-align:center;gap:4px}
+.arrow i{font-style:normal;font-size:20px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok);margin-right:6px}
+.dot.warn{background:var(--warn)}.dot.off{background:var(--dim)}
+.btn{font:600 11px var(--head);letter-spacing:.1em;text-transform:uppercase;border:1px solid var(--line2);background:var(--panel);color:var(--text);padding:8px 12px;cursor:default}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on)}.btn.danger{color:var(--crit);border-color:var(--crit)}
+.code{font:12.5px var(--mono);background:var(--bg);border:1px solid var(--line2);padding:12px;overflow-x:auto;white-space:pre;margin-top:8px}
+.field{display:grid;gap:4px;margin-top:10px}.field label{font:600 10px var(--head);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.input{border:1px solid var(--line2);background:var(--bg);padding:8px 10px;font-size:14px}
+.steps{counter-reset:s;list-style:none;padding:0;margin:10px 0 0}.steps li{counter-increment:s;padding:6px 0 6px 34px;position:relative;font-size:13.5px}
+.steps li::before{content:counter(s);position:absolute;left:0;top:5px;width:22px;height:22px;border:1px solid var(--accent);color:var(--accent);font:600 12px var(--head);display:grid;place-items:center}
+.picker{display:flex;align-items:center;gap:10px;border:1px solid var(--line2);background:var(--panel2);padding:8px 12px;width:max-content;max-width:100%}
+.mini{font-size:12.5px;color:var(--muted)}
+
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:14px}
+.brand{font:700 18px var(--head);text-transform:uppercase;letter-spacing:.04em}.brand small{display:block;font:500 12px var(--body);color:var(--muted);text-transform:none;letter-spacing:0}
+.stat{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);margin-top:14px}
+@media (max-width:820px){.stat{grid-template-columns:1fr 1fr}}
+.stat div{background:var(--panel);padding:12px}.stat b{display:block;font:700 22px var(--head)}.stat span{font:600 9.5px var(--head);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.big{display:flex;align-items:center;gap:14px;flex-wrap:wrap}.big .dot{width:14px;height:14px}
+.big h2{margin:0}
+.seg{display:inline-flex;border:1px solid var(--line2)}.seg span{font:600 10.5px var(--head);letter-spacing:.1em;text-transform:uppercase;padding:6px 10px;color:var(--muted)}.seg span.on{background:var(--panel2);color:var(--text)}
+.can li{list-style:none;padding-left:0}.can{padding:0}.can li::before{content:"\2713  ";color:var(--ok);font-weight:700}.cant li::before{content:"\2715  ";color:var(--crit)}
+td.mono,.mono{font-family:var(--mono);font-size:12.5px}
+.modal{border:1px solid var(--warn);background:var(--panel2);padding:16px;margin-top:12px}
+</style></head><body>
+<div class="banner">Preview · customer side · https://10.20.0.50:8600 (on the customer's LAN) · not built</div>
+<main>
+<div class="top">
+ <div class="brand">Guardian Site Collector<small>gc-zrh01 · Muster AG, Zürich office · v1.0.0 (VM appliance)</small></div>
+ <div class="row"><span class="mini">Signed in as <b>it-admin</b> (local account)</span><span class="btn">Sign out</span></div>
+</div>
+
+<div class="section">
+ <div class="row" style="justify-content:space-between">
+  <div class="big"><span class="dot"></span><div><div class="kicker">Status</div><h2>Connected · idle</h2></div></div>
+  <div class="row"><span class="btn">Pause collector</span><span class="btn danger">Disconnect</span></div>
+ </div>
+ <p class="note">Managed by <b>Guardian · collect.hadife.com</b> (your IT partner). Outbound HTTPS only; this collector accepts no connections from the internet. <b>Pause</b> keeps the connection but stops all work; your IT partner sees "Paused by customer". <b>Disconnect</b> closes the connection to Guardian completely: no work, no status, nothing sent until you press <b>Connect</b>. Neither can be undone from your IT partner's side.</p>
+ <div class="stat">
+  <div><b>12 s</b><span>Last contact with server</span></div>
+  <div><b>148</b><span>Jobs done · last 30 days</span></div>
+  <div><b>1</b><span>Refused · out of scope</span></div>
+  <div><b>29 Oct</b><span>Last assessment</span></div>
+ </div>
+</div>
+
+<div class="two">
+<div class="section"><div class="kicker">Set here, at install</div><h2>Scope</h2>
+ <p class="note">Only these networks may be scanned. The Guardian server can't change this list; only an admin on this page can.</p>
+ <div class="tw"><table style="margin-top:8px"><tbody>
+  <tr><td class="mono">10.20.0.0/22</td><td>Office LAN</td></tr>
+  <tr><td class="mono">10.20.8.0/24</td><td>Servers</td></tr>
+ </tbody></table></div>
+ <div class="row" style="margin-top:10px"><span class="btn">Edit scope</span><span class="mini">needs the local admin password</span></div>
+ <h3 style="margin-top:16px">Maintenance windows</h3>
+ <p class="note" style="margin-top:2px">Scans allowed: Mon–Fri 18:00–07:00, weekends all day. Re-checks of a single host: any time.</p>
+</div>
+<div class="section"><div class="kicker">Transparency</div><h2>What this collector can do</h2>
+ <div class="two" style="gap:10px">
+  <ul class="can"><li>Find devices on the networks above</li><li>Check open ports, services, TLS and web servers</li><li>Read settings from AD, Windows, Linux, Synology, Proxmox with the read-only accounts you gave</li><li>Send results to Guardian over HTTPS</li></ul>
+  <ul class="can cant"><li>Run commands you didn't approve</li><li>Change settings or fix anything</li><li>Scan outside the scope</li><li>Accept connections from the internet</li><li>Keep results after they're delivered</li></ul>
+ </div>
+ <h3 style="margin-top:12px">Accounts it uses</h3>
+ <div class="tw"><table><tbody>
+  <tr><td>Active Directory</td><td class="mono">svc-guardian-ro</td><td><span class="tag ok">read-only</span></td></tr>
+  <tr><td>Windows (2 hosts)</td><td class="mono">svc-guardian-ro</td><td><span class="tag ok">read-only</span></td></tr>
+  <tr><td>Synology NAS</td><td class="mono">guardian-ro</td><td><span class="tag ok">read-only</span></td></tr>
+ </tbody></table></div>
+ <p class="note">Passwords are sealed to this collector; neither this page nor the Guardian server shows them.</p>
+</div></div>
+
+<div class="section"><div class="kicker">The three states, as shown at the top of this page</div><h2>Connected · Paused · Disconnected</h2>
+ <div class="grid">
+  <div class="card"><div class="big"><span class="dot"></span><h3 style="margin:0">Connected</h3></div>
+   <p class="what">Talks to Guardian and runs jobs within the scope and maintenance windows.</p>
+   <div class="row"><span class="btn">Pause collector</span><span class="btn danger">Disconnect</span></div>
+   <p class="note">Your IT partner sees: <b>Online</b></p></div>
+  <div class="card"><div class="big"><span class="dot warn"></span><h3 style="margin:0">Paused</h3></div>
+   <p class="what">Still connected, but refuses all jobs. Use it for short breaks (month-end, a migration).</p>
+   <div class="row"><span class="btn primary">Resume</span><span class="btn danger">Disconnect</span></div>
+   <p class="note">Your IT partner sees: <b>Paused by customer</b> + your reason; still sees that the collector is healthy.</p></div>
+  <div class="card"><div class="big"><span class="dot off"></span><h3 style="margin:0">Disconnected</h3></div>
+   <p class="what">No connection to Guardian at all: nothing is sent or received. Running jobs stop. The certificate stays, so reconnecting needs no new enrollment.</p>
+   <div class="row"><span class="btn primary">Connect</span></div>
+   <p class="note">Your IT partner sees: <b>Disconnected by customer</b> (the last message before it closed) + your reason, and when.</p></div>
+ </div>
+ <div class="modal"><h3>Disconnect from Guardian?</h3><p class="note">Running jobs stop and the connection to collect.hadife.com closes. Nothing is sent or received until someone presses Connect on this page. Scheduled assessments are skipped and your IT partner is told why.</p>
+  <div class="field"><label>Reason (optional, sent to your IT partner before disconnecting)</label><div class="input">Network maintenance this weekend</div></div>
+  <div class="field"><label>Reconnect automatically (optional)</label><div class="input">Never (stay disconnected until someone presses Connect) ▾</div></div>
+  <div class="row" style="margin-top:12px"><span class="btn danger">Disconnect</span><span class="btn">Cancel</span></div></div>
+</div>
+
+<div class="section">
+ <div class="row" style="justify-content:space-between"><div><div class="kicker">Every job, as received and run</div><h2>Activity log</h2></div>
+  <div class="row"><div class="seg"><span class="on">All</span><span>Scans</span><span>Checks</span><span>Refused</span></div><span class="btn">Export CSV</span></div></div>
+ <div class="tw"><table class="wide" style="margin-top:12px"><thead><tr><th>Time</th><th>Job</th><th>Target</th><th>Asked by</th><th>Result</th><th>Duration</th></tr></thead><tbody>
+  <tr><td>30 Oct 16:10</td><td>connection</td><td class="mono">collect.hadife.com</td><td>it-admin (this page)</td><td><span class="tag med">connected again</span></td><td>—</td></tr>
+  <tr><td>30 Oct 16:08</td><td>connection</td><td class="mono">collect.hadife.com</td><td>it-admin (this page)</td><td><span class="tag med">disconnected · "test"</span></td><td>—</td></tr>
+  <tr><td>30 Oct 16:06</td><td>probe · smb-security-mode</td><td class="mono">192.168.1.10:445</td><td>Network agent · run 1030-1600</td><td><span class="tag crit">refused · out of scope</span></td><td>—</td></tr>
+  <tr><td>30 Oct 16:05</td><td>windows_check · firewall</td><td class="mono">DC01 (10.20.8.10)</td><td>Patch &amp; config agent</td><td><span class="tag ok">done</span></td><td>3.1 s</td></tr>
+  <tr><td>30 Oct 16:05</td><td>tls_inspect</td><td class="mono">10.20.1.15:443</td><td>Web agent</td><td><span class="tag ok">done</span></td><td>0.4 s</td></tr>
+  <tr><td>30 Oct 16:04</td><td>probe · ssl-enum-ciphers</td><td class="mono">10.20.1.15:443</td><td>Network agent</td><td><span class="tag ok">done</span></td><td>6.8 s</td></tr>
+  <tr><td>30 Oct 16:02</td><td>ad_query · stale_accounts</td><td class="mono">muster.local</td><td>Active Directory agent</td><td><span class="tag ok">done</span></td><td>1.2 s</td></tr>
+  <tr><td>30 Oct 16:00</td><td>discover</td><td class="mono">10.20.0.0/22, 10.20.8.0/24</td><td>Scheduled scan</td><td><span class="tag ok">done · 41 devices</span></td><td>3 min 12 s</td></tr>
+  <tr><td>30 Oct 10:10</td><td>discover</td><td class="mono">10.20.0.0/22</td><td>Manual (j.doe@partner)</td><td><span class="tag med">held · outside window</span></td><td>runs at 18:00</td></tr>
+ </tbody></table></div>
+ <p class="note">The log stays on this collector (90 days) and is signed so entries can't be removed unnoticed.</p>
+</div>
+
+<div class="two">
+<div class="section"><div class="kicker">Connection</div><h2>Server &amp; certificate</h2>
+ <div class="tw"><table style="margin-top:8px"><tbody>
+  <tr><td class="mini">Server</td><td class="mono">collect.hadife.com:443</td></tr>
+  <tr><td class="mini">Server key fingerprint</td><td class="mono">SHA256:9f2c…a71e</td></tr>
+  <tr><td class="mini">Collector certificate</td><td>valid until 29 Oct 2027</td></tr>
+  <tr><td class="mini">Outbound from</td><td class="mono">10.20.0.50 → 443/tcp only</td></tr>
+  <tr><td class="mini">Updates</td><td>v1.0.0 · signed releases · auto-install Sun 03:00</td></tr>
+ </tbody></table></div>
+</div>
+<div class="section"><div class="kicker">After pressing Pause</div><h2>Pause confirmation</h2>
+ <div class="modal"><h3>Pause the collector?</h3><p class="note">Running jobs stop now and no new work is accepted until someone resumes it here. Guardian (your IT partner) is told it's paused by you.</p>
+  <div class="field"><label>Reason (optional, shared with your IT partner)</label><div class="input">Month-end closing, please wait until Monday</div></div>
+  <div class="row" style="margin-top:12px"><span class="btn danger">Pause</span><span class="btn">Cancel</span></div></div>
+ <h3 style="margin-top:14px">Remove completely</h3>
+ <p class="note" style="margin-top:2px">Uninstall the VM / app: the certificate and sealed passwords are destroyed with it. Your IT partner can also revoke it from their side.</p>
+</div></div>
+</main></body></html>
