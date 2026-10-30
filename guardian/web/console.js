@@ -164,6 +164,15 @@ function changeText(ch) {
   return against ? `Since ${fmtRun(against)}: ${bits.length ? bits.join(" · ") : "no changes"}` : "";
 }
 
+// the report is a sandboxed page: it gets the account's theme and light/dark mode in its address
+function themeHash() { const t = Theme.get(); return `#theme=${t.theme}&scheme=${t.scheme}`; }
+Theme.onChange(() => {
+  for (const id of ["frame", "newtab"]) {
+    const e = $(id), attr = id === "frame" ? "src" : "href", u = e.getAttribute(attr);
+    if (u) e.setAttribute(attr, u.split("#")[0] + themeHash());
+  }
+});
+
 function openRun(id, hasReport) {
   current = id;
   loadOverview(id);
@@ -171,7 +180,7 @@ function openRun(id, hasReport) {
   $("current").textContent = `run ${fmtRun(id)}`;
   if (typeof Agents !== "undefined") Agents.show(id);
   if (typeof Plan !== "undefined") Plan.show(id);
-  const url = `/api/runs/${id}/report`;
+  const url = `/api/runs/${id}/report` + themeHash();
   if (hasReport) {
     $("frame").src = url; $("frame-empty").classList.add("hidden");
     $("newtab").href = url; $("newtab").classList.remove("hidden");

@@ -428,7 +428,7 @@ app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 PAGE_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
             "frame-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 REPORT_CSP = ("sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; "
-              "style-src 'unsafe-inline'; img-src data:")
+              "style-src 'unsafe-inline'; img-src data:; font-src data:")
 STATIC = {"/console.css": ("console.css", "text/css"), "/theme.js": ("theme.js", "text/javascript"), "/console.js": ("console.js", "text/javascript"),
           "/settings.js": ("settings.js", "text/javascript"), "/signin.js": ("signin.js", "text/javascript"),
           "/passkey.js": ("passkey.js", "text/javascript"), "/agents.js": ("agents.js", "text/javascript"),
