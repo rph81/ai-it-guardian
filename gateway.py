@@ -40,6 +40,8 @@ CERT, KEY = DATA / "tls-cert.pem", DATA / "tls-key.pem"
 TRUSTED_PROXY = os.environ.get("GUARDIAN_GATEWAY_TRUSTED_PROXY", "")   # set only when a proxy/tunnel sits in front
 
 MAX_BODY = 16 * 1024
+MAX_RESULT_BODY = 9 * 2**20          # results only: compressed scan output (the console caps what it accepts too)
+MAX_RESULT_B64 = 8 * 2**20 + 2**20 // 3
 CLOCK_SKEW = 120                     # seconds a signed request may be early or late
 WAIT = 25                            # long-poll for jobs
 ENROLL_FAILS, ENROLL_LOCK = 5, 3600  # failed enrollments per address before a one-hour lockout
@@ -94,6 +96,9 @@ class Empty(Strict):
 
 class ResultBody(Strict):
     job: str = Field(pattern=r"^j_[0-9a-f]{16}$")
+    status: Literal["done", "failed", "refused"]
+    error: Optional[str] = Field(default=None, max_length=500, pattern=r"^[^\x00-\x1f\x7f]*$")
+    data: Optional[str] = Field(default=None, max_length=MAX_RESULT_B64, pattern=r"^[A-Za-z0-9_-]*$")
 
 
 # -- small helpers ------------------------------------------------------------------------------------------------
@@ -145,16 +150,16 @@ def client_ip(request):
     return peer
 
 
-async def read_body(request):
+async def read_body(request, limit=MAX_BODY):
     if request.url.query:
         raise Fail(404)
     cl = request.headers.get("content-length")
-    if cl is not None and (not cl.isdigit() or int(cl) > MAX_BODY):
+    if cl is not None and (not cl.isdigit() or int(cl) > limit):
         raise Fail(413)
     chunks, size = [], 0
     async for chunk in request.stream():
         size += len(chunk)
-        if size > MAX_BODY:
+        if size > limit:
             raise Fail(413)
         chunks.append(chunk)
     return b"".join(chunks)
@@ -272,22 +277,29 @@ async def jobs(request, ip):
     body = await read_body(request)
     c = authenticate(request, body)
     parse(Empty, body)
-    # Phase A has no job types yet: hold the request like a real long poll, then answer "nothing to do".
+    # Long poll: hand out queued jobs (signed by the console; the gateway only relays them) as soon as there are any.
     end = time.monotonic() + WAIT
     while time.monotonic() < end and not await request.is_disconnected():
-        await asyncio.sleep(1)
         cur = store.collector(c["id"])
         if not cur or cur["status"] != "active":
             raise Fail(401)
+        if cur["state"] == "connected":
+            out = store.take_jobs(c["id"])
+            if out:
+                log.info("handed %d job(s) to %s", len(out), c["id"])
+                return reply(200, {"jobs": out})
+        await asyncio.sleep(1)
     return reply(200, {"jobs": []})
 
 
 @guarded
 async def result(request, ip):
-    body = await read_body(request)
-    authenticate(request, body)
-    parse(ResultBody, body)
-    raise Fail(404)                                                     # no jobs are issued before phase B
+    body = await read_body(request, MAX_RESULT_BODY)
+    c = authenticate(request, body)
+    b = parse(ResultBody, body)
+    if not store.finish_job(c["id"], b.job, b.status, b.data if b.status == "done" else None, b.error):
+        raise Fail(404)                                                 # not a job this collector was given, or already answered
+    return reply(200, {"ok": True})
 
 
 async def not_found(request, exc):

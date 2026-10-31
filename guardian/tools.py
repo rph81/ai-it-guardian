@@ -84,6 +84,20 @@ class Toolbox:
         self.agent = agent_name
         self.network = graph.data["site"]["network"]
         self.allowed_ips = set(allowed_ips) if allowed_ips else None
+        self.remote = graph.data["site"] if graph.data["site"].get("remote") else None    # a site behind an on-site collector
+
+    def _remote(self, kind, params, timeout=480):
+        """Run a network check at the customer through the collector: a signed job, then wait for its answer."""
+        from pathlib import Path
+        from . import jobs, sitestore
+        base = Path(__file__).resolve().parent.parent
+        db = Path(os.environ.get("GUARDIAN_GATEWAY_DATA", base / "gateway")) / "gateway.db"
+        store = sitestore.Store(db)
+        key = Path(os.environ.get("GUARDIAN_STATE_DIR", base / "console")) / "job-signing.key"
+        jid = jobs.submit(store, key, self.remote["id"], self.remote["collector"], kind, params,
+                          f"agent:{self.agent}", os.path.basename(self.g.run_dir))
+        self.g.log(self.agent, f"{kind} through the collector ({jid})")
+        return jobs.wait(store, jid, timeout)
 
     # -- schemas --------------------------------------------------------------
     def schemas(self, names):
@@ -350,6 +364,10 @@ class Toolbox:
             return {"error": f"{type(e).__name__}: {e}"[:400]}
 
     def _check_ip(self, ip):
+        if self.remote:
+            if not any(netutil.in_scope(ip, n.strip()) for n in self.network.split(",")):
+                raise ValueError(f"{ip} is outside the site's networks {self.network}")
+            return
         if not netutil.in_scope(ip, self.network):
             raise ValueError(f"{ip} is outside the assessed network {self.network}")
         if ip == self.g.data["site"].get("collector_ip"):
@@ -365,6 +383,12 @@ class Toolbox:
 
     def t_probe(self, ip, ports, checks, udp=False):
         self._check_ip(ip)
+        if self.remote:
+            xml_out = self._remote("probe", {"ip": ip, "ports": [int(p) for p in ports][:32], "scripts": [PROBES[c] for c in checks][:8],
+                                             "udp": bool(udp)}).decode("utf-8", "replace")
+            parse_nmap_xml(self.g, xml_out, f"probe:{self.agent}")
+            a = self.g.data["assets"].get(ip, {})
+            return [p for p in a.get("ports", []) if p["port"] in ports]
         scripts = ",".join(PROBES[c] for c in checks)
         cmd = ["nmap", "-Pn", "-n", "-sU" if udp else "-sT", "-sV", "--version-light",
                "-p", ",".join(str(int(p)) for p in ports), "--script", scripts,
@@ -378,10 +402,14 @@ class Toolbox:
     def t_http_get(self, url, method="GET"):
         host = urllib.parse.urlparse(url).hostname
         self._check_ip(host)
+        if self.remote:
+            return json.loads(self._remote("http", {"url": url, "method": method if method in ("GET", "HEAD") else "GET"}, 120))
         return netutil.http_fetch(url, method=method)
 
     def t_tls_inspect(self, ip, port):
         self._check_ip(ip)
+        if self.remote:
+            return json.loads(self._remote("tls", {"ip": ip, "port": int(port)}, 120))
         return netutil.tls_inspect(ip, port)
 
     def t_cve_lookup(self, cpe=None, keywords=None):

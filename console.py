@@ -17,6 +17,7 @@ import ctypes
 import hashlib
 import hmac
 import io
+import ipaddress
 import json
 import os
 import re
@@ -28,6 +29,7 @@ import sys
 import threading
 import time
 import urllib.parse
+import urllib.request
 import zipfile
 from pathlib import Path
 from typing import Optional
@@ -46,6 +48,7 @@ from guardian import siem
 from guardian import decoys
 from guardian import webscan
 from guardian import imagescan
+from guardian import jobs
 from guardian import sitestore
 from guardian import evidence
 from guardian import comppdf
@@ -439,7 +442,8 @@ async def run_job(cmd, extra_env, stdin=None):
 # -- run listing --------------------------------------------------------------------------------
 def run_summary(d):
     info = {"id": d.name, "has_graph": (d / "graph.json").exists(), "has_report": (d / "report.html").exists(),
-            "devices": None, "score": None, "grade": None, "counts": {}, "analysed": False, "site": run_site(d)}
+            "devices": None, "score": None, "grade": None, "counts": {}, "analysed": False, "site": run_site(d),
+            "remote": (_remote(d) or {}).get("state")}
     if info["has_graph"]:
         try:
             g = json.loads((d / "graph.json").read_text())
@@ -503,6 +507,7 @@ async def _startup():
     setup_code()
     asyncio.create_task(autolock_loop())
     asyncio.create_task(scheduler_loop())
+    asyncio.create_task(remote_loop())
     try:
         sites_db()                       # the gateway needs the job key before the first collector enrolls
     except Exception as e:                                         # noqa: BLE001 - the console must start anyway
@@ -1374,9 +1379,43 @@ def unattended_key():
         return None
 
 
+def site_schedule(site_id):
+    raw = site_settings(site_id).get("schedule") or {}
+    return {k: {**DEFAULT_SCHEDULE[k], **raw.get(k, {})} for k in DEFAULT_SCHEDULE} | {"last": raw.get("last", {})}
+
+
+def remote_scheduled_tick(now=None):
+    """Scheduled scans of remote sites through their collectors (one site at a time keeps the gateway calm)."""
+    now = now or time.time()
+    for x in sites_db().sites():
+        if x["id"] == LOCAL or not x.get("collector"):
+            continue
+        cfg = site_schedule(x["id"])
+        due = None
+        for kind in ("full", "quick"):
+            t = _target(cfg[kind], now)
+            if t and t <= now < t + 3600 and cfg["last"].get(kind, 0) < t:
+                due = due or kind
+                cfg["last"][kind] = now
+        if not due:
+            continue
+        sc = site_settings(x["id"])
+        sc["schedule"] = {k: cfg[k] for k in ("quick", "full")} | {"last": cfg["last"]}
+        save_site_settings(x["id"], sc)
+        try:
+            run = remote_start(x["id"], "Schedule", ai=due == "full")
+            vault.audit("system", "scheduled-remote-run", f"{x['id']} {x['name']}: {due} ({run})")
+        except HTTPException as e:
+            vault.audit("system", "scheduled-remote-skipped", f"{x['id']} {x['name']}: {e.detail}")
+
+
 async def scheduler_loop():
     while True:
         await asyncio.sleep(60)
+        try:
+            remote_scheduled_tick()
+        except Exception as e:                                      # noqa: BLE001 - keep the scheduler alive
+            print(f"[scheduler] remote: {e}", flush=True)
         try:
             scheduled_tick()
         except Exception as e:                                      # noqa: BLE001 - keep the scheduler alive
@@ -2805,6 +2844,166 @@ def site_vdp_action(site_id: str, rid: str, body: VdpAction, request: Request):
     return rep
 
 
+# -- remote sites through the on-site collector (phase B) -------------------------------------------------------------
+REMOTE_FILE = "remote.json"
+CLOUD_TYPES = ("m365", "azure", "aws", "ninjaone", "salesforce", "sap_btp")      # reachable from here; the rest need the collector
+
+
+def _remote(d):
+    try:
+        return json.loads((d / REMOTE_FILE).read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def _remote_save(d, r):
+    tmp = d / (REMOTE_FILE + ".tmp")
+    tmp.write_text(json.dumps(r))
+    os.replace(tmp, d / REMOTE_FILE)
+
+
+def remote_collector(site_id):
+    c = sites_db().active_collector(site_id)
+    if not c:
+        raise HTTPException(400, "This site has no collector yet: install one (Settings › Sites & collectors)")
+    if c["state"] != "connected" or time.time() - (c["last_seen"] or 0) > 180:
+        raise HTTPException(409, f"The collector is {c['state'] if c['state'] != 'connected' else 'not reachable'} at the customer")
+    return c
+
+
+def remote_start(site_id, by, ai=False):
+    """New run for a remote site: discover through the collector; remote_tick takes it from there."""
+    st = site_or_404(site_id)
+    c = remote_collector(site_id)
+    scope = json.loads(c["scope"] or "[]")
+    RUNS.mkdir(exist_ok=True)
+    run_id = time.strftime("%Y%m%d-%H%M%S")
+    while (RUNS / run_id).exists():
+        time.sleep(1)
+        run_id = time.strftime("%Y%m%d-%H%M%S")
+    d = RUNS / run_id
+    d.mkdir(mode=0o750)
+    (d / SITE_FILE).write_text(site_id)
+    g = Graph(str(d))
+    g.data["site"] = {"name": " · ".join(x for x in (st["customer"], st["name"]) if x), "id": site_id, "network": ", ".join(scope),
+                      "remote": True, "collector": c["id"], "collector_host": c["host"]}
+    g.agent("collector", status="working", activity="Discovering devices through the on-site collector")
+    g.event("start", "collector", "collector", f"Discovery through the collector at {st['name']}")
+    g.save()
+    jid = jobs.submit(sites_db(), JOB_KEY, site_id, c["id"], "discover", {"networks": scope}, by, run_id)
+    _remote_save(d, {"state": "discover", "jobs": {jid: "discover"}, "ai": bool(ai), "by": by, "started": time.time(), "errors": []})
+    vault.audit(by if "@" in by else "system", "remote-scan", f"{site_id} {st['name']} run {run_id}" + (" + AI" if ai else ""))
+    return run_id
+
+
+def remote_tick():
+    """Move remote runs forward: parse finished jobs, issue the scans, then finish the run (and start the AI if asked)."""
+    if not RUNS.exists():
+        return
+    from guardian import collector as scanner
+    for d in sorted(RUNS.iterdir()):
+        r = _remote(d) if d.is_dir() and RUN_ID.match(d.name) else None
+        if not r or r["state"] not in ("discover", "scan"):
+            continue
+        store_ = sites_db()
+        states = {jid: store_.job(jid) for jid in r["jobs"]}
+        if any(j and j["status"] in ("queued", "sent") for j in states.values()):
+            continue
+        g = Graph(str(d))
+        for jid, kind in r["jobs"].items():
+            j = states[jid]
+            if r.get("parsed", {}).get(jid):
+                continue
+            r.setdefault("parsed", {})[jid] = True
+            if not j or j["status"] != "done":
+                r["errors"].append(f"{kind} {jid}: {(j or {}).get('error') or (j or {}).get('status') or 'missing'}")
+                g.log("collector", f"{kind} job {jid} didn't run: {(j or {}).get('error') or (j or {}).get('status')}")
+                continue
+            out = jobs.unpack(j["result"]).decode("utf-8", "replace")
+            for part in out.split("<!--guardian-split-->"):
+                scanner.parse_nmap_xml(g, part.strip(), f"collector-{kind}")
+        site_id = run_site(d)
+        if r["state"] == "discover":
+            hosts = sorted(g.data["assets"], key=lambda ip: tuple(int(x) for x in ip.split(".")) if "." in ip else (999,))
+            if hosts:
+                extra = [int(x) for x in scanner.EXTRA_TCP.split(",")][:64]
+                c = store_.active_collector(site_id)
+                for i in range(0, len(hosts), 64):
+                    jid = jobs.submit(store_, JOB_KEY, site_id, c["id"], "scan", {"hosts": hosts[i:i + 64], "extra_ports": extra}, r["by"], d.name)
+                    r["jobs"][jid] = "scan"
+                r["state"] = "scan"
+                g.agent("collector", status="working", activity=f"Scanning {len(hosts)} devices through the collector")
+                g.save()
+                _remote_save(d, r)
+                continue
+        # finished: public IP as seen by the gateway → InternetDB, then the usual change detection and report
+        c = store_.active_collector(site_id)
+        wan = {"public_ip": (c or {}).get("last_ip"), "source": "collector's address as seen by Guardian's gateway"}
+        try:
+            if wan["public_ip"] and not ipaddress.ip_address(wan["public_ip"]).is_private:
+                with urllib.request.urlopen(urllib.request.Request(f"https://internetdb.shodan.io/{wan['public_ip']}",
+                                                                   headers={"User-Agent": "ai-guardian"}), timeout=15) as resp:
+                    wan["internetdb"] = json.loads(resp.read(200000))
+        except (OSError, ValueError) as e:
+            wan["internetdb_error"] = str(e)[:200]
+        g.data["wan"] = wan
+        g.agent("collector", status="done", activity=f'{len(g.data["assets"])} devices found through the collector')
+        g.event("done", "collector", "collector", f'Remote scan finished: {len(g.data["assets"])} devices')
+        g.save()
+        from guardian import changes as changes_mod
+        try:
+            changes_mod.record(g)
+            report_mod.render(g, str(d / "report.html"))
+        except Exception as e:                                         # noqa: BLE001 - the scan data is saved either way
+            r["errors"].append(f"report: {e}"[:200])
+        r.update(state="done", finished=time.time())
+        _remote_save(d, r)
+        if r.get("ai") and not job.running:
+            key = (api_keys().get("anthropic") if vault.unlocked else None) or unattended_key()
+            if key:
+                start_job("resume", d.name, r["by"], {"ANTHROPIC_API_KEY": key}, stdin=connector_handoff(site_id))
+                vault.audit("system", "remote-ai-started", f"{d.name} ({site_id})")
+            else:
+                r["errors"].append("AI assessment skipped: the vault was locked and unattended AI runs are off")
+                _remote_save(d, r)
+
+
+async def remote_loop():
+    while True:
+        await asyncio.sleep(5)
+        try:
+            await asyncio.to_thread(remote_tick)
+        except Exception as e:                                         # noqa: BLE001 - keep the loop alive
+            print(f"[remote] {e}", file=sys.stderr, flush=True)
+
+
+class RemoteScanBody(BaseModel):
+    ai: bool = False
+
+
+@app.post("/api/sites/{site_id}/scan")
+def site_remote_scan(site_id: str, body: RemoteScanBody, request: Request):
+    sid, s, user = require(request, "operator")
+    if site_id == LOCAL:
+        raise HTTPException(400, "Guardian's own network is scanned with the Scan buttons")
+    if body.ai:
+        if sid not in vault.holders:
+            raise HTTPException(423, "Unlock the vault with your passkey first: the AI step needs the API key")
+        if not api_keys().get("anthropic"):
+            raise HTTPException(400, "Add your Anthropic API key in Settings first")
+    return {"run": remote_start(site_id, user["email"], body.ai)}
+
+
+@app.get("/api/runs/{run_id}/remote")
+def run_remote(run_id: str, request: Request):
+    require(request)
+    d = run_dir(run_id)
+    r = _remote(d)
+    if not r:
+        raise HTTPException(404, "Not a remote run")
+    return {**{k: r.get(k) for k in ("state", "ai", "started", "finished", "errors")}, "jobs": sites_db().jobs_for_run(run_id)}
+
+
 # -- multi-site: settings, portfolio, access -------------------------------------------------------------------------
 SITE_TICKET_MODES = ("msp", "own", "off")
 # fields each system lets a site set for itself when it uses the MSP's own system (the customer, board, queue...)
@@ -2825,7 +3024,13 @@ def save_site_settings(site_id, cfg):
 
 
 def visible_sites(user):
-    return [{"id": x["id"], "name": x["name"], "customer": x["customer"]} for x in sites_db().sites() if can_see(user, x["id"])]
+    def coll(x):
+        c = x.get("collector")
+        if not c:
+            return None
+        online = c["state"] == "connected" and time.time() - (c.get("last_seen") or 0) <= 180
+        return {"state": c["state"] if c["state"] != "connected" or online else "unreachable", "reason": c.get("reason"), "host": c.get("host")}
+    return [{"id": x["id"], "name": x["name"], "customer": x["customer"], "collector": coll(x)} for x in sites_db().sites() if can_see(user, x["id"])]
 
 
 def site_ticket_label(site_id):
@@ -2876,7 +3081,10 @@ def site_settings_get(site_id: str, request: Request):
     base = ticket_cfg()
     users = [{"id": u["id"], "email": u["email"], "role": u["role"]} for u in vault.users() if u["status"] == "active"]
     limits = vault.get("user_sites", {})
+    sch = site_schedule(site_id)
     return {"site": st, "local": site_id == LOCAL, "scope": cfg["scope"],
+            "schedule": {k: sch[k] for k in ("quick", "full")}, "next": next_runs(sch),
+            "collector": sites_db().active_collector(site_id) is not None,
             "ticketing": {"mode": cfg["ticketing"]["mode"], "map": cfg["ticketing"]["map"], "threshold": cfg["ticketing"]["threshold"],
                           "resolve": cfg["ticketing"]["resolve"],
                           "own": {**{k: v for k, v in own.items() if k != "settings"}, "settings": own.get("settings") or {},
@@ -2922,6 +3130,31 @@ def site_edit(site_id: str, body: SiteEdit, request: Request):
     save_site_settings(site_id, cfg)
     vault.audit(user["email"], "site-changed", f"{site_id} {name}")
     return {"ok": True}
+
+
+class SiteScheduleBody(BaseModel):
+    quick: dict
+    full: dict
+
+
+@app.post("/api/sites/{site_id}/schedule")
+def site_schedule_set(site_id: str, body: SiteScheduleBody, request: Request):
+    sid, s, user = require(request, "admin")
+    st = site_or_404(site_id)
+    if site_id == LOCAL:
+        raise HTTPException(400, "This network's schedule is in Settings › Schedules & alerts")
+    cfg = site_schedule(site_id)
+    for kind, given in (("quick", body.quick), ("full", body.full)):
+        e = {**cfg[kind], **{k: given[k] for k in ("every", "time", "day", "mday") if k in given}}
+        if e["every"] not in EVERY[kind] or not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", str(e["time"])) \
+                or not 0 <= int(e["day"]) <= 6 or not 1 <= int(e["mday"]) <= 28:
+            raise HTTPException(400, f"Check the {kind} schedule")
+        cfg[kind] = {"every": e["every"], "time": e["time"], "day": int(e["day"]), "mday": int(e["mday"])}
+    sc = site_settings(site_id)
+    sc["schedule"] = {k: cfg[k] for k in ("quick", "full")} | {"last": cfg["last"]}
+    save_site_settings(site_id, sc)
+    vault.audit(user["email"], "site-schedule-changed", f"{site_id} {st['name']}: scan {cfg['quick']['every']}, AI {cfg['full']['every']}")
+    return {"ok": True, "next": next_runs(cfg)}
 
 
 class SiteTicketBody(BaseModel):
@@ -3084,8 +3317,11 @@ def launch(mode, run_id, sid, user, inbox=None):
         raise HTTPException(409, "A run is already in progress")
     if mode not in MODES:
         raise HTTPException(400, "Unknown mode")
-    if run_id and run_site(run_dir(run_id)) != LOCAL:
-        raise HTTPException(400, "Only Guardian's own network can be scanned or analysed today; other sites hold imported results")
+    rsite = run_site(run_dir(run_id)) if run_id else LOCAL
+    if rsite != LOCAL and mode != "report" and not _remote(run_dir(run_id)):
+        raise HTTPException(400, "This assessment holds imported results only: use 'Scan through collector' for this site")
+    if rsite != LOCAL and mode in ("resume", "followup"):
+        remote_collector(rsite)
     if mode in ("resume", "report", "followup"):
         d = run_dir(run_id)
         if not (d / "graph.json").exists():
@@ -3103,7 +3339,7 @@ def launch(mode, run_id, sid, user, inbox=None):
         vault.audit(user["email"], "secret-used", "API keys for an AI assessment")
     stdin = None
     if mode in ("full", "resume", "followup"):
-        stdin = connector_handoff()
+        stdin = connector_handoff(rsite)
         if stdin:
             vault.audit(user["email"], "secret-used", "Connectors for the connector agents (AD, Microsoft 365, devices, patch & configuration)")
     if inbox:
@@ -3117,13 +3353,15 @@ HANDOFF_TYPES = ("active_directory", "linux_ssh", "synology", "proxmox_ve", "pro
                  "sap_abap", "sap_btp", "salesforce", "aws")
 
 
-def connector_handoff():
-    """The connectors the connector agents use, decrypted, as bytes for the run's stdin. None when there are none."""
+def connector_handoff(site_id=LOCAL):
+    """The connectors the connector agents use, decrypted, as bytes for the run's stdin. None when there are none.
+    For a remote site only internet-reachable (cloud / SaaS) connectors: the rest run on site in phase C."""
     if not vault.unlocked:
         return None
     items = [{"id": c["id"], "type": c["type"], "name": c.get("name") or conn.CATALOG[c["type"]]["label"],
               "fields": store.fields_with_secrets(c), "pin": c.get("pin")}
-             for c in store.connectors() if c.get("type") in HANDOFF_TYPES and (c.get("site") or LOCAL) == LOCAL]
+             for c in store.connectors() if c.get("type") in HANDOFF_TYPES and (c.get("site") or LOCAL) == site_id
+             and (site_id == LOCAL or c["type"] in CLOUD_TYPES)]
     if not items:
         return None
     key = next((r["private"] for r in vault.load_records("secret") if "private" in r), None) \

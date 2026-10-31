@@ -83,9 +83,15 @@ function setSites(sites) {
   document.body.classList.toggle("all-sites", SITE === "all");
   $("portfolio").classList.toggle("hidden", SITE !== "all");
   const remote = SITE !== "all" && SITE !== "local";
+  const col = remote && cur ? cur.collector : null;
   for (const id of ["go-collect", "go-full", "go-replay"]) $(id).classList.toggle("hidden", remote);
   $("go-newrun").classList.toggle("hidden", !remote);
+  for (const id of ["go-rscan", "go-rfull"]) { $(id).classList.toggle("hidden", !remote || !col); $(id).disabled = !col || col.state !== "connected"; }
   $("remote-note").classList.toggle("hidden", !remote);
+  $("remote-note").textContent = !remote ? "" : !col
+    ? "This site has no collector yet. Install one (Settings › Sites & collectors) to scan it, or import another scanner's results: New assessment, then \"Import results from another scanner\" in its Fix plan."
+    : col.state === "connected" ? `Collector ${col.host || ""} is online at the customer. Scans and AI checks run there; the customer can pause or disconnect it at any time.`
+    : `Collector ${col.host || ""} is ${col.state.replace("_", " ")}` + (col.reason ? ` ("${col.reason}")` : "") + ": scans wait until the customer resumes it.";
   if (SITE === "all") renderPortfolio();
 }
 $("site-pick").addEventListener("change", e => {
@@ -108,6 +114,15 @@ async function renderPortfolio() {
     el("td", {}, s.overdue ? el("span", {class: "tag warn"}, String(s.overdue)) : "0"),
     el("td", {}, String(s.open)), el("td", {}, coll(s.collector)), el("td", {}, s.tickets))));
 }
+
+for (const [id, ai] of [["go-rscan", false], ["go-rfull", true]]) $(id).addEventListener("click", async () => {
+  try {
+    if (ai && !(me && me.unlocked)) { await unlock(); }
+    await api(`/api/sites/${SITE}/scan`, {ai});
+    note(ai ? "Scan started through the collector; the AI assessment follows when it finishes." : "Scan started through the collector.");
+    poll();
+  } catch (e) { alert(e.message); }
+});
 
 $("go-newrun").addEventListener("click", async () => {
   try {
@@ -147,14 +162,15 @@ function renderRuns(runs, job) {
     const top = el("div", {class: "top"}, el("span", {class: "mono"}, fmtRun(r.id)),
       busy ? el("span", {class: "meta"}, "running")
         : r.score != null ? el("span", {class: "score"}, String(r.score), " ", el("small", {}, r.grade || ""))
-        : el("span", {class: "meta"}, r.has_graph ? "scan only" : "incomplete"));
+        : r.remote && r.remote !== "done" ? el("span", {class: "meta"}, `collector ${r.remote}…`)
+      : el("span", {class: "meta"}, r.has_graph ? "scan only" : "incomplete"));
     const sevs = el("div", {class: "sevs"});
     if (r.devices != null) sevs.append(el("span", {}, `${r.devices} device${r.devices === 1 ? "" : "s"}`));
     if (r.analysed) for (const s of SEVS) if (r.counts[s]) sevs.append(el("span", {}, el("b", {class: `c-${s}`}, String(r.counts[s])), ` ${s === "medium" ? "med" : s}`));
     if (r.has_graph && !r.analysed) sevs.append(el("span", {}, r.site === "local" ? "no AI analysis yet" : "imported results"));
     if (r.cost != null) sevs.append(el("span", {}, `AI $${r.cost.toFixed(2)}`));
     const acts = el("div", {class: "row"});
-    const canRun = me && me.role !== "viewer" && r.site === "local";
+    const canRun = me && me.role !== "viewer" && (r.site === "local" || (r.remote === "done" && SITES.some(s => s.id === r.site && s.collector && s.collector.state === "connected")));
     if (r.has_report) acts.append(el("button", {class: "btn sm", onclick: ev => { ev.stopPropagation(); openRun(r.id, true); }}, "Report"));
     if (r.has_agents) acts.append(el("button", {class: "btn sm", onclick: ev => { ev.stopPropagation(); openRun(r.id, r.has_report); showTab("map"); }}, "Agent map"));
     if (r.has_graph) {
@@ -337,6 +353,7 @@ async function poll() {
     const o = await api("/api/overview");
     renderRuns(siteRuns(o), o.job);
     keyWarning(o.config);
+    if (siteRuns(o).some(r => r.remote && r.remote !== "done")) polling = setTimeout(poll, 5000);
     if (s.run_id && s.exit_code === 0) {
       const r = o.runs.find(x => x.id === s.run_id);
       if (r && r.has_report && s.mode !== "collect") openRun(r.id, true);
@@ -386,6 +403,7 @@ async function start() {
   if (s.lines.length) { appendLog(s.lines); seq = s.seq; }
   renderJob(s);
   if (s.running) { showTab("log"); poll(); }
+  else if (runs.some(r => r.remote && r.remote !== "done")) poll();
 }
 start();
 setTimeout(() => me && me.role !== "viewer" && fetch("/api/connectors").then(r => r.ok ? r.json() : null).then(d => {

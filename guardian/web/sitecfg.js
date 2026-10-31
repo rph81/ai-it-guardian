@@ -196,8 +196,28 @@ const SiteCfg = (() => {
   }
 
   function schedule() {
-    return [el("p", {class: "note"}, d.local ? "This network's scans and AI assessments are scheduled in Settings › Schedules & alerts."
-      : "Remote sites are scanned by their collector. Schedules per site arrive with remote scans (collector phase B); until then, import scanner results into an assessment for this site from the dashboard.")];
+    if (d.local) return [el("p", {class: "note"}, "This network's scans and AI assessments are scheduled in Settings › Schedules & alerts.")];
+    const EV = {quick: ["off", "daily", "weekly"], full: ["off", "weekly", "monthly"]};
+    const DAYN = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+    const inputs = {};
+    const row = (k, label) => {
+      const c = d.schedule[k];
+      const every = el("select", {id: `ss-${k}-every`}, ...EV[k].map(v => el("option", {value: v, selected: c.every === v}, v === "off" ? "Off" : `Every ${v === "daily" ? "day" : v.replace("ly", "")}`)));
+      const day = el("select", {id: `ss-${k}-day`}, ...DAYN.map((n, i) => el("option", {value: String(i), selected: c.day === i}, n)));
+      const tm = el("input", {id: `ss-${k}-time`, type: "time", value: c.time});
+      const md = el("input", {id: `ss-${k}-mday`, type: "number", min: "1", max: "28", value: String(c.mday)});
+      inputs[k] = {every, day, tm, md};
+      return el("div", {class: "f3 field"}, field(label, every), field("Day (weekly)", day), field("Time", tm), field("Day of month (monthly)", md));
+    };
+    const out = el("span", {class: "note m0"});
+    return [el("p", {class: "note"}, d.collector ? "Scans run through the site's collector, in the customer's quiet hours rules: a collector that is paused, disconnected or in quiet hours refuses the job and the run is skipped (logged)." :
+                                                   "Install a collector for this site first; schedules start once it's online."),
+      row("quick", "Network scan (free)"), row("full", "Scan + AI assessment (uses credit; needs the vault unlocked or unattended AI runs)"),
+      el("p", {class: "help"}, Object.entries(d.next || {}).map(([k, t]) => `Next ${k === "quick" ? "scan" : "AI assessment"}: ${new Date(t * 1000).toLocaleString()}`).join(" · ") || "Nothing scheduled."),
+      el("div", {class: "row mt16"}, el("button", {class: "btn primary", type: "button", onclick: async () => {
+        const v = k => ({every: inputs[k].every.value, day: Number(inputs[k].day.value), time: inputs[k].tm.value, mday: Number(inputs[k].md.value)});
+        try { await api(`/api/sites/${id}/schedule`, {quick: v("quick"), full: v("full")}); d = await api(`/api/sites/${id}/settings`); render(); }
+        catch (e) { out.textContent = e.message; } }}, "Save"), out)];
   }
 
   $("sc-close").addEventListener("click", () => $("sc-card").classList.add("hidden"));

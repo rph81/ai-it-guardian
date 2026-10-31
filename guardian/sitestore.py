@@ -37,6 +37,10 @@ CREATE TABLE IF NOT EXISTS nonces (collector_id TEXT NOT NULL, nonce TEXT NOT NU
 CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, t REAL NOT NULL, site_id TEXT,
   collector_id TEXT, kind TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS events_site ON events (site_id, id);
+CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, collector_id TEXT NOT NULL, site_id TEXT NOT NULL, type TEXT NOT NULL,
+  envelope TEXT NOT NULL, status TEXT NOT NULL, created REAL NOT NULL, expires REAL NOT NULL, sent_at REAL, done_at REAL,
+  result TEXT, error TEXT, by TEXT NOT NULL DEFAULT '', run TEXT);
+CREATE INDEX IF NOT EXISTS jobs_queue ON jobs (collector_id, status, created);
 """
 
 
@@ -238,6 +242,49 @@ class Store:
             self.event(state, old["site_id"], cid, reason or "")
         if old and old["scope"] != json.dumps(scope):
             self.event("scope-changed", old["site_id"], cid, ", ".join(scope))
+
+    # -- jobs (phase B): the console adds signed jobs, the gateway hands them out and stores results ----------------
+    @locked
+    def add_job(self, jid, cid, site_id, kind, envelope, expires, by, run=None):
+        self.db.execute("INSERT INTO jobs (id, collector_id, site_id, type, envelope, status, created, expires, by, run) "
+                        "VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)", (jid, cid, site_id, kind, envelope, time.time(), expires, by, run))
+
+    @locked
+    def take_jobs(self, cid, limit=4):
+        """Queued jobs for this collector, marked as sent. Expired ones are marked expired instead."""
+        now = time.time()
+        with self.tx():
+            self.db.execute("UPDATE jobs SET status='expired' WHERE collector_id=? AND status IN ('queued', 'sent') AND expires < ?", (cid, now))
+            rows = self.db.execute("SELECT id, envelope FROM jobs WHERE collector_id=? AND status='queued' ORDER BY created LIMIT ?",
+                                   (cid, limit)).fetchall()
+            for r in rows:
+                self.db.execute("UPDATE jobs SET status='sent', sent_at=? WHERE id=?", (now, r["id"]))
+        return [json.loads(r["envelope"]) for r in rows]
+
+    @locked
+    def finish_job(self, cid, jid, status, result=None, error=None):
+        """Only a job that was sent to this very collector can be finished, and only once."""
+        n = self.db.execute("UPDATE jobs SET status=?, result=?, error=?, done_at=? WHERE id=? AND collector_id=? AND status='sent'",
+                            (status, result, (error or "")[:500] or None, time.time(), jid, cid)).rowcount
+        return n == 1
+
+    @locked
+    def job(self, jid):
+        r = self.db.execute("SELECT * FROM jobs WHERE id=?", (jid,)).fetchone()
+        return dict(r) if r else None
+
+    @locked
+    def jobs_for_run(self, run):
+        return [dict(r) for r in self.db.execute("SELECT id, type, status, error, created, done_at FROM jobs WHERE run=? ORDER BY created", (run,))]
+
+    @locked
+    def active_collector(self, site_id):
+        r = self.db.execute("SELECT * FROM collectors WHERE site_id=? AND status='active' ORDER BY enrolled_at DESC LIMIT 1", (site_id,)).fetchone()
+        return dict(r) if r else None
+
+    @locked
+    def purge_jobs(self, days=30):
+        self.db.execute("DELETE FROM jobs WHERE created < ?", (time.time() - days * 86400,))
 
     @staticmethod
     def _public(r):
