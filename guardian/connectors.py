@@ -201,6 +201,27 @@ CATALOG = {
         "fields": [F("instance_url", "My Domain address", placeholder="https://yourcompany.my.salesforce.com", mono=True),
                    F("client_id", "Consumer key", mono=True), F("client_secret", "Consumer secret", "password", secret=True)],
     },
+    "aws": {
+        "label": "Amazon Web Services", "icon": "AWS", "color": "#ff9900", "category": "Cloud",
+        "status": "available", "multi": True, "always": True,
+        "summary": "AWS accounts",
+        "checks": "Used by the AWS agent: root account MFA and keys, IAM users without MFA and old keys, admin-everything "
+                  "policies, public S3 buckets, security groups open to the internet, public snapshots and images, "
+                  "unencrypted volumes and databases, CloudTrail, GuardDuty, Security Hub, Config and KMS rotation.",
+        "steps": ["In the customer's account: IAM › Roles › Create role › AWS account › Another AWS account: your Guardian "
+                  "account ID, Require external ID (choose a random value). Attach SecurityAudit and ViewOnlyAccess, "
+                  "nothing else. Name it GuardianReadOnly.",
+                  "In your own account: an IAM user guardian-assume with one inline policy allowing only sts:AssumeRole on "
+                  "arn:aws:iam::*:role/GuardianReadOnly. Create an access key for it.",
+                  "Paste the access key, the role ARN and the external ID below. Without a role ARN, the keys themselves must "
+                  "have only SecurityAudit and ViewOnlyAccess. Optionally list the regions to check (default: all enabled)."],
+        "fields": [F("access_key_id", "Access key ID", mono=True, placeholder="AKIA…"),
+                   F("secret_access_key", "Secret access key", "password", secret=True),
+                   F("role_arn", "Role ARN in the customer account (recommended)", mono=True, required=False,
+                     placeholder="arn:aws:iam::123456789012:role/GuardianReadOnly"),
+                   F("external_id", "External ID", mono=True, required=False),
+                   F("regions", "Only these regions (optional, space-separated)", mono=True, required=False, placeholder="eu-central-1 eu-west-1")],
+    },
     "ninjaone": {
         "label": "NinjaOne (RMM)", "icon": "N1", "color": "#2b6cb0", "category": "Endpoints & network",
         "status": "available", "multi": False, "always": True,
@@ -855,6 +876,15 @@ def _test_windows(f):
     return _done(worst, {"ok": "Connected", "warn": "Connected, with a warning", "error": "Some machines didn't answer"}[worst], details)
 
 
+def _aws_test(f):
+    from . import awsposture
+    try:
+        level, message, details = awsposture.test(f)
+    except awsposture.AwsError as e:
+        raise Result("error", str(e))
+    return _done(level, message, details)
+
+
 def _bizsys():
     from . import bizsys                       # imported late: bizsys imports this module
     return bizsys
@@ -875,6 +905,7 @@ def test(ctype, fields, pin=None, state_dir=None, vault=None):
         "azure": lambda: _test_azure(fields),
         "ninjaone": lambda: _test_ninjaone(fields),
         "sap_abap": lambda: _bizsys().test_sap(fields, pin),
+        "aws": lambda: _aws_test(fields),
         "sap_btp": lambda: _bizsys().test_btp(fields),
         "salesforce": lambda: _bizsys().test_sf(fields),
         "windows": lambda: _test_windows(fields),

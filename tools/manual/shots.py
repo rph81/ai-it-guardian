@@ -52,6 +52,8 @@ for s in ["connectors", "users", "security", "account", "ai", "scope", "evidence
 nav("/settings#connectors", 3)
 js("(()=>{const h=[...document.querySelectorAll('#s-connectors *')].find(e=>e.children.length===0&&e.textContent.trim().toLowerCase()==='business systems');if(h){h.scrollIntoView({block:'start'});scrollBy(0,-20)}})()"); time.sleep(0.8)
 shot("10-settings-business", height=700)
+js("(()=>{const h=[...document.querySelectorAll('#s-connectors *')].find(e=>e.children.length===0&&e.textContent.trim().toLowerCase()==='cloud');if(h){h.scrollIntoView({block:'start'});scrollBy(0,-20)}})()"); time.sleep(0.8)
+shot("10-settings-cloud", height=420)
 for t, name in [("General", "10-site-general"), ("Ticketing", "10-site-ticketing"), ("Access", "10-site-access"), ("Disclosure", "10-site-disclosure"), ("Decoys", "10-site-decoys")]:
     nav("/settings#sites", 2)
     js("(()=>{const z=[...document.querySelectorAll('#si-rows tr')].find(r=>r.textContent.includes('Zürich'));z.querySelector('button').click()})()"); time.sleep(1)

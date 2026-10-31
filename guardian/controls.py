@@ -119,6 +119,32 @@ NLPD = [
 
 # CIS Microsoft Azure Foundations Benchmark, grouped by its sections. Guardian's own IDs (AZ-<section>.<n>) and
 # paraphrased titles: map them to the official recommendation numbers of the benchmark version you audit against.
+CIS_AWS = [
+    ("AWS-1.1", "Contact and security contact details are kept current"), ("AWS-1.2", "The root user has no access keys"),
+    ("AWS-1.3", "The root user has MFA (hardware MFA for important accounts)"), ("AWS-1.4", "The root user isn't used for everyday tasks"),
+    ("AWS-1.5", "The password policy requires at least 14 characters and prevents reuse"),
+    ("AWS-1.6", "Every IAM user with a console password has MFA"), ("AWS-1.7", "Credentials unused for 45 days or more are disabled"),
+    ("AWS-1.8", "Access keys are rotated every 90 days or less"), ("AWS-1.9", "Users get permissions only through groups or roles"),
+    ("AWS-1.10", "No IAM policy grants full *:* administrative privileges"), ("AWS-1.11", "A support role exists to manage incidents with AWS Support"),
+    ("AWS-1.12", "IAM Access Analyzer is enabled in all active regions"),
+    ("AWS-2.1", "S3 Block Public Access is on at account and bucket level"), ("AWS-2.2", "S3 buckets have default encryption"),
+    ("AWS-2.3", "S3 bucket policies deny HTTP requests"), ("AWS-2.4", "EBS volume encryption is on by default in every region"),
+    ("AWS-2.5", "RDS instances are encrypted at rest"), ("AWS-2.6", "RDS instances are not publicly accessible"),
+    ("AWS-2.7", "RDS automatic minor version upgrades are on"), ("AWS-2.8", "EFS file systems are encrypted"),
+    ("AWS-3.1", "CloudTrail is enabled in all regions"), ("AWS-3.2", "CloudTrail log file validation is enabled"),
+    ("AWS-3.3", "The CloudTrail S3 bucket isn't public"), ("AWS-3.4", "CloudTrail logs are encrypted with KMS"),
+    ("AWS-3.5", "AWS Config is enabled in all regions"), ("AWS-3.6", "S3 access logging is on for the CloudTrail bucket"),
+    ("AWS-3.7", "Rotation is enabled for customer-managed KMS keys"), ("AWS-3.8", "VPC flow logs are enabled"),
+    ("AWS-4.1", "Alarms exist for unauthorised API calls, console sign-in without MFA and root use"),
+    ("AWS-4.2", "Alarms exist for IAM, CloudTrail, security group and network changes"),
+    ("AWS-4.3", "AWS Security Hub is enabled"), ("AWS-4.4", "Amazon GuardDuty is enabled and findings are handled"),
+    ("AWS-5.1", "No network ACL allows ingress from 0.0.0.0/0 to remote administration ports"),
+    ("AWS-5.2", "No security group allows ingress from 0.0.0.0/0 to remote administration ports"),
+    ("AWS-5.3", "No security group allows ingress from ::/0 to remote administration ports"),
+    ("AWS-5.4", "The default security group of every VPC restricts all traffic"),
+    ("AWS-5.5", "EC2 instances require IMDSv2"), ("AWS-5.6", "No EBS snapshots or AMIs are public"),
+]
+
 CIS_AZURE = [
     ("AZ-2.1", "Microsoft Defender for Servers is enabled"), ("AZ-2.2", "Microsoft Defender for Storage is enabled"),
     ("AZ-2.3", "Microsoft Defender for SQL / databases is enabled"), ("AZ-2.4", "Microsoft Defender for Key Vault is enabled"),
@@ -165,5 +191,6 @@ FRAMEWORKS = {
     "nis2": {"title": "NIS2 Article 21(2)", "controls": NIS2},
     "nlpd": {"title": "Swiss revFADP / nLPD · data security", "controls": NLPD},
     "cis_azure": {"title": "CIS Microsoft Azure Foundations (by section)", "controls": CIS_AZURE, "optional": True},
+    "cis_aws": {"title": "CIS AWS Foundations (by section)", "controls": CIS_AWS, "optional": True},
 }
 STATUSES = ("met", "partial", "gap", "not_assessed")

@@ -3114,7 +3114,7 @@ def launch(mode, run_id, sid, user, inbox=None):
 
 
 HANDOFF_TYPES = ("active_directory", "linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "m365", "windows", "azure", "ninjaone",
-                 "sap_abap", "sap_btp", "salesforce")
+                 "sap_abap", "sap_btp", "salesforce", "aws")
 
 
 def connector_handoff():

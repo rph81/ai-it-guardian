@@ -332,6 +332,13 @@ powerful SAP users, RFC destinations with stored passwords, security parameters,
 administrators, identity providers and destinations; Salesforce Health Check, admins without MFA, guest users. Each
 needs a read-only technical user or service key; the steps are on the card. Details: [BUSINESS-SYSTEMS.md](BUSINESS-SYSTEMS.md).
 
+![Cloud connectors](manual/10-settings-cloud.png)
+
+**Cloud** connectors: **Microsoft Azure** (Reader + Security Reader app; [AZURE.md](AZURE.md)) and **Amazon Web Services**
+(a read-only role with SecurityAudit and ViewOnlyAccess, reached through sts:AssumeRole with an external ID; [AWS.md](AWS.md)).
+The AWS agent checks root and IAM users, public S3 buckets and snapshots, security groups open to the internet, RDS,
+CloudTrail, GuardDuty, Security Hub, Config and KMS, and maps them to CIS AWS Foundations in the compliance view.
+
 Connectors let Guardian look **inside** systems with a read-only account you create. **Suggested from your last scan**
 proposes connectors for devices it found (e.g. a Synology NAS); **All connectors** lists every type with what it checks
 and step-by-step instructions. Each connector has a **Test** that checks the account and warns if it has more rights

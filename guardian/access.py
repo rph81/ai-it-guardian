@@ -22,10 +22,10 @@ _CONNECTORS = []        # [{"id", "type", "name", "fields": {...incl. secrets}, 
 _SSH = {"private": None, "path": None}
 _STATE_DIR = None
 TYPES = {"active_directory", "linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "m365", "windows", "azure", "ninjaone",
-         "sap_abap", "sap_btp", "salesforce"}
+         "sap_abap", "sap_btp", "salesforce", "aws"}
 CONNECTOR_AGENTS = {"ad": ["active_directory"], "patch": ["linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "windows", "ninjaone"],
                     "m365": ["m365"], "devices": ["m365"], "azure": ["azure"],
-                    "business": ["sap_abap", "sap_btp", "salesforce"]}
+                    "business": ["sap_abap", "sap_btp", "salesforce"], "aws": ["aws"]}
 
 
 def load(data, state_dir):
@@ -737,3 +737,19 @@ def salesforce_query(cid, query):
         return bizsys.cap(bizsys.sf_read(c["fields"], query))
     except bizsys.BizError as e:
         return {"error": str(e)}
+
+
+# -- AWS ------------------------------------------------------------------------------------------------------------
+def aws_query(cid, query, region=None):
+    from . import awsposture
+    c = _get(cid, {"aws"})
+    if query not in awsposture.QUERIES:
+        return {"error": "unknown query", "allowed": awsposture.QUERIES}
+    try:
+        res = awsposture.run(c["fields"], query, region)
+    except awsposture.AwsError as e:
+        return {"error": str(e)}
+    from . import bizsys
+    if isinstance(res, dict) and "rows" in res:                     # regional reads: rows plus regions and errors
+        return {**bizsys.cap(res["rows"]), **{k: v for k, v in res.items() if k != "rows"}}
+    return bizsys.cap(res) if isinstance(res, list) else res

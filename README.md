@@ -109,8 +109,8 @@ exposure) and `previous` (the same issue in the previous assessment).
    (our PSA with per-customer mapping, the customer's own system, or off) and user access per site.
    **Gap features (now)**: vulnerability-disclosure page, SIEM output and MCP server, decoys, safe web app check,
    private repos, infrastructure-as-code and container image checks.
-   **Next, in this order**: AWS posture agent;
-   on-site collector phases B–D. Then a **final testing phase** against real systems (real AI run, AD, Microsoft 365, fix recipes, NinjaOne,
+   **AWS (now)**: AWS posture agent with CIS AWS Foundations ([docs](docs/AWS.md)).
+   **Next**: on-site collector phases B–D. Then a **final testing phase** against real systems (real AI run, AD, Microsoft 365, fix recipes, NinjaOne,
    Azure, Windows, ServiceNow, alert channels, collector packages, outside penetration test of the gateway).
    Built-in VPN client: on hold pending a design review (the on-site collector covers most of the need).
 2. **Next**: agents use the connectors (inside view of NAS, hypervisors, servers); more connector sign-in methods

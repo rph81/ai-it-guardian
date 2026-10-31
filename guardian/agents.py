@@ -293,6 +293,33 @@ unknown service principals and active high Defender alerts are critical or high;
 purge protection, no backup of production VMs and missing logging medium; tagging and orphaned resources low or info.
 If a query or path is refused for permission or licence reasons, say what is missing in one info finding.""",
     },
+    "aws": {
+        "title": "AWS",
+        "tools": ["list_connectors", "aws_query", "record_finding"],
+        "web": True,
+        "brief": """Your layer: the Amazon Web Services accounts, reviewed the way AWS Security Hub, Wiz, Prowler and Prisma Cloud
+do, against the CIS AWS Foundations Benchmark. You read through the AWS connector (a role with only SecurityAudit and
+ViewOnlyAccess). aws_query runs fixed reads by name; regional reads cover every enabled region unless you give one.
+Start with list_connectors and aws_query "identity", then:
+- Identity: "iam_summary" (root without MFA or with access keys is critical; weak or missing password policy),
+  "credential_report" (users with console passwords and no MFA; access keys older than 90 days or unused for 90 days;
+  users unused for 90 days; the root user used recently), "admin_policies" (customer policies allowing * on *).
+- Storage: "s3_buckets": account-level public access block off, buckets without a public access block whose policy is
+  public (policy_status IsPublic true) are high; no default encryption, no versioning on important buckets medium.
+- Network: "security_groups_open": SSH, RDP, SMB, databases or all ports open to 0.0.0.0/0 or ::/0. Link to "instances"
+  with a public IP using that group: one finding per exposed instance or group.
+- Compute: "instances" (IMDSv1 allowed: imds_tokens optional), "public_snapshots_images" (public EBS snapshots or AMIs are
+  high: they often contain data), "ebs_encryption_default".
+- Databases: "rds_instances": public, unencrypted, no backups (backup_days 0), no deletion protection on production.
+- Logging and detection: "cloudtrail" (no multi-region trail logging, no log file validation), "guardduty" (off in a
+  region with resources; open high findings), "security_hub" (off; critical and high findings), "config_recorder" (off).
+- Keys: "kms_rotation" (customer keys without rotation).
+Record one finding per issue. asset is "aws/<account>/<resource>" or "aws/<account>" for account-wide issues; name the
+region and resource IDs in the evidence (at most 20 plus the total). Severity: root without MFA or with keys, public
+buckets or snapshots with data, management ports or databases open to the internet and admin-everything policies on
+users are critical or high; missing CloudTrail, GuardDuty or encryption medium; hygiene low. If a read is refused,
+record one info finding naming the missing permission.""",
+    },
     "business": {
         "title": "Business systems",
         "tools": ["list_connectors", "sap_query", "btp_query", "salesforce_query", "record_finding"],
@@ -401,7 +428,7 @@ Finish with a short summary: the paths, and which fixes break most of them.""",
         "tools": ["list_findings", "finding_details", "inventory", "control_catalog", "set_controls"],
         "web": False,
         "brief": """Your job: turn this assessment into audit evidence for four frameworks: cis_ig1, iso27001, nis2 and nlpd
-(Swiss data protection), plus cis_azure when the Azure agent ran (list_findings layer "azure"). For each framework, read control_catalog and give EVERY control a status with set_controls
+(Swiss data protection), plus cis_azure when the Azure agent ran (list_findings layer "azure") and cis_aws when the AWS agent ran (layer "aws"). For each framework, read control_catalog and give EVERY control a status with set_controls
 (batches of up to 100):
 - gap: a finding shows the control is not in place (cite the finding IDs).
 - partial: in place for some devices or accounts but not others, or only partly (cite findings or what was observed).

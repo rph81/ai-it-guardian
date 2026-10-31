@@ -13,7 +13,7 @@ import time
 import urllib.parse
 import urllib.request
 
-from . import access, bizsys, netutil
+from . import access, awsposture, bizsys, netutil
 from . import attack as mitre
 from .collector import parse_nmap_xml
 from .controls import FRAMEWORKS, STATUSES
@@ -214,6 +214,16 @@ class Toolbox:
                                "of a resource. Example: /subscriptions/<id>/resourceGroups/<rg>/providers/Microsoft.Sql/servers/<name>/firewallRules",
                 "input_schema": {"type": "object", "properties": {"connector": {"type": "string"}, "path": {"type": "string"}},
                                  "required": ["connector", "path"], "additionalProperties": False}},
+            "aws_query": {
+                "description": "Run one fixed read-only AWS read through an AWS connector. Account-wide: identity, iam_summary (root MFA "
+                               "and keys, password policy), credential_report (every IAM user: MFA, password and key use and age), "
+                               "admin_policies (customer policies allowing * on *), s3_buckets (account and bucket public access block, "
+                               "policy status, encryption, versioning, logging), cloudtrail. Per region (all enabled regions, or one): "
+                               "security_groups_open, instances, public_snapshots_images, ebs_encryption_default, rds_instances, "
+                               "guardduty, security_hub, config_recorder, kms_rotation.",
+                "input_schema": {"type": "object", "properties": {
+                    "connector": {"type": "string"}, "query": {"type": "string", "enum": awsposture.QUERIES},
+                    "region": {"type": "string"}}, "required": ["connector", "query"], "additionalProperties": False}},
             "sap_query": {
                 "description": "Read one fixed SAP table view through an SAP S/4HANA / ECC connector (RFC_READ_TABLE, read-only; password "
                                "columns are never read, RFC destinations come back as flags). Queries: clients (T000 change settings), "
@@ -473,6 +483,10 @@ class Toolbox:
         self.g.log(self.agent, f"azure_get {path}")
         return access.azure_get(connector, path)
 
+    def t_aws_query(self, connector, query, region=None):
+        self.g.log(self.agent, f"aws_query {query}" + (f" {region}" if region else ""))
+        return access.aws_query(connector, query, region)
+
     def t_sap_query(self, connector, query):
         self.g.log(self.agent, f"sap_query {query}")
         return access.sap_query(connector, query)
@@ -692,6 +706,8 @@ def describe(name, args):
         return f'Microsoft 365: {a.get("path")}'
     if name == "windows_check":
         return f'{a.get("host")}: {a.get("check", "").replace("_", " ")}'
+    if name == "aws_query":
+        return f'AWS: {a.get("query", "").replace("_", " ")}' + (f' ({a["region"]})' if a.get("region") else "")
     if name == "sap_query":
         return f'SAP: {a.get("query", "").replace("_", " ")}'
     if name == "btp_query":
@@ -740,4 +756,4 @@ def describe(name, args):
 # checks that touch the network or the internet (drawn as a pulse on the map); the rest only read the run's data
 ACTIVE = {"probe", "http_get", "tls_inspect", "cve_lookup", "eol_lookup", "web_search", "epss_lookup", "kev_details",
           "ad_query", "linux_check", "linux_vulnerable_packages", "synology_info", "proxmox_get",
-          "graph_get", "windows_check", "azure_query", "azure_get", "ninja_query", "sap_query", "btp_query", "salesforce_query"}
+          "graph_get", "windows_check", "azure_query", "azure_get", "ninja_query", "sap_query", "btp_query", "salesforce_query", "aws_query"}

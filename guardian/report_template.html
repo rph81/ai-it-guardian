@@ -178,7 +178,7 @@ footer{margin-top:28px;font:600 10px var(--head);letter-spacing:.16em;text-trans
 const D = /*__DATA__*/null;
 const SEV = ["critical","high","medium","low","info"];
 const PRI = f => (f.risk && f.risk.priority) || ({critical:1,high:2,medium:3}[f.severity] || 4);
-const LAYER_NAMES = {discovery:"Discovery",network:"Network",os:"OS & endpoints",web:"Web & APIs",firmware:"Firmware",wan:"Internet perimeter",ad:"Active Directory",m365:"Microsoft 365",devices:"Device fleet",azure:"Azure",business:"Business systems",patch:"Patch & config",import:"Imported"};
+const LAYER_NAMES = {discovery:"Discovery",network:"Network",os:"OS & endpoints",web:"Web & APIs",firmware:"Firmware",wan:"Internet perimeter",ad:"Active Directory",m365:"Microsoft 365",devices:"Device fleet",azure:"Azure",aws:"AWS",business:"Business systems",patch:"Patch & config",import:"Imported"};
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const $ = id => document.getElementById(id);
 
