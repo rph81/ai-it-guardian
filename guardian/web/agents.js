@@ -1,7 +1,7 @@
 "use strict";
 // Agents tab, live agent map and the Orchestrator chat. Uses $, el, api and me from console.js.
 const Agents = (() => {
-  const ORDER = ["collector", "discovery", "orchestrator", "network", "os", "web", "firmware", "wan", "ad", "m365", "devices", "azure", "aws", "business", "infra", "google", "patch", "risk", "paths", "compliance", "report"];
+  const ORDER = ["collector", "discovery", "orchestrator", "network", "os", "web", "firmware", "wan", "ad", "m365", "devices", "azure", "aws", "business", "infra", "google", "leaks", "ai", "patch", "risk", "paths", "compliance", "report"];
   const NODES = {
     orchestrator: {x: 400, y: 320, sub: "assigns · relays", center: true},
     collector: {x: 400, y: 70, sub: "program, not AI"},
@@ -22,7 +22,7 @@ const Agents = (() => {
   };
   const SHORT = {collector: "Scanner", discovery: "Discovery", orchestrator: "Orchestrator", network: "Network", os: "OS & endpoints",
                  web: "Web & APIs", firmware: "Firmware", wan: "Internet perimeter", report: "Report writer",
-                 ad: "Active Directory", m365: "Microsoft 365", devices: "Device fleet", azure: "Azure", aws: "AWS", business: "Business systems", infra: "Infrastructure", google: "Google", patch: "Patch & config", risk: "Risk analyst", paths: "Attack paths", compliance: "Compliance"};
+                 ad: "Active Directory", m365: "Microsoft 365", devices: "Device fleet", azure: "Azure", aws: "AWS", business: "Business systems", infra: "Infrastructure", google: "Google", leaks: "Leaked credentials", ai: "AI usage", patch: "Patch & config", risk: "Risk analyst", paths: "Attack paths", compliance: "Compliance"};
   const KIND = {order: "order", tool: "check", read: "read", find: "finding", note: "note", note_outcome: "then", done: "done", start: "start", error: "error"};
   const CHECKS = {probe: "probes", http_get: "web pages", tls_inspect: "TLS checks", cve_lookup: "CVE lookups", eol_lookup: "EOL lookups",
                   web_search: "searches", wan_info: "public-IP lookups", annotate_asset: "identifications",

@@ -265,6 +265,18 @@ SOC2 = [
     ("C1.1", "Confidential information is identified and protected"), ("C1.2", "Confidential information is disposed of securely"),
 ]
 
+# NIST Cybersecurity Framework 2.0, by category (NIST publications are public domain: official titles)
+NIST_CSF = [
+    ("GV.OC", "Organizational Context"), ("GV.RM", "Risk Management Strategy"),
+    ("GV.RR", "Roles, Responsibilities, and Authorities"), ("GV.PO", "Policy"), ("GV.OV", "Oversight"),
+    ("GV.SC", "Cybersecurity Supply Chain Risk Management"), ("ID.AM", "Asset Management"), ("ID.RA", "Risk Assessment"),
+    ("ID.IM", "Improvement"), ("PR.AA", "Identity Management, Authentication, and Access Control"),
+    ("PR.AT", "Awareness and Training"), ("PR.DS", "Data Security"), ("PR.PS", "Platform Security"),
+    ("PR.IR", "Technology Infrastructure Resilience"), ("DE.CM", "Continuous Monitoring"), ("DE.AE", "Adverse Event Analysis"),
+    ("RS.MA", "Incident Management"), ("RS.AN", "Incident Analysis"), ("RS.CO", "Incident Response Reporting and Communication"),
+    ("RS.MI", "Incident Mitigation"), ("RC.RP", "Incident Recovery Plan Execution"), ("RC.CO", "Incident Recovery Communication"),
+]
+
 FRAMEWORKS = {
     "cis_ig1": {"title": "CIS Controls v8 · IG1", "controls": CIS_IG1},
     "iso27001": {"title": "ISO/IEC 27001:2022 Annex A", "controls": ISO27001},
@@ -274,5 +286,6 @@ FRAMEWORKS = {
     "cis_aws": {"title": "CIS AWS Foundations (by section)", "controls": CIS_AWS, "optional": True},
     "pci_dss": {"title": "PCI DSS v4.0 (by requirement)", "controls": PCI_DSS, "optional": True},
     "soc2": {"title": "SOC 2 Trust Services Criteria", "controls": SOC2, "optional": True},
+    "nist_csf": {"title": "NIST CSF 2.0 (by category)", "controls": NIST_CSF, "optional": True},
 }
 STATUSES = ("met", "partial", "gap", "not_assessed")

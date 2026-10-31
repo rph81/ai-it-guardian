@@ -21,6 +21,7 @@ from pathlib import Path
 # -- catalog --------------------------------------------------------------------------
 F = lambda name, label, kind="text", **kw: {"name": name, "label": label, "kind": kind, **kw}
 HOST = F("host", "Address", placeholder="192.168.1.10", mono=True)
+URL_FIELD = F("url", "Server address", placeholder="https://rmm.example.com", mono=True)
 VERIFY = F("verify_tls", "Verify the certificate", "checkbox", default=False,
            help="Leave off for self-signed certificates: Guardian then pins the certificate it sees on the first test.")
 
@@ -242,10 +243,13 @@ CATALOG = {
         "status": "available", "multi": True,
         "summary": "Windows PCs and servers",
         "checks": "Used by the Patch & configuration agent: OS build and installed updates, pending reboot, Defender, "
-                  "firewall, BitLocker, local admins, SMB, RDP, UAC and LSA settings, installed software.",
+                  "firewall, BitLocker, local admins, SMB, RDP, UAC and LSA settings, installed software; on Hyper-V hosts, "
+                  "the VMs and their configuration.",
         "steps": ["Create a normal domain or local user, e.g. svc-guardian (not an administrator).",
                   "Add it to the local group 'Remote Management Users' on each machine (a Group Policy can do this for many).",
                   "Make sure WinRM over HTTPS (port 5986) is on: winrm quickconfig -transport:https, or by Group Policy.",
+                  "Hyper-V hosts: wmimgmt.msc › WMI Control › Properties › Security › root\\virtualization\\v2 › add the user "
+                  "with only Enable Account and Remote Enable (read access; not Hyper-V Administrators, which can change VMs).",
                   "List the machines below. Some checks (BitLocker) need more rights and are reported as 'not readable'."],
         "fields": [F("hosts", "Machines (one per line)", "textarea", mono=True, placeholder="192.168.1.20\nsrv-files.corp.local"),
                    F("username", "Username", placeholder="CORP\\svc-guardian", mono=True),
@@ -253,7 +257,7 @@ CATALOG = {
                    F("port", "Port", "number", default=5986, mono=True), VERIFY],
     },
     "firewall": {
-        "label": "Firewall (OPNsense, pfSense, FortiGate, UniFi)", "icon": "FW", "color": "#dc2626", "category": "Endpoints & network",
+        "label": "Firewall (OPNsense, pfSense, FortiGate, UniFi, Palo Alto, Check Point, Sophos, MikroTik)", "icon": "FW", "color": "#dc2626", "category": "Endpoints & network",
         "status": "available", "multi": True,
         "summary": "Firewall rules, firmware and VPN",
         "checks": "Used by the Infrastructure agent: firmware and pending updates, rules allowing any-to-any or open from the "
@@ -267,10 +271,18 @@ CATALOG = {
                   "FortiGate: System › Administrators › Create New › REST API Admin guardian with an admin profile set to "
                   "Read for every group (no Read/Write), trusted hosts = Guardian or the collector. Copy the token.",
                   "UniFi (UniFi OS): Settings › Control Plane › Integrations › Create API key (Network application API).",
+                  "Palo Alto (PAN-OS): an admin with the Superuser (read-only) role, then generate its API key "
+                  "(https://<firewall>/api/?type=keygen). Paste the key as the token.",
+                  "Check Point: SmartConsole › Manage & Settings › Permissions & Administrators: an administrator with the "
+                  "Read Only All profile; enable the Management API for this address. User in the first field, password as the token.",
+                  "Sophos Firewall: Backup & firmware › API: enable the API and allow only Guardian or the collector; an "
+                  "administrator with a read-only profile. User in the first field, password as the token.",
+                  "MikroTik (RouterOS 7, REST): a user in a group with only 'read' and 'api' / 'rest-api' policies. User in the "
+                  "first field, password as the token.",
                   "Choose the vendor and paste the key below. For a customer site the check runs through its collector."],
-        "fields": [F("vendor", "Vendor", "select", options=["opnsense", "pfsense", "fortigate", "unifi"], default="opnsense"),
+        "fields": [F("vendor", "Vendor", "select", options=["opnsense", "pfsense", "fortigate", "unifi", "paloalto", "checkpoint", "sophos", "mikrotik"], default="opnsense"),
                    HOST, F("port", "Port", "number", default=443, mono=True),
-                   F("key_id", "API key (OPNsense only; the other vendors use only the token)", mono=True, required=False),
+                   F("key_id", "API key (OPNsense) or user (Check Point, Sophos, MikroTik)", mono=True, required=False),
                    F("token", "Secret / API token", "password", secret=True), VERIFY],
     },
     "vmware": {
@@ -356,6 +368,69 @@ CATALOG = {
                   "project of the service account. Paste the key below; optionally limit to some project IDs."],
         "fields": [F("service_account_json", "Service account key (JSON)", "password", secret=True, json=True),
                    F("projects", "Only these project IDs (optional, space-separated)", mono=True, required=False)],
+    },
+    "hibp": {
+        "label": "Have I Been Pwned (leaked credentials)", "icon": "HIBP", "color": "#3a7bd5", "category": "Identity & productivity",
+        "status": "available", "multi": True, "always": True,
+        "summary": "Staff addresses in breaches and stealer logs",
+        "checks": "Used by the Leaked credentials agent: which addresses of the customer's domains appear in data breaches "
+                  "and in info-stealer logs, when, and which kinds of data leaked. HIBP never returns passwords.",
+        "steps": ["haveibeenpwned.com › API › subscribe (a plan with domain search; stealer logs need Pwned 5 or higher).",
+                  "Dashboard › Domain search: add and verify each customer domain (DNS TXT record, e-mail or meta tag).",
+                  "Paste the API key below. Optionally list the domains to check (default: every verified domain of the key)."],
+        "fields": [F("api_key", "API key", "password", secret=True),
+                   F("domains", "Only these domains (optional, space-separated)", mono=True, required=False, placeholder="example.com")],
+    },
+    "datto_rmm": {
+        "label": "Datto RMM", "icon": "DRM", "color": "#199ed9", "category": "Endpoints & network",
+        "status": "available", "multi": True, "always": True, "summary": "Patch and device status from your RMM",
+        "checks": "Used by the Patch & configuration agent: devices per site, online state and last contact, patch status and "
+                  "pending patches, antivirus product and status, reboot required. Read-only.",
+        "steps": ["Datto RMM › Setup › Users: create a user with a read-only security level, then Global Settings › Access "
+                  "Control: enable API access; on the user, Generate API keys.",
+                  "API URL: your platform's address, e.g. https://merlot-api.centrastage.net (shown next to the keys).",
+                  "Paste the API URL, key and secret below."],
+        "fields": [F("url", "API URL", placeholder="https://", mono=True), F("api_key", "API key", mono=True),
+                   F("api_secret", "API secret key", "password", secret=True)],
+    },
+    "ncentral": {
+        "label": "N-able N-central", "icon": "NC", "color": "#4a3f8c", "category": "Endpoints & network",
+        "status": "available", "multi": True, "always": True, "summary": "Devices and active issues from your RMM",
+        "checks": "Used by the Patch & configuration agent: devices, OS and last check-in, and active issues per customer "
+                  "(failed patch, antivirus, backup and disk services). Read-only.",
+        "steps": ["N-central › Administration › User Management: a user with a read-only role for the customers Guardian "
+                  "covers; on that user, API Access › Generate JSON Web Token.",
+                  "Paste the server address and the token below."],
+        "fields": [URL_FIELD, F("jwt", "User API token (JWT)", "password", secret=True), VERIFY],
+    },
+    "cw_automate": {
+        "label": "ConnectWise Automate", "icon": "CWA", "color": "#e6492d", "category": "Endpoints & network",
+        "status": "available", "multi": True, "always": True, "summary": "Computers and patch dates from your RMM",
+        "checks": "Used by the Patch & configuration agent: computers per client, OS, last contact, last patch date, antivirus, "
+                  "reboot needed. Read-only.",
+        "steps": ["Automate › System › Users: an integrator or API user with read-only permissions (no two-factor for API users).",
+                  "Register a Client ID at developer.connectwise.com.",
+                  "Paste the server address, Client ID, user and password below."],
+        "fields": [URL_FIELD, F("client_id", "Client ID", mono=True), F("username", "User", mono=True),
+                   F("password", "Password", "password", secret=True), VERIFY],
+    },
+    "jamf": {
+        "label": "Jamf Pro", "icon": "JMF", "color": "#4f6b8a", "category": "Endpoints & network",
+        "status": "available", "multi": True, "always": True, "summary": "Macs, iPhones and iPads",
+        "checks": "Used by the Device fleet agent: macOS versions, FileVault, System Integrity Protection, Gatekeeper, "
+                  "firewall, last contact; iOS / iPadOS versions. Read-only.",
+        "steps": ["Jamf Pro › Settings › API roles and clients: an API role with only Read privileges for computers and "
+                  "mobile devices, and an API client using it. Generate a client secret.",
+                  "Paste the Jamf Pro address, client ID and secret below."],
+        "fields": [URL_FIELD, F("client_id", "Client ID", mono=True), F("client_secret", "Client secret", "password", secret=True)],
+    },
+    "kandji": {
+        "label": "Kandji", "icon": "KAN", "color": "#2e7d6b", "category": "Endpoints & network",
+        "status": "available", "multi": True, "always": True, "summary": "Apple devices",
+        "checks": "Used by the Device fleet agent: OS versions, last check-in, missing devices, agent installed, blueprints.",
+        "steps": ["Kandji › Settings › Access › API token: add a token with only 'Device list' and 'Blueprints' read permissions.",
+                  "API URL: https://<subdomain>.api.kandji.io (EU: https://<subdomain>.api.eu.kandji.io). Paste it and the token."],
+        "fields": [F("url", "API URL", placeholder="https://", mono=True), F("token", "API token", "password", secret=True)],
     },
     "tenable": {
         "label": "Tenable Vulnerability Management", "icon": "TEN", "color": "#00a3e0", "category": "Scanners",
@@ -1034,7 +1109,9 @@ def _aws_test(f):
 
 
 FIREWALL_TEST = {"opnsense": "/api/core/firmware/info", "pfsense": "/api/v2/system/version",
-                 "fortigate": "/api/v2/monitor/system/status", "unifi": "/proxy/network/integration/v1/info"}
+                 "fortigate": "/api/v2/monitor/system/status", "unifi": "/proxy/network/integration/v1/info",
+                 "mikrotik": "/rest/system/resource"}
+FIREWALL_READ_TEST = {"paloalto": "system_info", "checkpoint": "api_versions", "sophos": "admin_settings"}
 
 
 def _test_firewall(f, pin):
@@ -1042,6 +1119,18 @@ def _test_firewall(f, pin):
     vendor = f.get("vendor")
     if vendor == "opnsense" and not f.get("key_id"):
         raise Result("error", "OPNsense needs both the API key and its secret")
+    if vendor in ("checkpoint", "sophos", "mikrotik") and not f.get("key_id"):
+        raise Result("error", "Enter the read-only user in the first field and its password as the token")
+    if vendor in FIREWALL_READ_TEST:
+        host, port = f["host"], int(f.get("port") or 443)
+        pin = _tls_context(host, port, f.get("verify_tls"), pin)[1]
+        r = access.firewall_read({"fields": f, "pin": pin}, FIREWALL_READ_TEST[vendor])
+        body = str(r.get("data", ""))
+        if r.get("error") or r.get("status") != 200 or re.search(r'status="error"|Authentication Failure|<Status code="5', body):
+            raise Result("error", r.get("error") or f"The firewall refused the request ({r.get('status')}): check the account and that the API is enabled")
+        ver = re.search(r"<sw-version>([^<]+)|\"(?:version|current-version)\"\s*:\s*\"([^\"]+)|<FirmwareVersion>([^<]+)", body)
+        return _done("ok", "Connected", [f"{vendor} {next((g for g in (ver.groups() if ver else ()) if g), '')}".strip(),
+                                         "Guardian only runs a fixed list of read requests; keep the account read-only."], pin=pin)
     host, port = f["host"], int(f.get("port") or 443)
     ctx, pin = _tls_context(host, port, f.get("verify_tls"), pin)
     st, d = _http(f"https://{host}:{port}{FIREWALL_TEST[vendor]}", ctx, access.firewall_auth(f))
@@ -1128,6 +1217,34 @@ def _test_google(kind, f):
     return _done(level, message, details)
 
 
+def _test_hibp(f):
+    from . import access
+    r = access.hibp_call(f, "/subscribeddomains")
+    if "error" in r:
+        raise Result("error", r["error"])
+    doms = [d.get("DomainName") for d in r["data"] or []]
+    if not doms:
+        raise Result("warn", "The key works, but no domain is verified for it yet (HIBP dashboard › Domain search).")
+    return _done("ok", "Connected", [f"{len(doms)} verified domain(s): " + ", ".join(doms[:6])])
+
+
+def _test_msp(ctype, f, pin):
+    from . import msptools
+    first = msptools.QUERIES[ctype][0]
+    ctx = None
+    try:
+        if ctype in ("ncentral", "cw_automate"):
+            import urllib.parse as up
+            u = up.urlsplit(msptools.base_url(f))
+            ctx, pin = _tls_context(u.hostname, u.port or 443, f.get("verify_tls"), pin)
+        res = msptools.run(ctype, f, first, ctx)
+    except msptools.MspError as e:
+        raise Result("error", str(e)[:1].upper() + str(e)[1:])
+    n = len(res) if isinstance(res, list) else 1
+    return _done("ok", "Connected", [f"{first.replace('_', ' ')}: {n} readable" if isinstance(res, list) else "Version readable",
+                                     "Give the account read-only rights only: Guardian never changes anything through it."], pin=pin)
+
+
 def _test_scanner(ctype, f, pin):
     from . import importers
     ctx = None
@@ -1170,6 +1287,8 @@ def test(ctype, fields, pin=None, state_dir=None, vault=None):
         "kubernetes": lambda: _test_kubernetes(fields, pin),
         "google_workspace": lambda: _test_google("workspace", fields),
         "gcp": lambda: _test_google("gcp", fields),
+        "hibp": lambda: _test_hibp(fields),
+        **{k: (lambda k=k: _test_msp(k, fields, pin)) for k in ("datto_rmm", "ncentral", "cw_automate", "jamf", "kandji")},
         "tenable": lambda: _test_scanner("tenable", fields, pin),
         "qualys": lambda: _test_scanner("qualys", fields, pin),
         "rapid7": lambda: _test_scanner("rapid7", fields, pin),

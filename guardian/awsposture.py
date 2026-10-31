@@ -341,9 +341,24 @@ def _admin_policies(creds):
 
 GLOBAL = {"identity": lambda c, a, f: whoami(c), "iam_summary": lambda c, a, f: _iam_summary(c), "credential_report": lambda c, a, f: _credential_report(c),
           "admin_policies": lambda c, a, f: _admin_policies(c), "s3_buckets": lambda c, a, f: _s3(c, a), "cloudtrail": lambda c, a, f: _trails(c, "us-east-1")}
+def _bedrock(creds, region):
+    """Bedrock in this region: whether model calls are logged, and the guardrails that exist (both read-only)."""
+    try:
+        log = rest_api(creds, "bedrock", region, "GET", "/logging/modelinvocations")
+        guards = rest_api(creds, "bedrock", region, "GET", "/guardrails")
+    except AwsError as e:
+        if "not" in str(e).lower() and ("subscribed" in str(e).lower() or "available" in str(e).lower()):
+            return {"region": region, "bedrock": "not available"}
+        raise
+    cfg = log.get("loggingConfig") or {}
+    return {"region": region, "invocation_logging": bool(cfg), "log_text": cfg.get("textDataDeliveryEnabled"),
+            "log_destinations": [k for k in ("cloudWatchConfig", "s3Config") if cfg.get(k)],
+            "guardrails": [g.get("name") for g in guards.get("guardrails") or []][:20]}
+
+
 REGIONAL = {"security_groups_open": _open_groups, "instances": _instances, "public_snapshots_images": _public_snapshots,
             "ebs_encryption_default": _ebs_default, "rds_instances": _rds, "guardduty": _guardduty, "security_hub": _securityhub,
-            "config_recorder": _config, "kms_rotation": _kms}
+            "config_recorder": _config, "kms_rotation": _kms, "bedrock": _bedrock}
 QUERIES = list(GLOBAL) + list(REGIONAL)
 
 

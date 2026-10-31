@@ -143,3 +143,36 @@ def build(meta, frameworks, findings, evidence, include_findings=True, include_e
 
     doc.build(s, onFirstPage=footer, onLaterPages=footer)
     return buf.getvalue()
+
+
+def letter(m):
+    """One-page assessment letter. m: issuer, issuer_address, recipient, place_date, customer, period, scope (list),
+    method, covered (list), devices, findings (counts by priority), verified, frameworks (list), open_text, signer."""
+    buf = io.BytesIO()
+    LET = ParagraphStyle("l", parent=BODY, fontSize=10, leading=14.5, spaceAfter=7)
+
+    def footer(canvas, doc):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 7)
+        canvas.setFillColor(MUTED)
+        canvas.drawString(18 * mm, 12 * mm, "This letter confirms that an assessment took place and summarises it. It is not a certification "
+                                             "and not a penetration-test attestation.")
+        canvas.restoreState()
+
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=22 * mm, rightMargin=22 * mm, topMargin=22 * mm, bottomMargin=22 * mm,
+                            title=f"Assessment letter · {m['customer']}", author=m["issuer"] or "AI IT Guardian")
+    f = m["findings"]
+    total = sum(f.values())
+    s = [P(m["issuer"], ParagraphStyle("i", parent=LET, fontName="Helvetica-Bold", spaceAfter=0)), P(m["issuer_address"], SMALL),
+         Spacer(1, 12 * mm), P(m["recipient"] or "To whom it may concern", LET), P(m["place_date"], LET), Spacer(1, 4 * mm),
+         P(f"Confirmation of an IT security assessment — {m['customer']}", ParagraphStyle("t", parent=LET, fontName="Helvetica-Bold")),
+         P(f"On {m['period']} we assessed the IT environment of {m['customer']} ({'; '.join(m['scope'])}) with AI IT Guardian, "
+           f"{m['method']}.", LET),
+         P(f"The assessment covered {', '.join(m['covered'])}. {m['devices']} devices were identified; {total} findings were raised "
+           f"({f.get(1, 0)} priority 1, {f.get(2, 0)} priority 2, {f.get(3, 0)} priority 3, {f.get(4, 0)} priority 4)."
+           + (f" Mapped frameworks: {', '.join(m['frameworks'])}." if m["frameworks"] else ""), LET)]
+    if m["open_text"]:
+        s.append(P(m["open_text"], LET))
+    s += [Spacer(1, 14 * mm), P("Signed: ______________________________", LET), P(m["signer"], LET)]
+    doc.build(s, onFirstPage=footer, onLaterPages=footer)
+    return buf.getvalue()

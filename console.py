@@ -497,7 +497,7 @@ STATIC = {"/console.css": ("console.css", "text/css"), "/theme.js": ("theme.js",
           "/remediate.js": ("remediate.js", "text/javascript"), "/code.js": ("code.js", "text/javascript"),
           "/plan.js": ("plan.js", "text/javascript"), "/schedule.js": ("schedule.js", "text/javascript"),
           "/ticketing.js": ("ticketing.js", "text/javascript"), "/sites.js": ("sites.js", "text/javascript"), "/sitecfg.js": ("sitecfg.js", "text/javascript"), "/vdp.js": ("vdp.js", "text/javascript"), "/integrations.js": ("integrations.js", "text/javascript"), "/webcheck.js": ("webcheck.js", "text/javascript"),
-          "/evidence.js": ("evidence.js", "text/javascript")}
+          "/evidence.js": ("evidence.js", "text/javascript"), "/assets.js": ("assets.js", "text/javascript")}
 PAGES = {"/": "console.html", "/settings": "settings.html", "/signin": "signin.html"}
 
 
@@ -554,6 +554,13 @@ def page_fix(request: Request):
     if not current(request)[1]:
         return Response(status_code=303, headers={"Location": "/signin"})
     return _page("remediate.html")
+
+
+@app.get("/assets")
+def page_assets(request: Request):
+    if not current(request)[1]:
+        return Response(status_code=303, headers={"Location": "/signin"})
+    return _page("assets.html")
 
 
 @app.get("/code")
@@ -1295,6 +1302,51 @@ def compliance_pdf(run_id: str, request: Request, frameworks: str = "", findings
                                                                  "Cache-Control": "no-store"})
 
 
+LAYER_SCOPE = {"network": "network services", "os": "operating systems and versions", "web": "web interfaces",
+               "firmware": "firmware", "wan": "the internet perimeter", "ad": "Active Directory", "m365": "Microsoft 365 / Entra ID",
+               "devices": "managed devices", "azure": "Microsoft Azure", "aws": "Amazon Web Services", "google": "Google Workspace / Cloud",
+               "business": "business systems (SAP, Salesforce)", "infra": "firewalls, hypervisors and containers",
+               "patch": "patch levels and configuration", "leaks": "leaked credentials", "ai": "AI usage"}
+
+
+@app.get("/api/runs/{run_id}/assessment-letter.pdf")
+def assessment_letter(run_id: str, request: Request, issuer: str = "", issuer_address: str = "", recipient: str = "",
+                      signer: str = "", place: str = "", open_text: str = "counts"):
+    """A one-page letter confirming the assessment; every number comes from the run."""
+    sid, s, user = require(request, "operator")
+    d = run_dir(run_id)
+    g = _read_graph(d)
+    rows = tracking_rows(d, g)
+    site_ = g.get("site") or {}
+    clip = lambda x, n=200: re.sub(r"[\x00-\x1f]", " ", x or "").strip()[:n]
+    customer = site_.get("name") or "the customer"
+    started = (g.get("started") or run_id)[:10]
+    ended = (g.get("finished") or g.get("updated") or g.get("started") or run_id)[:10]
+    scope = [f"networks {site_['network']}"] if site_.get("network") else []
+    scope += [f"{c['name']}" for c in (g.get("access") or [])][:8]
+    done = (g.get("compliance") or {})
+    fws = [FRAMEWORKS[k]["title"] for k in FRAMEWORKS if done.get(k)]
+    layers = [LAYER_SCOPE[k] for k in (g.get("agents") or {}) if k in LAYER_SCOPE]
+    open_rows = [r for r in rows if r["status"] not in ("verified",)]
+    counts = {p: sum(1 for r in rows if r["priority"] == p) for p in (1, 2, 3, 4)}
+    p1_open = sum(1 for r in open_rows if r["priority"] == 1)
+    verified = sum(1 for r in rows if r["status"] == "verified")
+    text = {"counts": (f"{verified} findings have been fixed and verified by re-check; {len(open_rows)} remain open and are tracked "
+                       f"with owners and due dates" + (f", including {p1_open} of priority 1." if p1_open else ", none of priority 1.")),
+            "none": ""}.get(open_text, clip(open_text, 600))
+    remote = bool(site_.get("remote"))
+    pdf = comppdf.letter({
+        "issuer": clip(issuer, 120) or "Your IT service provider", "issuer_address": clip(issuer_address),
+        "recipient": clip(recipient), "place_date": (clip(place, 60) + ", " if place else "") + time.strftime("%d %B %Y"),
+        "customer": customer, "period": started if started == ended else f"{started} to {ended}", "scope": scope or ["its network"],
+        "method": "read-only" + (", from inside the network through an on-site collector" if remote else ", from inside the network"),
+        "covered": layers or ["network services"], "devices": len(g.get("assets") or {}), "findings": counts,
+        "frameworks": fws, "open_text": text, "signer": clip(signer, 120) or user["name"]})
+    vault.audit(user["email"], "assessment-letter", f"{run_id} for {customer}")
+    return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="assessment-letter-{run_id}.pdf"',
+                                                                 "Cache-Control": "no-store"})
+
+
 @app.get("/api/runs/{run_id}/compliance-pack.zip")
 def compliance_pack(run_id: str, request: Request, frameworks: str = "", findings: int = 1, na: int = 0):
     user, meta, fws, fnd, ev = _export_parts(run_id, request, frameworks, bool(na))
@@ -1452,8 +1504,62 @@ def scheduled_tick(now=None):
     return mode
 
 
+ASSETS_DIR = STATE / "assets"
+_assets_lock = threading.Lock()
+
+
+def _open_by_asset(d, g):
+    out = {}
+    for r in tracking_rows(d, g):
+        if r["status"] in ("verified", "fixed", "accepted") or not r.get("asset"):
+            continue
+        pc = out.setdefault(str(r["asset"]).lower(), {})
+        pc[r["priority"]] = pc.get(r["priority"], 0) + 1
+    return out
+
+
+def asset_store(site_id, rebuild=True):
+    """The site's lasting asset list; built from all its past runs the first time it's needed."""
+    from guardian import assets as assets_mod
+    st = assets_mod.Store(ASSETS_DIR / f"{site_id}.json")
+    if rebuild and not st.path.exists():
+        last = None
+        for d in sorted(x for x in RUNS.iterdir() if x.is_dir() and RUN_ID.match(x.name)) if RUNS.exists() else []:
+            if run_site(d) == site_id and (d / "graph.json").exists():
+                g = _read_graph(d)
+                if st.merge_run(d.name, g):
+                    last = (d, g)
+        if last:
+            st.set_open(last[0].name, _open_by_asset(*last))
+        st.save()
+    return st
+
+
+def assets_update(run_id):
+    d = run_dir(run_id)
+    with _assets_lock:
+        st = asset_store(run_site(d))
+        g = _read_graph(d)
+        if st.merge_run(run_id, g):
+            st.set_open(run_id, _open_by_asset(d, g))
+            st.save()
+
+
+@app.get("/api/sites/{site_id}/assets")
+def site_assets(site_id: str, request: Request):
+    require(request)
+    if site_id != LOCAL:
+        site_or_404(site_id)
+    with _assets_lock:
+        return asset_store(site_id).view()
+
+
 def after_run(run_id, mode, note=None):
     """Runs in the console once a run has finished: carry tracking over, then send alerts."""
+    try:
+        assets_update(run_id)
+    except Exception as e:                                          # noqa: BLE001 - the asset list must not block alerts
+        print(f"asset list update failed: {e}", file=sys.stderr, flush=True)
     if mode in ("full", "resume", "followup"):
         carry_tracking(run_id)
         try:
@@ -2946,7 +3052,7 @@ def site_vdp_action(site_id: str, rid: str, body: VdpAction, request: Request):
 
 # -- remote sites through the on-site collector (phase B) -------------------------------------------------------------
 REMOTE_FILE = "remote.json"
-CLOUD_TYPES = ("m365", "azure", "aws", "ninjaone", "salesforce", "sap_btp", "google_workspace", "gcp", "tenable", "qualys")      # reachable from here; the rest need the collector
+CLOUD_TYPES = ("m365", "azure", "aws", "ninjaone", "salesforce", "sap_btp", "google_workspace", "gcp", "tenable", "qualys", "hibp", "datto_rmm", "ncentral", "cw_automate", "jamf", "kandji")      # reachable from here; the rest need the collector
 
 
 def _remote(d):
@@ -3450,7 +3556,8 @@ def launch(mode, run_id, sid, user, inbox=None):
 
 
 HANDOFF_TYPES = ("active_directory", "linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "m365", "windows", "azure", "ninjaone",
-                 "sap_abap", "sap_btp", "salesforce", "aws", "firewall", "vmware", "docker", "kubernetes", "google_workspace", "gcp")
+                 "sap_abap", "sap_btp", "salesforce", "aws", "firewall", "vmware", "docker", "kubernetes", "google_workspace", "gcp", "hibp",
+                 "datto_rmm", "ncentral", "cw_automate", "jamf", "kandji")
 
 
 def connector_handoff(site_id=LOCAL, run=None):

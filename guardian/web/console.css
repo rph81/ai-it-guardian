@@ -557,3 +557,7 @@ table.pf tr.clickable:hover td,table.pf tr.clickable:focus-visible td{background
 .vdp{max-width:760px;margin:0 auto;padding:40px 16px 60px}
 .vdp textarea{width:100%;font:inherit}
 .pre{white-space:pre-wrap;font-size:13px;margin:6px 0}
+/* Assets page */
+.as-q{margin-left:auto;min-width:240px}
+.as-row{cursor:pointer}.as-row:hover td,.as-row:focus td{background:color-mix(in srgb,var(--accent) 6%,transparent)}
+.as-detail td{background:var(--bg2)}.as-row td .tag{margin:1px 3px 1px 0}

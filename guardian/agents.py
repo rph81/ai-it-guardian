@@ -170,7 +170,7 @@ unconstrained delegation, no lockout or end-of-life domain controllers are high;
     "patch": {
         "title": "Patch & configuration",
         "tools": ["list_connectors", "linux_check", "linux_vulnerable_packages", "windows_check", "synology_info", "proxmox_get",
-                  "ninja_query", "inventory", "eol_lookup", "cve_lookup", "record_finding"],
+                  "ninja_query", "msp_query", "inventory", "eol_lookup", "cve_lookup", "record_finding"],
         "web": True,
         "brief": """Your layer: what a scan from outside can't see, read from inside through the connectors, the way Nessus
 credentialed scans, Qualys VMDR / Policy Compliance and Rapid7 InsightVM do. Everything is read-only: fixed checks, a
@@ -192,6 +192,12 @@ normal user, no sudo. Start with list_connectors, then for each system:
   "antivirus_status" (AV off, outdated or threats found), "device_health". One finding per issue, asset: the device's
   IP when known, otherwise "ninja/<device name>"; name the devices and the KBs in the evidence. Read "devices" before
   "os_patches_pending" so devices are named.
+- Other RMMs (msp_query): Datto RMM "devices" (patch_status, patches_pending, antivirus_status, reboot_required,
+  last_seen), N-central "devices" and "active_issues" (failed patch, antivirus or backup services), ConnectWise Automate
+  "computers" (last_patched older than ~45 days, no antivirus). Same rules as NinjaOne; asset "rmm/<device>".
+- Hyper-V hosts (windows_check "hyperv" on a Windows connector host): VM configuration versions far behind the host,
+  Secure Boot off on generation 2 VMs, VMs set to start automatically that nobody knows about; say so when the account
+  has no read access to the virtualization namespace.
 - Synology (synology_info): DSM version and whether an update is available; check the vendor's support status with
   web search (models stop getting updates).
 - Proxmox VE / Backup Server (proxmox_get): /version, /nodes, /nodes/<node>/apt/update (pending updates),
@@ -234,9 +240,10 @@ permission reasons, say what is missing in one info finding instead of guessing.
     },
     "devices": {
         "title": "Device fleet",
-        "tools": ["list_connectors", "graph_get", "eol_lookup", "record_finding"],
+        "tools": ["list_connectors", "graph_get", "msp_query", "eol_lookup", "record_finding"],
         "web": True,
-        "brief": """Your layer: the laptops, desktops and phones managed by Microsoft Intune (and seen by Microsoft Defender),
+        "brief": """Your layer: the laptops, desktops and phones managed by Microsoft Intune (and seen by Microsoft Defender), Jamf
+Pro or Kandji,
 including devices that are rarely on the office network: the coverage Tenable, Qualys and Rapid7 get from their endpoint
 agents. Read through the Microsoft 365 connector. Start with list_connectors, then:
 - /deviceManagement/managedDevices with $select=deviceName,operatingSystem,osVersion,complianceState,isEncrypted,
@@ -248,7 +255,10 @@ agents. Read through the Microsoft 365 connector. Start with list_connectors, th
   all for each platform, does it require encryption, a minimum OS version and a password.
 - /deviceManagement/managedDeviceOverview for totals; /devices for Entra-registered devices not in Intune.
 - /security/alerts_v2 with $filter=status ne 'resolved': open Defender alerts per device.
-Record one finding per issue (asset: 'site'; name the devices in the evidence, at most 20, plus the total). Severity:
+- Apple devices in Jamf Pro (msp_query "computers", "mobile_devices") or Kandji ("devices"): FileVault off, System
+  Integrity Protection or Gatekeeper off, firewall off, macOS / iOS versions out of support (eol_lookup "macos", "ios"),
+  devices not seen for 30+ days or marked missing.
+Only use the connectors that exist (list_connectors). Record one finding per issue (asset: 'site'; name the devices in the evidence, at most 20, plus the total). Severity:
 open high Defender alerts and unencrypted or non-compliant devices with company data are high; stale devices and missing
 policies medium. If Intune isn't licensed or the permission is missing, record one info finding saying so.""",
     },
@@ -371,6 +381,44 @@ are critical or high; audit log off, weak password parameters, stored RFC passwo
 hygiene low. If a read is refused for authorization reasons, record one info finding naming the missing
 authorization (S_TABU_NAM for the table, or the API role).""",
     },
+    "leaks": {
+        "title": "Leaked credentials",
+        "tools": ["list_connectors", "hibp_query", "record_finding"],
+        "web": False,
+        "brief": """Your layer: staff credentials that have leaked outside, the way Pentera's leaked-credential checks, Have I
+Been Pwned domain search and dark-web monitoring services report them. You read through the Have I Been Pwned connector
+(read-only; it never returns passwords). Start with list_connectors, then hibp_query "domains", "breaches" and
+"stealer_logs".
+- Stealer logs are the most urgent: a password captured from an infected browser, usually with the session. Each
+  address there is a high finding (critical if it is an admin or a shared mailbox such as finance@ or it@); say which
+  sign-ins were captured (websites listed) and that the device that leaked them must be found.
+- Breaches: group by address. Breaches in the last two years with passwords leaked (DataClasses contains "Passwords")
+  are medium, high when the address is an admin or many addresses share the breach. Older breaches or breaches without
+  passwords are low; one info finding is enough for those.
+Record one finding per issue (asset: "email/<domain>"). List at most 20 addresses per finding plus the total; never
+guess passwords and never suggest testing them. Recommend: reset the passwords, check MFA on those accounts, look for
+password reuse, and for stealer logs, find and clean the infected device.""",
+    },
+    "ai": {
+        "title": "AI usage",
+        "tools": ["list_connectors", "ai_usage", "record_finding"],
+        "web": True,
+        "brief": """Your layer: which AI tools the business uses and whether they put its data at risk, the way Tenable AI
+Exposure, Qualys TotalAI and Wiz AI-SPM report it. You read through the existing connectors (read-only): call
+ai_usage once for each Microsoft 365, Google Workspace, NinjaOne, Azure and AWS connector from list_connectors.
+- AI apps connected to Microsoft 365 or Google: an app with admin consent or many user consents and broad permissions
+  (read all mail, all files, all sites, meeting transcripts) is high: company data flows to that vendor. Unverified
+  publishers raise it. Meeting recorders (Otter, Fireflies, Read AI...) are medium at least: they record and store
+  meetings, often joining automatically. Copilot is usually sanctioned: info unless permissions look wrong.
+- AI apps installed on devices: list the products and device counts in one finding per product group; DeepSeek and
+  local model runners deserve a note on where data goes.
+- Azure AI services with public network access enabled and local (key) authentication on are medium; no customer-
+  managed keys is low. AWS Bedrock without invocation logging is medium; no guardrails low.
+- If the business has no AI policy evidence, recommend one (allowed tools, data that may not go into them).
+Record one finding per issue. asset: "m365/<tenant>", "google/<domain>", "azure/<subscription>/<name>",
+"aws/<region>/bedrock" or "devices". Use web search only to check what a little-known AI app is and where it keeps data.
+Don't judge use of AI as such: report where data goes and what access the apps hold.""",
+    },
     "infra": {
         "title": "Infrastructure",
         "tools": ["list_connectors", "firewall_get", "vmware_get", "docker_query", "k8s_query", "inventory", "eol_lookup",
@@ -379,7 +427,8 @@ authorization (S_TABU_NAM for the table, or the API role).""",
         "brief": """Your layer: the firewalls, hypervisors and container platforms, read from inside through their APIs the way
 Tenable / Qualys configuration audits, firewall analyzers and Kubernetes posture tools (Wiz KSPM, Sysdig, kube-bench) do.
 Everything is read-only: fixed paths and queries, read-only accounts, secrets hidden. Start with list_connectors, then:
-- Firewalls (firewall_get; paths depend on the vendor in list_connectors): firmware / version and pending updates
+- Firewalls (firewall_get; paths, or read names for Palo Alto / Check Point / Sophos, depend on the vendor in
+  list_connectors): firmware / version and pending updates
   (then cve_lookup and eol_lookup: firewall CVEs are often actively exploited, check KEV); rules allowing any source to
   any destination or any service, inbound rules or port forwards / VIPs open to the internet (management, RDP, SMB,
   databases are high); admin access (HTTPS, SSH) allowed on the WAN interface; admin accounts, password policy and
@@ -467,7 +516,7 @@ Finish with a short summary: the five findings to fix first, and why.""",
     },
     "paths": {
         "title": "Attack paths",
-        "tools": ["list_findings", "finding_details", "inventory", "asset_details", "attack_catalog", "record_path"],
+        "tools": ["list_findings", "finding_details", "inventory", "asset_details", "attack_catalog", "threat_actors", "record_path"],
         "web": False,
         "brief": """Your job: show how an attacker could chain the observed weaknesses into a real attack, the way Tenable One
 attack paths, Wiz "toxic combinations" and Horizon3 NodeZero narratives do, but reasoned from the evidence only:
@@ -479,6 +528,9 @@ nothing is exploited. Steps:
    finding ID when there is one; a step without a finding must say why it is plausible (e.g. "flat network: no
    segmentation found between IoT and servers"). Give each step its ATT&CK technique (attack_catalog) when one fits.
 3. For each path, name the choke points: the one or two fixes that break it, tied to finding IDs.
+4. Before recording a path, call threat_actors with its steps' techniques and put the groups that match at least 3
+   of them in "actors" (name and how many matched, e.g. "FIN7 (5 of 7)"). Say it plainly: these groups are known to
+   use the same techniques, not evidence that they target this business.
 Never invent vulnerabilities. If the findings don't support a meaningful path, record none and say so.
 Finish with a short summary: the paths, and which fixes break most of them.""",
     },
@@ -488,7 +540,7 @@ Finish with a short summary: the paths, and which fixes break most of them.""",
         "web": False,
         "brief": """Your job: turn this assessment into audit evidence for four frameworks: cis_ig1, iso27001, nis2 and nlpd
 (Swiss data protection), plus cis_azure when the Azure agent ran (list_findings layer "azure") and cis_aws when the AWS agent ran (layer "aws"),
-and pci_dss and soc2 (both always: most of their controls are process controls, so not_assessed is common). For each framework, read control_catalog and give EVERY control a status with set_controls
+and pci_dss, soc2 and nist_csf (always: most of their controls are process controls, so not_assessed is common). For each framework, read control_catalog and give EVERY control a status with set_controls
 (batches of up to 100):
 - gap: a finding shows the control is not in place (cite the finding IDs).
 - partial: in place for some devices or accounts but not others, or only partly (cite findings or what was observed).

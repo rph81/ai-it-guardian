@@ -164,6 +164,8 @@ const Plan = (() => {
         s.finding ? fref(s.finding) : null))),
       p.choke_points.length ? el("div", {class: "ap-choke"}, el("b", {}, "Choke points: "),
         ...p.choke_points.map(c => el("div", {}, "• ", c.fix, c.finding ? ` (${c.finding})` : ""))) : null,
+      (p.actors || []).length ? el("p", {class: "note"}, "Techniques also used by: ", ...p.actors.map(a => el("span", {class: "tag"}, a)),
+        " (known groups using the same techniques; not a sign they target you)") : null,
       el("p", {class: "note"}, p.summary))));
   }
 
@@ -249,7 +251,24 @@ const Plan = (() => {
       el("div", {class: "row mt16"}, ...boxes.map(x => x[1])), el("div", {class: "row"}, fl, nl),
       el("div", {class: "row mt16"}, el("button", {class: "btn primary", type: "button", onclick: () => go("compliance.pdf")}, "Download PDF"),
         el("button", {class: "btn", type: "button", onclick: () => go("compliance-pack.zip")}, "Evidence pack (ZIP)")),
-      el("p", {class: "note"}, "The pack holds the PDF, the evidence files and SHA256SUMS.txt, so an auditor can check each file against the PDF's list."));
+      el("p", {class: "note"}, "The pack holds the PDF, the evidence files and SHA256SUMS.txt, so an auditor can check each file against the PDF's list."),
+      letterForm());
+  }
+
+  // one-page letter confirming the assessment (for an auditor or insurer); the issuer fields are remembered in this browser
+  function letterForm() {
+    const mem = (() => { try { return JSON.parse(localStorage.getItem("guardian-letter") || "{}"); } catch (e) { return {}; } })();
+    const inp = (k, ph) => el("input", {value: mem[k] || "", placeholder: ph, maxlength: "200", "aria-label": ph});
+    const f = {issuer: inp("issuer", "Your company"), issuer_address: inp("issuer_address", "Address"), place: inp("place", "Place, e.g. Zürich"),
+               signer: inp("signer", "Signed by: name, role"), recipient: el("input", {placeholder: "Recipient (optional)", maxlength: "200", "aria-label": "Recipient"})};
+    const open = el("select", {"aria-label": "Open findings"}, el("option", {value: "counts"}, "State fixed and open findings"), el("option", {value: "none"}, "Don't mention open findings"));
+    const go = el("button", {class: "btn", type: "button", onclick: () => {
+      const keep = {}; for (const k of ["issuer", "issuer_address", "place", "signer"]) keep[k] = f[k].value;
+      try { localStorage.setItem("guardian-letter", JSON.stringify(keep)); } catch (e) { /* private window */ }
+      const q = new URLSearchParams({...Object.fromEntries(Object.entries(f).map(([k, v]) => [k, v.value])), open_text: open.value});
+      location.href = `/api/runs/${S.run}/assessment-letter.pdf?${q}`; }}, "Assessment letter (PDF)");
+    return el("div", {class: "mt16"}, el("p", {class: "note"}, "Assessment letter: one page confirming scope, dates, method and outcome, for an auditor or insurer. Not a certification."),
+      el("div", {class: "row"}, f.issuer, f.issuer_address, f.place), el("div", {class: "row"}, f.signer, f.recipient, open, go));
   }
 
   function renderComp() {

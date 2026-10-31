@@ -19,14 +19,19 @@ import urllib.request
 from . import connectors as conn
 
 _CONNECTORS = []        # [{"id", "type", "name", "fields": {...incl. secrets}, "pin"}]
+LAST_ROWS = {}          # (kind, connector, query) -> full rows of the last read, for the asset inventory
 _SSH = {"private": None, "path": None}
 _STATE_DIR = None
 TYPES = {"active_directory", "linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "m365", "windows", "azure", "ninjaone",
-         "sap_abap", "sap_btp", "salesforce", "aws", "firewall", "vmware", "docker", "kubernetes", "google_workspace", "gcp"}
+         "sap_abap", "sap_btp", "salesforce", "aws", "firewall", "vmware", "docker", "kubernetes", "google_workspace", "gcp", "hibp",
+         "datto_rmm", "ncentral", "cw_automate", "jamf", "kandji"}
 CONNECTOR_AGENTS = {"ad": ["active_directory"], "patch": ["linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "windows", "ninjaone"],
                     "m365": ["m365"], "devices": ["m365"], "azure": ["azure"],
                     "business": ["sap_abap", "sap_btp", "salesforce"], "aws": ["aws"],
-                    "infra": ["firewall", "vmware", "docker", "kubernetes"], "google": ["google_workspace", "gcp"]}
+                    "infra": ["firewall", "vmware", "docker", "kubernetes"], "google": ["google_workspace", "gcp"],
+                    "leaks": ["hibp"], "ai": ["m365", "google_workspace", "ninjaone", "azure", "aws"]}
+CONNECTOR_AGENTS["patch"] += ["datto_rmm", "ncentral", "cw_automate"]
+CONNECTOR_AGENTS["devices"] += ["jamf", "kandji"]
 
 
 def load(data, state_dir):
@@ -304,7 +309,7 @@ AD_QUERIES = {
     "stale_users": ("sub", None, ["sAMAccountName", "lastLogonTimestamp", "adminCount"]),
     "stale_computers": ("sub", None, ["sAMAccountName", "operatingSystem", "lastLogonTimestamp"]),
     "computer_os": ("sub", "(&(objectCategory=computer)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))",
-                    ["operatingSystem", "operatingSystemVersion"]),
+                    ["operatingSystem", "operatingSystemVersion", "sAMAccountName", "lastLogonTimestamp"]),
     "laps_coverage": ("sub", "(&(objectCategory=computer)(!(primaryGroupID=516))(!(userAccountControl:1.2.840.113556.1.4.803:=2)))",
                       ["sAMAccountName", "ms-Mcs-AdmPwdExpirationTime", "msLAPS-PasswordExpirationTime"]),
     "krbtgt": ("sub", "(sAMAccountName=krbtgt)", ["pwdLastSet"]),
@@ -415,6 +420,7 @@ def ad_query(cid, query, days=90):
             result = {"domain": nc, "computers": len(rows), "with_laps": covered,
                       "without_laps": [r["sAMAccountName"] for r in rows if not (r.get("ms-Mcs-AdmPwdExpirationTime") or r.get("msLAPS-PasswordExpirationTime"))][:100],
                       "note": "A normal user may not be allowed to read the LAPS attributes; 0 covered can mean 'not readable'."}
+        LAST_ROWS[("ad", cid, query)] = rows            # full list for the asset inventory; the agent gets the summary
         if query == "computer_os":
             counts = {}
             for r in rows:
@@ -439,7 +445,7 @@ GRAPH_PATHS = [
     r"/security/secureScores", r"/security/secureScoreControlProfiles", r"/security/alerts_v2", r"/security/incidents",
     r"/deviceManagement/managedDevices", r"/deviceManagement/managedDevices/[\w-]+", r"/deviceManagement/deviceCompliancePolicies",
     r"/deviceManagement/deviceConfigurations", r"/deviceManagement/managedDeviceOverview",
-    r"/deviceManagement/windowsAutopilotDeviceIdentities", r"/devices",
+    r"/deviceManagement/windowsAutopilotDeviceIdentities", r"/deviceManagement/detectedApps", r"/devices",
 ]
 GRAPH_QUERY = {"$select", "$filter", "$top", "$expand", "$orderby", "$count", "$search"}
 _GRAPH_TOKEN = {}
@@ -454,8 +460,8 @@ def _graph_token(c):
     return token
 
 
-def graph_get(cid, path, query=None, beta=False, max_pages=5):
-    """GET one allow-listed Microsoft Graph path, following up to max_pages of results."""
+def graph_get(cid, path, query=None, beta=False, max_pages=5, full=False):
+    """GET one allow-listed Microsoft Graph path, following up to max_pages of results (full: no size cap, for Guardian's own use)."""
     c = _get(cid, {"m365"})
     path = "/" + path.strip().lstrip("/").split("?")[0]
     if ".." in path or not any(re.fullmatch(p, path) for p in GRAPH_PATHS):
@@ -481,7 +487,7 @@ def graph_get(cid, path, query=None, beta=False, max_pages=5):
             return {"status": st, "data": d}
     body = json.dumps(rows, default=str)
     out = {"status": 200, "count": len(rows), "more": bool(url), "rows": rows}
-    if len(body) > 30000:
+    if len(body) > 30000 and not full:
         out.update(rows=json.loads(json.dumps(rows[:max(1, int(len(rows) * 30000 / len(body)))], default=str)), truncated=True)
     return out
 
@@ -490,6 +496,7 @@ def graph_get(cid, path, query=None, beta=False, max_pages=5):
 ARM = "https://management.azure.com"
 # Resource Graph: fixed queries only. The agent picks a name; it can narrow by resource group, never write KQL.
 AZURE_QUERIES = {
+    "ai_services": "resources | where type in~ ('microsoft.cognitiveservices/accounts', 'microsoft.machinelearningservices/workspaces', 'microsoft.search/searchservices') | project name, type, kind, resourceGroup, subscriptionId, location, publicNetworkAccess=tostring(properties.publicNetworkAccess), localAuthDisabled=tostring(properties.disableLocalAuth), defaultAction=tostring(properties.networkAcls.defaultAction), keySource=tostring(properties.encryption.keySource), privateEndpoints=array_length(properties.privateEndpointConnections)",
     "subscriptions": "resourcecontainers | where type == 'microsoft.resources/subscriptions' | project subscriptionId, name, state=tostring(properties.state)",
     "resource_counts": "resources | summarize count() by type | order by count_ desc | take 100",
     "public_ips": "resources | where type == 'microsoft.network/publicipaddresses' | project name, resourceGroup, subscriptionId, ip=properties.ipAddress, attachedTo=tostring(properties.ipConfiguration.id), natGateway=tostring(properties.natGateway.id), sku=tostring(sku.name)",
@@ -659,6 +666,7 @@ NINJA_QUERIES = {
     "software_patches_pending": ("/v2/queries/software-patches", {"status": "PENDING"}),
     "antivirus_status": ("/v2/queries/antivirus-status", {}),
     "device_health": ("/v2/queries/device-health", {}),
+    "software": ("/v2/queries/software", {}),
 }
 _NJ = {}
 
@@ -707,6 +715,12 @@ WINDOWS_CHECKS = {
                  "BehaviorMonitorEnabled,IsTamperProtected,AntivirusSignatureLastUpdated,QuickScanEndTime,AMRunningMode | ConvertTo-Json"),
     "firewall": "Get-NetFirewallProfile | Select-Object Name,Enabled,DefaultInboundAction,DefaultOutboundAction | ConvertTo-Json",
     "bitlocker": "try { Get-BitLockerVolume -EA Stop | Select-Object MountPoint,VolumeStatus,ProtectionStatus,EncryptionMethod | ConvertTo-Json } catch { 'not readable with this account' }",
+    "hyperv": ("$n='root\\virtualization\\v2'; try { $s=Get-CimInstance -Namespace $n -ClassName Msvm_VirtualSystemSettingData "
+               "-Filter \"VirtualSystemType='Microsoft:Hyper-V:System:Realized'\" -EA Stop | Select-Object ElementName,Version,"
+               "VirtualSystemSubType,SecureBootEnabled,AutomaticStartupAction; $v=Get-CimInstance -Namespace $n -ClassName "
+               "Msvm_ComputerSystem -Filter \"Caption='Virtual Machine'\" | Select-Object ElementName,EnabledState,OnTimeInMilliseconds; "
+               "[pscustomobject]@{settings=$s; state=$v} | ConvertTo-Json -Depth 3 } catch { 'no Hyper-V or no read access to "
+               "root\\virtualization\\v2: ' + $_.Exception.Message }"),
     "local_admins": "Get-LocalGroupMember -SID S-1-5-32-544 -EA SilentlyContinue | Select-Object Name,ObjectClass,PrincipalSource | ConvertTo-Json",
     "smb": "Get-SmbServerConfiguration | Select-Object EnableSMB1Protocol,EnableSMB2Protocol,RequireSecuritySignature,EncryptData | ConvertTo-Json",
     "rdp": ("$t='HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server'; [pscustomobject]@{"
@@ -830,11 +844,48 @@ FIREWALL_PATHS = {
                   r"/api/v2/cmdb/vpn.ssl/settings", r"/api/v2/cmdb/vpn.ipsec/phase1-interface", r"/api/v2/cmdb/log/setting"],
     "unifi": [r"/proxy/network/integration/v1/info", r"/proxy/network/integration/v1/sites",
               r"/proxy/network/integration/v1/sites/[\w-]{1,64}/devices"],
+    "mikrotik": [r"/rest/system/resource", r"/rest/system/routerboard", r"/rest/system/package/update", r"/rest/system/package",
+                 r"/rest/ip/firewall/filter", r"/rest/ip/firewall/nat", r"/rest/ip/service", r"/rest/user", r"/rest/user/group",
+                 r"/rest/ip/ipsec/peer", r"/rest/interface/wireguard", r"/rest/ip/upnp", r"/rest/system/logging", r"/rest/snmp"],
 }
+# vendors whose APIs aren't plain GET paths: fixed named reads (method, path, body)
+PAN = "/api/?type={t}&{q}"
+FIREWALL_READS = {
+    "paloalto": {
+        "system_info": ("GET", PAN.format(t="op", q="cmd=<show><system><info></info></system></show>"), None),
+        "security_rules": ("GET", PAN.format(t="config", q="action=show&xpath=/config/devices/entry/vsys/entry/rulebase/security"), None),
+        "nat_rules": ("GET", PAN.format(t="config", q="action=show&xpath=/config/devices/entry/vsys/entry/rulebase/nat"), None),
+        "interfaces": ("GET", PAN.format(t="config", q="action=show&xpath=/config/devices/entry/network/interface"), None),
+        "management_profiles": ("GET", PAN.format(t="config", q="action=show&xpath=/config/devices/entry/network/profiles/interface-management-profile"), None),
+        "device_settings": ("GET", PAN.format(t="config", q="action=show&xpath=/config/devices/entry/deviceconfig/system"), None),
+        "admins": ("GET", PAN.format(t="config", q="action=show&xpath=/config/mgt-config/users"), None),
+        "globalprotect": ("GET", PAN.format(t="config", q="action=show&xpath=/config/devices/entry/vsys/entry/global-protect"), None),
+        "log_settings": ("GET", PAN.format(t="config", q="action=show&xpath=/config/devices/entry/vsys/entry/log-settings"), None),
+    },
+    "checkpoint": {         # Management API "show" commands (read-only; POST is how that API works)
+        "api_versions": ("POST", "/web_api/show-api-versions", {}),
+        "gateways": ("POST", "/web_api/show-gateways-and-servers", {"details-level": "full", "limit": 100}),
+        "access_rules": ("POST", "/web_api/show-access-rulebase", {"name": "Network", "limit": 500, "details-level": "standard", "use-object-dictionary": False}),
+        "nat_rules": ("POST", "/web_api/show-nat-rulebase", {"package": "Standard", "limit": 500}),
+        "administrators": ("POST", "/web_api/show-administrators", {"details-level": "full", "limit": 200}),
+        "vpn_communities": ("POST", "/web_api/show-vpn-communities-star", {"limit": 50}),
+    },
+    "sophos": {             # SFOS XML API: <Get> requests only
+        "firewall_rules": ("XML", "FirewallRule", None), "nat_rules": ("XML", "NATRule", None), "zones": ("XML", "Zone", None),
+        "admin_settings": ("XML", "AdminSettings", None), "ipsec": ("XML", "VPNIPSecConnection", None),
+        "ssl_vpn": ("XML", "SSLTunnelAccessSettings", None), "web_admin": ("XML", "WebAdminSettings", None),
+    },
+}
+XML_SECRETS = re.compile(r"(<(?:phash|password|Password|psk|PresharedKey|secret|Secret|key)>)[^<]*(</)", re.I)
 
 
 def firewall_auth(f):
     v, tok = f.get("vendor"), f.get("token") or ""
+    if v == "paloalto":
+        return {"X-PAN-KEY": tok}
+    if v == "mikrotik":
+        import base64
+        return {"Authorization": "Basic " + base64.b64encode(f"{f.get('key_id', '')}:{tok}".encode()).decode()}
     if v == "opnsense":
         import base64
         return {"Authorization": "Basic " + base64.b64encode(f"{f.get('key_id', '')}:{tok}".encode()).decode()}
@@ -843,10 +894,65 @@ def firewall_auth(f):
     return {"X-API-Key": tok} if v == "pfsense" else {"X-API-KEY": tok}
 
 
+def _raw(method, url, ctx, headers=None, body=None, timeout=25):
+    """For XML APIs: (status, text), capped."""
+    req = urllib.request.Request(url, method=method, data=body, headers={"User-Agent": "ai-guardian", **(headers or {})})
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=timeout) as r:
+            st, text = r.status, r.read(4 * 2**20).decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        st, text = e.code, e.read(4000).decode("utf-8", "replace")
+    except (urllib.error.URLError, OSError) as e:
+        return 0, f"can't reach it: {getattr(e, 'reason', e)}"
+    return st, text
+
+
+def firewall_read(c, name):
+    """One named read on a Palo Alto, Check Point or Sophos firewall."""
+    f = c["fields"]
+    reads = FIREWALL_READS[f["vendor"]]
+    if name not in reads:
+        return {"error": "read not in the list", "allowed": list(reads)}
+    method, path, body = reads[name]
+    host, port = f["host"], int(f.get("port") or 443)
+    ctx = conn._tls_context(host, port, f.get("verify_tls"), c.get("pin"))[0]
+    base = f"https://{host}:{port}"
+    if f["vendor"] == "paloalto":
+        st, text = _raw("GET", base + urllib.parse.quote(path, safe="/?=&"), ctx, firewall_auth(f))
+        return _clip(st, XML_SECRETS.sub(r"\1[hidden]\2", text))
+    if f["vendor"] == "sophos":
+        xml = ("<Request><Login><Username>{u}</Username><Password>{p}</Password></Login><Get><{e}></{e}></Get></Request>"
+               .format(u=_xml_escape(f.get("key_id", "")), p=_xml_escape(f.get("token", "")), e=path))
+        st, text = _raw("POST", base + "/webconsole/APIController", ctx, {"Content-Type": "application/x-www-form-urlencoded"},
+                        urllib.parse.urlencode({"reqxml": xml}).encode())
+        return _clip(st, XML_SECRETS.sub(r"\1[hidden]\2", text))
+    st, login = _raw("POST", base + "/web_api/login", ctx, {"Content-Type": "application/json"},
+                     json.dumps({"user": f.get("key_id", ""), "password": f.get("token", ""), "read-only": True}).encode())
+    try:
+        sid = json.loads(login)["sid"]
+    except (ValueError, KeyError, TypeError):
+        return {"status": st, "error": "Check Point refused the sign-in"}
+    try:
+        st, text = _raw("POST", base + path, ctx, {"Content-Type": "application/json", "X-chkp-sid": sid}, json.dumps(body).encode())
+        try:
+            return _clip(st, _scrub(json.loads(text)))
+        except ValueError:
+            return _clip(st, XML_SECRETS.sub(r"\1[hidden]\2", text))
+    finally:
+        _raw("POST", base + "/web_api/logout", ctx, {"Content-Type": "application/json", "X-chkp-sid": sid}, b"{}")
+
+
+def _xml_escape(s):
+    from xml.sax.saxutils import escape
+    return escape(str(s))
+
+
 @_on_site
 def firewall_get(cid, path):
     c = _get(cid, {"firewall"})
     f = c["fields"]
+    if f.get("vendor") in FIREWALL_READS:
+        return firewall_read(c, path.strip().strip("/"))
     allowed = FIREWALL_PATHS.get(f.get("vendor"), [])
     path = "/" + path.strip().lstrip("/").split("?")[0]
     if not any(re.fullmatch(p, path) for p in allowed):
@@ -1076,3 +1182,125 @@ def gcp_query(cid, query, project=None):
     if isinstance(res, dict) and "rows" in res:
         return {**bizsys.cap(res["rows"]), **{k: v for k, v in res.items() if k != "rows"}}
     return bizsys.cap(res)
+
+
+# -- Have I Been Pwned: breached and stealer-logged addresses of the customer's verified domains -------------------
+HIBP = "https://haveibeenpwned.com/api/v3"
+HIBP_QUERIES = ("domains", "breaches", "stealer_logs")
+
+
+def hibp_call(f, path):
+    st, d = conn._http(HIBP + path, ssl.create_default_context(), {"hibp-api-key": f["api_key"], "Accept": "application/json"}, timeout=30)
+    if st == 404:
+        return {"status": 404, "data": {}}
+    if st == 401:
+        return {"error": "HIBP refused the API key"}
+    if st == 403:
+        return {"error": "This HIBP plan doesn't include that (stealer logs need Pwned 5 or higher), or the domain isn't verified"}
+    if st == 429:
+        return {"error": "HIBP rate limit reached; try again in a minute"}
+    if st != 200:
+        return {"error": f"HIBP answered {st}"}
+    return {"status": 200, "data": d}
+
+
+def hibp_query(cid, query):
+    c = _get(cid, {"hibp"})
+    f = c["fields"]
+    if query not in HIBP_QUERIES:
+        return {"error": "unknown query", "allowed": list(HIBP_QUERIES)}
+    r = hibp_call(f, "/subscribeddomains")
+    if "error" in r:
+        return r
+    doms = [d.get("DomainName") for d in r["data"] or [] if d.get("DomainName")]
+    want = (f.get("domains") or "").split()
+    doms = [d for d in doms if d in want] if want else doms
+    if query == "domains":
+        return {"status": 200, "domains": [{"domain": d.get("DomainName"), "pwned_count": d.get("PwnCount"),
+                                            "pwned_excluding_spam": d.get("PwnCountExcludingSpamLists")}
+                                           for d in r["data"] or [] if d.get("DomainName") in doms]}
+    out, details = [], {}
+    for dom in doms[:20]:
+        path = f"/breacheddomain/{urllib.parse.quote(dom)}" if query == "breaches" else f"/stealerlogsbyemaildomain/{urllib.parse.quote(dom)}"
+        x = hibp_call(f, path)
+        if "error" in x:
+            out.append({"domain": dom, "error": x["error"]})
+            continue
+        for alias, items in sorted((x["data"] or {}).items()):
+            if query == "stealer_logs":                     # items are websites whose sign-ins were captured
+                out.append({"address": f"{alias}@{dom}", "captured_sign_ins_for": items[:20], "count": len(items)})
+                continue
+            for name in items:
+                if name not in details:
+                    b = hibp_call(f, f"/breach/{urllib.parse.quote(name)}")
+                    bd = b.get("data") or {}
+                    details[name] = {"date": bd.get("BreachDate"), "added": (bd.get("AddedDate") or "")[:10],
+                                     "data": (bd.get("DataClasses") or [])[:8], "verified": bd.get("IsVerified"),
+                                     "stealer_log": bd.get("IsStealerLog")}
+            out.append({"address": f"{alias}@{dom}", "breaches": [{"name": n, **details[n]} for n in items]})
+    return _cap(out, False, {"query": query, "domains": doms})
+
+
+# -- AI usage (shadow AI): AI apps and services found through the existing connectors --------------------------------
+def ai_usage(cid):
+    """AI apps and services seen through one connector (Microsoft 365, Google Workspace, NinjaOne, Azure or AWS)."""
+    from . import aiusage
+    c = next((x for x in _CONNECTORS if x["id"] == cid), None)
+    if not c:
+        return {"error": "no such connector"}
+    kind = c["type"]
+    if kind == "m365":
+        sps = graph_get(cid, "/servicePrincipals", {"$select": "id,displayName,publisherName,verifiedPublisher,servicePrincipalType",
+                                                    "$top": "999"}, max_pages=10, full=True)
+        grants = graph_get(cid, "/oauth2PermissionGrants", {"$top": "999"}, max_pages=10, full=True)
+        apps = graph_get(cid, "/deviceManagement/detectedApps", {"$select": "displayName,version,publisher,deviceCount", "$top": "999"},
+                         max_pages=10, full=True)
+        if "error" in sps:
+            return sps
+        found = aiusage.from_m365(sps["rows"], grants.get("rows") or [])
+        if "rows" in apps:
+            found += aiusage.from_software(apps["rows"], "Intune detected apps")
+        notes = [] if "rows" in grants else ["consents not readable: " + grants.get("error", "")]
+        notes += [] if "rows" in apps else ["Intune detected apps not readable (needs Intune and DeviceManagementManagedDevices.Read.All)"]
+        return {**_cap(found, False, {"source": "Microsoft 365"}), "notes": notes}
+    if kind == "google_workspace":
+        from . import google
+        try:
+            tok = google.token(c["fields"], google.WS_SCOPES, c["fields"]["admin_email"])
+            acts, _ = google._pages("https://admin.googleapis.com/admin/reports/v1/activity/users/all/applications/token"
+                                    "?eventName=authorize&maxResults=1000", tok, "items", max_pages=3)
+        except google.GoogleError as e:
+            return {"error": str(e)}
+        return _cap(aiusage.from_google_tokens(acts), False, {"source": "Google Workspace", "days": 180})
+    if kind == "ninjaone":
+        r = ninja_query(cid, "software")
+        if "error" in r:
+            return r
+        return _cap(aiusage.from_software(r.get("rows") or [], "NinjaOne software inventory"), False, {"source": "NinjaOne"})
+    if kind == "azure":
+        return azure_query(cid, "ai_services")
+    if kind == "aws":
+        return aws_query(cid, "bedrock")
+    return {"error": "this connector type has no AI usage read (use Microsoft 365, Google Workspace, NinjaOne, Azure or AWS)"}
+
+
+# -- RMM and MDM tools of the MSP (Datto RMM, N-central, ConnectWise Automate, Jamf Pro, Kandji) ----------------------
+MSP_TYPES = {"datto_rmm", "ncentral", "cw_automate", "jamf", "kandji"}
+
+
+def msp_query(cid, query):
+    from . import msptools
+    c = _get(cid, MSP_TYPES)
+    f = c["fields"]
+    ctx = None
+    if c["type"] in ("ncentral", "cw_automate"):                  # often self-hosted: pinned certificate unless verified
+        try:
+            u = urllib.parse.urlsplit(msptools.base_url(f))
+            ctx = conn._tls_context(u.hostname, u.port or 443, f.get("verify_tls"), c.get("pin"))[0]
+        except (msptools.MspError, conn.Result) as e:
+            return {"error": getattr(e, "message", None) or str(e)}
+    try:
+        res = msptools.run(c["type"], f, query, ctx)
+    except msptools.MspError as e:
+        return {"error": str(e)}
+    return _cap(res, False, {"query": query}) if isinstance(res, list) else {"status": 200, "data": res}

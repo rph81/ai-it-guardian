@@ -13,7 +13,7 @@ import time
 import urllib.parse
 import urllib.request
 
-from . import access, awsposture, bizsys, google, netutil
+from . import access, awsposture, bizsys, google, msptools, netutil
 from . import attack as mitre
 from .collector import parse_nmap_xml
 from .controls import FRAMEWORKS, STATUSES
@@ -272,11 +272,36 @@ class Toolbox:
                     "connector": {"type": "string"}, "host": {"type": "string"},
                     "check": {"type": "string", "enum": list(access.WINDOWS_CHECKS)}},
                     "required": ["connector", "host", "check"], "additionalProperties": False}},
+            "msp_query": {
+                "description": "Read an RMM or MDM tool through its connector (read-only): Datto RMM devices / sites (patch status, "
+                               "pending patches, antivirus, reboot, last seen), N-central devices / active_issues, ConnectWise Automate "
+                               "computers (last contact, last patched, antivirus), Jamf Pro version / computers (macOS, FileVault, SIP, "
+                               "Gatekeeper, firewall) / mobile_devices, Kandji devices / blueprints.",
+                "input_schema": {"type": "object", "properties": {
+                    "connector": {"type": "string"}, "query": {"type": "string", "enum": sorted({q for v in msptools.QUERIES.values() for q in v})}},
+                    "required": ["connector", "query"], "additionalProperties": False}},
+            "ai_usage": {
+                "description": "AI apps and services seen through one connector, matched against Guardian's AI catalogue: Microsoft 365 "
+                               "(apps users or admins connected, who consented, broad permissions such as Mail.Read or Files.Read.All; "
+                               "Intune detected apps), Google Workspace (apps authorised in the last 180 days and their scopes), NinjaOne "
+                               "(installed AI apps), Azure (AI services: public access, local keys, network rules, encryption), AWS "
+                               "(Bedrock per region: invocation logging, guardrails).",
+                "input_schema": {"type": "object", "properties": {"connector": {"type": "string"}},
+                                 "required": ["connector"], "additionalProperties": False}},
+            "hibp_query": {
+                "description": "Read Have I Been Pwned through the connector: domains (verified domains and counts), breaches (each "
+                               "breached address with breach name, date, kinds of data leaked), stealer_logs (addresses whose sign-ins "
+                               "were captured by info-stealer malware, with the websites). Never returns passwords.",
+                "input_schema": {"type": "object", "properties": {
+                    "connector": {"type": "string"}, "query": {"type": "string", "enum": list(access.HIBP_QUERIES)}},
+                    "required": ["connector", "query"], "additionalProperties": False}},
             "firewall_get": {
                 "description": "Read one firewall API path through a firewall connector (GET only, fixed list per vendor; passwords and keys "
                                "are hidden). OPNsense: " + ", ".join(access.FIREWALL_PATHS["opnsense"]) + ". pfSense (REST API package): "
                                + ", ".join(access.FIREWALL_PATHS["pfsense"]) + ". FortiGate: " + ", ".join(access.FIREWALL_PATHS["fortigate"])
-                               + ". UniFi: /proxy/network/integration/v1/info, /sites, /sites/<site id>/devices.",
+                               + ". UniFi: /proxy/network/integration/v1/info, /sites, /sites/<site id>/devices. MikroTik: "
+                               + ", ".join(access.FIREWALL_PATHS["mikrotik"]) + ". Palo Alto, Check Point and Sophos take a read name "
+                               "instead of a path: " + "; ".join(f"{v}: " + ", ".join(r) for v, r in access.FIREWALL_READS.items()) + ".",
                 "input_schema": {"type": "object", "properties": {"connector": {"type": "string"}, "path": {"type": "string"}},
                                  "required": ["connector", "path"], "additionalProperties": False}},
             "vmware_get": {
@@ -377,8 +402,15 @@ class Toolbox:
                     "choke_points": {"type": "array", "items": {"type": "object", "properties": {
                         "finding": {"type": "string"}, "fix": {"type": "string"}},
                         "required": ["fix"], "additionalProperties": False}},
+                    "actors": {"type": "array", "maxItems": 5, "items": {"type": "string"},
+                               "description": "Known attacker groups that use these techniques (from threat_actors), e.g. 'FIN7 (5 of 7)'."},
                     "summary": {"type": "string"}},
                     "required": ["title", "target", "likelihood", "steps", "summary"], "additionalProperties": False}},
+            "threat_actors": {
+                "description": "Known attacker groups (MITRE ATT&CK group data) that use the most of these ATT&CK techniques. "
+                               "Without techniques, uses every technique on this run's findings.",
+                "input_schema": {"type": "object", "properties": {"techniques": {"type": "array", "items": {"type": "string"}, "maxItems": 40}},
+                                 "additionalProperties": False}},
             "control_catalog": {
                 "description": "The controls of one framework: " + ", ".join(f"{k} ({v['title']})" for k, v in FRAMEWORKS.items()) + ".",
                 "input_schema": {"type": "object", "properties": {"framework": {"type": "string", "enum": list(FRAMEWORKS)}},
@@ -528,9 +560,41 @@ class Toolbox:
         rows = [c for c in access.summary() if not want or c["type"] in want]
         return rows or {"note": "No connector of this kind was handed to this run (none set up, or the vault was locked when it started)."}
 
+    def _inventory(self, source, rows, name, os_=None, seen=None, kind=None):
+        """Keep the devices a connector listed, for the site's asset list (names and OS only)."""
+        def pick(r, keys):
+            for k in keys if isinstance(keys, (list, tuple)) else [keys]:
+                v = r
+                for part in k.split("."):
+                    v = v.get(part) if isinstance(v, dict) else None
+                if v not in (None, "", []):
+                    return v[0] if isinstance(v, list) else v
+            return None
+        items = []
+        for r in rows if isinstance(rows, list) else []:
+            if not isinstance(r, dict):
+                continue
+            n = pick(r, name)
+            if n:
+                items.append({"name": str(n)[:120], "os": str(pick(r, os_) or "")[:120] if os_ else None,
+                              "last_seen": str(pick(r, seen) or "")[:30] if seen else None, "type": kind})
+        if items:
+            with self.g.lock:
+                inv = self.g.data.setdefault("inventory", {}).setdefault(source, [])
+                known = {i["name"].lower() for i in inv}
+                for i in items:
+                    if i["name"].lower() not in known:
+                        known.add(i["name"].lower())
+                        inv.append(i)
+                del inv[5000:]
+
     def t_ad_query(self, connector, query, days=90):
         self.g.log(self.agent, f"ad_query {query}")
-        return access.ad_query(connector, query, days)
+        r = access.ad_query(connector, query, days)
+        if query in ("computer_os", "stale_computers", "domain_controllers") and isinstance(r, dict):
+            self._inventory("AD", access.LAST_ROWS.pop(("ad", connector, query), None) or r.get("rows") or [], ["sAMAccountName", "dNSHostName", "cn"],
+                            ["operatingSystem"], ["lastLogonTimestamp"], "computer")
+        return r
 
     def t_linux_check(self, connector, host, check):
         self.g.log(self.agent, f"linux_check {host} {check}")
@@ -542,7 +606,10 @@ class Toolbox:
 
     def t_graph_get(self, connector, path, query=None, beta=False, max_pages=5):
         self.g.log(self.agent, f"graph_get {path}")
-        return access.graph_get(connector, path, query, beta, max_pages)
+        r = access.graph_get(connector, path, query, beta, max_pages)
+        if path.strip().rstrip("/") == "/deviceManagement/managedDevices" and isinstance(r, dict):
+            self._inventory("Intune", r.get("rows") or [], "deviceName", ["operatingSystem"], "lastSyncDateTime", "managed device")
+        return r
 
     def t_azure_query(self, connector, query, resource_group=None, subscription=None):
         self.g.log(self.agent, f"azure_query {query}" + (f" rg={resource_group}" if resource_group else ""))
@@ -586,13 +653,33 @@ class Toolbox:
                 nj["devices_with_pending"] = [{**d, "name": names.get(k)} for k, d in by.items() if d["id"] is not None]
         return r
 
+    def t_msp_query(self, connector, query):
+        self.g.log(self.agent, f"msp_query {query}")
+        r = access.msp_query(connector, query)
+        if query in ("devices", "computers", "mobile_devices") and isinstance(r, dict):
+            kind = next((c["type"] for c in access._CONNECTORS if c["id"] == connector), "rmm")
+            label = {"datto_rmm": "Datto RMM", "ncentral": "N-central", "cw_automate": "Automate", "jamf": "Jamf", "kandji": "Kandji"}.get(kind, kind)
+            self._inventory(label, r.get("rows") or [], ["device", "computer"], ["os"], ["last_seen", "last_contact", "last_check_in"], "managed device")
+        return r
+
+    def t_ai_usage(self, connector):
+        self.g.log(self.agent, f"ai_usage {connector}")
+        return access.ai_usage(connector)
+
+    def t_hibp_query(self, connector, query):
+        self.g.log(self.agent, f"hibp_query {query}")
+        return access.hibp_query(connector, query)
+
     def t_firewall_get(self, connector, path):
         self.g.log(self.agent, f"firewall_get {path}")
         return access.firewall_get(connector, path)
 
     def t_vmware_get(self, connector, path):
         self.g.log(self.agent, f"vmware_get {path}")
-        return access.vmware_get(connector, path)
+        r = access.vmware_get(connector, path)
+        if path.strip().rstrip("/") == "/api/vcenter/vm" and isinstance(r, dict):
+            self._inventory("vCenter", r.get("data") or [], "name", kind="VM")
+        return r
 
     def t_docker_query(self, connector, query):
         self.g.log(self.agent, f"docker_query {query}")
@@ -600,7 +687,10 @@ class Toolbox:
 
     def t_k8s_query(self, connector, query):
         self.g.log(self.agent, f"k8s_query {query}")
-        return access.k8s_query(connector, query)
+        r = access.k8s_query(connector, query)
+        if query == "nodes" and isinstance(r, dict):
+            self._inventory("Kubernetes", r.get("rows") or [], "name", ["osImage"], kind="Kubernetes node")
+        return r
 
     def t_google_query(self, connector, query):
         self.g.log(self.agent, f"google_query {query}")
@@ -608,7 +698,10 @@ class Toolbox:
 
     def t_gcp_query(self, connector, query, project=None):
         self.g.log(self.agent, f"gcp_query {query}" + (f" {project}" if project else ""))
-        return access.gcp_query(connector, query, project)
+        r = access.gcp_query(connector, query, project)
+        if query == "instances" and isinstance(r, dict):
+            self._inventory("Google Cloud", r.get("rows") or [], "name", kind="cloud VM")
+        return r
 
     def t_windows_check(self, connector, host, check):
         self.g.log(self.agent, f"windows_check {host} {check}")
@@ -722,7 +815,17 @@ class Toolbox:
             f["first_seen"] = p.get("first_seen") or prev.get("started")
         return {"ok": True, "first_seen": f["first_seen"]}
 
-    def t_record_path(self, title, target, likelihood, steps, summary, choke_points=None):
+    def t_threat_actors(self, techniques=None):
+        from . import threatintel
+        if not techniques:
+            techniques = sorted({t for f in self.g.data["findings"] for t in f.get("attack") or []})
+        groups = threatintel.match(techniques)
+        if not threatintel.load():
+            return {"error": "MITRE's group data couldn't be loaded (no internet access and no cached copy)"}
+        return {"techniques": len(set(techniques)), "groups": groups,
+                "note": "Groups known to use the same techniques; not evidence that they target this business."}
+
+    def t_record_path(self, title, target, likelihood, steps, summary, choke_points=None, actors=None):
         known = {f["id"] for f in self.g.data["findings"]}
         bad = [x for x in [s.get("finding") for s in steps] + [c.get("finding") for c in (choke_points or [])] if x and x not in known]
         if bad:
@@ -734,7 +837,8 @@ class Toolbox:
             paths = self.g.data.setdefault("attack_paths", [])
             pid = "AP%02d" % (len(paths) + 1)
             paths.append({"id": pid, "title": title[:200], "target": target[:200], "likelihood": likelihood,
-                          "steps": steps, "choke_points": choke_points or [], "summary": summary[:1200]})
+                          "steps": steps, "choke_points": choke_points or [], "summary": summary[:1200],
+                          "actors": [str(a)[:80] for a in (actors or [])][:5]})
         return {"ok": True, "id": pid}
 
     def t_control_catalog(self, framework):
@@ -813,6 +917,14 @@ def describe(name, args):
         return f'Azure: {a.get("query", "").replace("_", " ")}' + (f' in {a["resource_group"]}' if a.get("resource_group") else "")
     if name == "azure_get":
         return f'Azure: {a.get("path", "").rsplit("/providers/", 1)[-1]}'
+    if name == "msp_query":
+        return f'RMM / MDM: {a.get("query", "").replace("_", " ")}'
+    if name == "ai_usage":
+        return "AI apps and services in use"
+    if name == "hibp_query":
+        return f'Have I Been Pwned: {a.get("query", "").replace("_", " ")}'
+    if name == "threat_actors":
+        return "Compared techniques with known attacker groups"
     if name == "firewall_get":
         return f'Firewall: {a.get("path")}'
     if name == "vmware_get":
@@ -862,4 +974,4 @@ def describe(name, args):
 ACTIVE = {"probe", "http_get", "tls_inspect", "cve_lookup", "eol_lookup", "web_search", "epss_lookup", "kev_details",
           "ad_query", "linux_check", "linux_vulnerable_packages", "synology_info", "proxmox_get",
           "graph_get", "windows_check", "azure_query", "azure_get", "ninja_query", "sap_query", "btp_query", "salesforce_query", "aws_query",
-          "firewall_get", "vmware_get", "docker_query", "k8s_query", "google_query", "gcp_query"}
+          "firewall_get", "vmware_get", "docker_query", "k8s_query", "google_query", "gcp_query", "hibp_query", "ai_usage", "msp_query"}

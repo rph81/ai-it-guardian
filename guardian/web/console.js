@@ -30,7 +30,7 @@ function setStyle(e, css) {
 }
 const AGENT_NAMES = {orchestrator: "Orchestrator", discovery: "Discovery", network: "Network", os: "OS & endpoints", web: "Web & APIs",
                      firmware: "Firmware", wan: "Internet perimeter", report: "Report writer", collector: "Scanner",
-                     ad: "Active Directory", m365: "Microsoft 365", devices: "Device fleet", azure: "Azure", aws: "AWS", business: "Business systems", infra: "Infrastructure", google: "Google", patch: "Patch & config", risk: "Risk analyst", paths: "Attack paths", compliance: "Compliance"};
+                     ad: "Active Directory", m365: "Microsoft 365", devices: "Device fleet", azure: "Azure", aws: "AWS", business: "Business systems", infra: "Infrastructure", google: "Google", leaks: "Leaked credentials", ai: "AI usage", patch: "Patch & config", risk: "Risk analyst", paths: "Attack paths", compliance: "Compliance"};
 const SEVS_ALL = ["critical", "high", "medium", "low", "info"];
 const money = v => v == null ? "—" : `$${Number(v).toFixed(2)}`;
 const fmtRun = id => `${id.slice(0,4)}-${id.slice(4,6)}-${id.slice(6,8)} ${id.slice(9,11)}:${id.slice(11,13)}`;
