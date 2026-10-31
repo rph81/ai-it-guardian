@@ -107,8 +107,9 @@ exposure) and `previous` (the same issue in the previous assessment).
    **Business systems (now)**: SAP S/4HANA / ECC, SAP BTP and Salesforce connectors and agent ([docs](docs/BUSINESS-SYSTEMS.md)).
    **Multi-site (now)**: several customers in one console: site switcher, all-sites portfolio, connectors, ticketing
    (our PSA with per-customer mapping, the customer's own system, or off) and user access per site.
-   **Next, in this order**: medium / low priority gap features (private repos and IaC scanning, safe web app
-   testing, SIEM output and MCP server, decoys, vulnerability-disclosure page); AWS posture agent;
+   **Gap features (now)**: vulnerability-disclosure page, SIEM output and MCP server, decoys, safe web app check,
+   private repos, infrastructure-as-code and container image checks.
+   **Next, in this order**: AWS posture agent;
    on-site collector phases B–D. Then a **final testing phase** against real systems (real AI run, AD, Microsoft 365, fix recipes, NinjaOne,
    Azure, Windows, ServiceNow, alert channels, collector packages, outside penetration test of the gateway).
    Built-in VPN client: on hold pending a design review (the on-site collector covers most of the need).

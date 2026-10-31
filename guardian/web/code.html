@@ -7,6 +7,8 @@
 <script src="/theme.js"></script>
 <link rel="stylesheet" href="/console.css">
 <script src="/code.js" defer></script>
+<script src="/passkey.js" defer></script>
+<script src="/webcheck.js" defer></script>
 </head>
 <body>
 <div class="shell">
@@ -21,9 +23,9 @@
   <main class="page">
     <div class="topbar">
       <div>
-        <div class="crumb"><b>//</b>Guardian / Code</div>
+        <div class="crumb"><b>//</b>Guardian / Code &amp; web apps</div>
         <h1 class="ptitle">Code / Scan.</h1>
-        <p class="sub">Paste a link to a public GitHub repository. Guardian downloads the code, never runs it, and checks it for malicious or risky code before you install or deploy it.</p>
+        <p class="sub">Paste a link to a GitHub repository (private ones with a token from Settings › Integrations). Guardian downloads the code, never runs it, and checks it for malicious or risky code and infrastructure-as-code mistakes. Below: safe checks of web apps and container images.</p>
       </div>
       <div class="who"><span class="chip"><i></i>Code is never executed</span></div>
     </div>
@@ -83,10 +85,38 @@
           <li><b>The Code agent has no shell, network or web search.</b> It can only read files from the archive and record findings.</li>
           <li><b>Runs in its own process</b> with memory, CPU and time limits, separate from the console.</li>
           <li>Only the report and the evidence lines are kept. Secrets found in the code are masked in the report.</li>
-          <li>Public repositories only.</li>
+          <li>Public repositories; private ones with a read-only GitHub token (Settings › Integrations).</li>
         </ul>
       </section>
     </div>
+
+    <section class="section" aria-labelledby="wc-title">
+      <div class="kicker">Guardian / web apps</div>
+      <h2 class="stitle" id="wc-title">Web app check.</h2>
+      <p class="note">A safe, read-only check of a web app you're responsible for: security headers, cookies, exposed files, error pages that leak details, CORS, and (with a test account) pages that also load without signing in. GET and HEAD only, the app's own address only, at most 2 requests a second; links that look like actions (logout, delete, reset) are skipped and forms are never sent. Needs an admin's passkey.</p>
+      <form class="stack field" id="wc-form">
+        <div class="f3"><div><label for="wc-url">App address</label><input id="wc-url" class="mono" placeholder="https://app.customer.example" required></div>
+          <div><label for="wc-site">Site</label><select id="wc-site"></select></div>
+          <div><label for="wc-max">Pages at most</label><input id="wc-max" type="number" min="1" max="500" value="150"></div></div>
+        <div class="f3"><div><label for="wc-hname">Sign-in header (optional)</label><input id="wc-hname" class="mono" placeholder="Cookie or Authorization"></div>
+          <div><label for="wc-hval">Its value for a test account</label><input id="wc-hval" class="mono" type="password" autocomplete="off" placeholder="session=… or Bearer …"></div>
+          <div><label class="check"><input type="checkbox" id="wc-tls" checked> Verify the certificate</label></div></div>
+        <label class="check"><input type="checkbox" id="wc-ok"> I'm allowed to test this app, and the test account has no admin rights.</label>
+        <div class="row"><button class="btn solid" type="submit" id="wc-go">Check web app</button><button class="btn danger hidden" type="button" id="wc-stop">Stop</button></div>
+        <p class="err" id="wc-err" role="alert"></p>
+      </form>
+      <form class="stack field" id="ic-form">
+        <h3 class="gap">Container image check</h3>
+        <p class="note">Reads an image straight from its registry without running it: the packages inside (Debian, Ubuntu, Alpine, Python, npm) against known vulnerabilities and malware (OSV), plus root user, secrets in environment variables and a base OS out of support.</p>
+        <div class="f3"><div><label for="ic-image">Image</label><input id="ic-image" class="mono" placeholder="nginx:1.27 or ghcr.io/org/app:2.1" required></div>
+          <div><label for="ic-site">Site</label><select id="ic-site"></select></div>
+          <div><label for="ic-token">Pull token (private registries, optional)</label><input id="ic-token" class="mono" type="password" autocomplete="off"></div></div>
+        <div class="row"><button class="btn solid" type="submit" id="ic-go">Check image</button></div>
+        <p class="err" id="ic-err" role="alert"></p>
+      </form>
+      <div class="hidden" id="wc-res"><h3 class="gap mono" id="wc-rtitle"></h3><p class="note" id="wc-rmeta"></p><div id="wc-findings"></div></div>
+      <div class="tablewrap field"><table><thead><tr><th>App or image</th><th>When</th><th>By</th><th>Mode</th><th>Status</th><th>Findings</th></tr></thead><tbody id="wc-history"></tbody></table></div>
+    </section>
 
     <section class="section" aria-labelledby="hi-title">
       <div class="kicker">Guardian / history</div>

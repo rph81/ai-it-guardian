@@ -12,6 +12,7 @@
 <script src="/ticketing.js" defer></script>
 <script src="/sites.js" defer></script>
 <script src="/sitecfg.js" defer></script>
+<script src="/integrations.js" defer></script>
 <script src="/evidence.js" defer></script>
 </head>
 <body>
@@ -48,6 +49,7 @@
       <a href="#sites" data-s="sites">Sites &amp; collectors</a>
       <a href="#schedules" data-s="schedules">Schedules &amp; alerts</a>
       <a href="#ticketing" data-s="ticketing">Ticketing</a>
+      <a href="#integrations" data-s="integrations" class="admin-only">Integrations</a>
       <a href="#appearance" data-s="appearance">Appearance</a>
     </nav>
 
@@ -303,6 +305,32 @@
           <pre class="code field" id="si-cmd"></pre>
           <div class="row mt16"><button class="btn" type="button" id="si-copy">Copy</button><button class="btn danger" type="button" id="si-cancel">Cancel code</button></div>
           <p class="help" id="si-help"></p>
+        </div>
+      </section>
+      <section class="stack hidden" id="s-integrations">
+        <div><h1>Integrations</h1><p class="lede">Send findings to your SIEM, and let other AI tools ask Guardian questions.</p></div>
+        <div class="card">
+          <h2>SIEM output</h2>
+          <p class="note">After each run Guardian sends one event per finding (and one per run) to the destinations switched on below. Send-only: nothing is read back. Like the alert channels, the secrets are kept on the server for scheduled runs.</p>
+          <label class="check field"><input type="checkbox" id="in-only-new"> Only findings that are new since the previous assessment (all open findings on the first run)</label>
+          <div class="stack field" id="in-siem"></div>
+          <div class="row mt16"><button class="btn primary" type="button" id="in-save">Save</button><button class="btn" type="button" id="in-test">Send a test event</button><span class="note m0" id="in-result"></span></div>
+          <p class="help" id="in-last"></p>
+        </div>
+        <div class="card">
+          <h2>GitHub (private repositories)</h2>
+          <p class="note">To scan private repositories on the Code page, create a <b>fine-grained personal access token</b> on GitHub (Settings › Developer settings) with access to the repositories Guardian should read and only <b>Contents: Read-only</b> and <b>Metadata: Read-only</b>. It's stored in the vault and handed to each code scan in memory.</p>
+          <div class="f3 field"><div><label for="in-gh">Token <span class="tag" id="in-gh-state"></span></label><input id="in-gh" class="mono" type="password" autocomplete="new-password" placeholder="github_pat_…"></div>
+            <div class="row end"><button class="btn" type="button" id="in-gh-save">Save</button><button class="btn danger" type="button" id="in-gh-del">Remove</button></div></div>
+        </div>
+        <div class="card">
+          <h2>MCP server</h2>
+          <p class="note">Other AI tools (Claude Desktop, Claude Code, Copilot and others that speak the Model Context Protocol) can read Guardian's sites, findings, attack paths and ATT&amp;CK map. Read-only. Each tool gets its own token; remove it to cut access. Address: <span class="mono" id="in-mcp-url"></span></p>
+          <div class="tablewrap field"><table><thead><tr><th>Token</th><th>Sites</th><th>Last used</th><th></th></tr></thead><tbody id="in-tokens"></tbody></table></div>
+          <div class="f3 field"><div><label for="in-mname">New token for</label><input id="in-mname" maxlength="60" placeholder="Claude Desktop"></div>
+            <div><label for="in-msites">Sites</label><select id="in-msites"></select></div>
+            <div class="row end"><button class="btn" type="button" id="in-mcp-add">Create token (passkey)</button></div></div>
+          <div id="in-mnew"></div>
         </div>
       </section>
       <section class="stack hidden" id="s-ticketing">

@@ -2,7 +2,7 @@
 // Settings › Sites › one site: general, scope, ticketing (our PSA / customer's own / off), access. Uses $, el and api from settings.js.
 const SiteCfg = (() => {
   let d = null, id = null, tab = "general";
-  const TABS = {general: "General", ticketing: "Ticketing", access: "Access", connectors: "Connectors", schedule: "Schedule"};
+  const TABS = {general: "General", ticketing: "Ticketing", access: "Access", disclosure: "Disclosure", decoys: "Decoys", connectors: "Connectors", schedule: "Schedule"};
   const MODES = {msp: ["Our PSA", "Use the ticketing system from Settings › Ticketing, filed under this customer."],
                  own: ["Customer's own system", "The customer's ServiceNow, Jira… with its own address and secret, used only for this site."],
                  off: ["Off", "No tickets for this site. The Fix plan still tracks owners and due dates."]};
@@ -21,6 +21,11 @@ const SiteCfg = (() => {
     $("sc-label").textContent = `Tickets: ${d.label}`;
     $("sc-tabs").replaceChildren(...Object.entries(TABS).map(([k, v]) => el("button", {type: "button", "aria-pressed": String(tab === k),
       onclick: () => { tab = k; render(); }}, v)));
+    if (tab === "disclosure" || tab === "decoys") {
+      const t = tab; $("sc-body").replaceChildren(el("p", {class: "note"}, "Loading…"));
+      (t === "disclosure" ? disclosure() : decoyTab()).then(x => { if (tab === t) $("sc-body").replaceChildren(...x); });
+      return;
+    }
     $("sc-body").replaceChildren(...({general, ticketing, access, connectors, schedule})[tab]());
   }
 
@@ -111,6 +116,77 @@ const SiteCfg = (() => {
         try { await api(`/api/sites/${id}/access`, {users: Object.fromEntries(Object.entries(boxes).map(([k, b]) => [k, b.checked]))});
               d = await api(`/api/sites/${id}/settings`); render(); }
         catch (e) { out.textContent = e.message; } }}, "Save"), out)];
+  }
+
+  async function disclosure() {
+    let v;
+    try { v = await api(`/api/sites/${id}/vdp`); } catch (e) { return [el("p", {class: "note"}, e.message)]; }
+    const on = el("input", {type: "checkbox", id: "sv-on", checked: v.on});
+    const contact = el("input", {id: "sv-contact", value: v.contact, placeholder: "security@customer.example"});
+    const policy = el("textarea", {id: "sv-policy", rows: "5", maxlength: "4000"}); policy.value = v.policy;
+    const out = el("span", {class: "note m0"});
+    const save = async newLink => {
+      try { await api(`/api/sites/${id}/vdp`, {on: on.checked, contact: contact.value, policy: policy.value, new_link: newLink}); out.textContent = "Saved."; render(); }
+      catch (e) { out.textContent = e.message; }
+    };
+    const STATUS = {"new": ["tag warn", "New"], "dismissed": ["tag", "Dismissed"], "in-fix-plan": ["tag ok", "In the Fix plan"]};
+    const act = async (r, action, severity) => {
+      try { await api(`/api/sites/${id}/vdp/${r.id}`, {action, severity}); render(); } catch (e) { alert(e.message); }
+    };
+    const reports = v.reports.map(r => {
+      const sev = el("select", {"aria-label": "Severity"}, ...["critical", "high", "medium", "low"].map(s => el("option", {value: s, selected: s === "medium"}, s)));
+      return el("div", {class: "ap"},
+        el("div", {class: "row"}, el("span", {class: STATUS[r.status][0]}, STATUS[r.status][1]), el("b", {}, r.title),
+          el("span", {class: "micro"}, `${new Date(r.t * 1000).toLocaleString()} · ref ${r.id}`)),
+        r.affected ? el("p", {class: "note"}, "Affected: ", r.affected) : null,
+        el("p", {class: "pre"}, r.description),
+        r.contact ? el("p", {class: "note"}, "Contact: ", r.contact) : null,
+        r.status === "new" ? el("div", {class: "row"}, sev,
+          el("button", {class: "btn sm primary", type: "button", onclick: () => act(r, "fix-plan", sev.value)}, "Add to Fix plan"),
+          el("button", {class: "btn sm", type: "button", onclick: () => act(r, "dismiss")}, "Dismiss")) : null);
+    });
+    return [el("p", {class: "note"}, "A public page where anyone can report a security weakness in this customer's systems (NIS2 expects a way to do this). Reports land here; nothing reaches the Fix plan until you add it. The page needs Guardian's address to be reachable from the internet; otherwise publish only the security.txt with an e-mail contact."),
+      el("div", {class: "f3 field"}, el("div", {}, el("label", {class: "check"}, on, " Page switched on")),
+        el("div", {}, el("label", {for: "sv-contact"}, "Also reachable by e-mail (optional)"), contact)),
+      el("div", {class: "field"}, el("label", {for: "sv-policy"}, "Policy shown on the page"), policy),
+      el("div", {class: "row mt16"}, el("button", {class: "btn primary", type: "button", onclick: () => save(false)}, "Save"),
+        v.url ? el("button", {class: "btn", type: "button", onclick: () => { if (confirm("Create a new link? The old one stops working.")) save(true); }}, "New link") : null, out),
+      v.url && v.on ? el("div", {class: "field"}, el("label", {}, "Public page"), el("a", {class: "mono", href: v.url, target: "_blank", rel: "noopener"}, v.url),
+        el("p", {class: "help"}, "Place this file at https://<customer domain>/.well-known/security.txt: ",
+          el("a", {href: v.url + "/security.txt", target: "_blank", rel: "noopener"}, "security.txt"), " (renew it yearly; it carries an expiry date).")) : null,
+      el("h3", {class: "gap"}, `Reports (${v.reports.length})`),
+      ...(reports.length ? reports : [el("p", {class: "note"}, "No reports yet.")])];
+  }
+
+  async function decoyTab() {
+    let v;
+    try { v = await api(`/api/sites/${id}/decoys`); } catch (e) { return [el("p", {class: "note"}, e.message)]; }
+    const kind = el("select", {id: "sd-kind"}, ...Object.entries(v.kinds).map(([k, l]) => el("option", {value: k}, l)));
+    const label = el("input", {id: "sd-label", maxlength: "80", placeholder: "IT share on the file server"});
+    const del = async x => {
+      if (!confirm(`Remove the decoy "${x.label}"? Remove it from where you placed it too.`)) return;
+      const r = await fetch(`/api/sites/${id}/decoys/${x.id}`, {method: "DELETE", headers: {"X-Guardian": "1"}});
+      if (!r.ok) alert("Couldn't remove it"); render();
+    };
+    const HOW = {link: "Paste the link where only an intruder would click it: an internal wiki page about 'VPN access', a 'credentials' e-mail draft, a bookmark.",
+                 login: "Paste these lines into a file an intruder would read: passwords.txt on an admin share, a script, a password-manager export.",
+                 docx: "Download the document and put it where an intruder would open it: an IT share, a backup folder, an admin's documents."};
+    const cards = v.decoys.map(x => el("div", {class: "ap"},
+      el("div", {class: "row"}, el("span", {class: x.hits.length ? "tag error" : "tag ok"}, x.hits.length ? `${x.hits.length} hit${x.hits.length > 1 ? "s" : ""}` : "quiet"),
+        el("b", {}, x.label), el("span", {class: "micro"}, v.kinds[x.kind])),
+      el("p", {class: "help"}, HOW[x.kind]),
+      x.kind === "docx" ? el("a", {class: "btn sm", href: `/api/sites/${id}/decoys/${x.id}/file`}, "Download IT-passwords.docx")
+                        : el("pre", {class: "code"}, x.text),
+      ...x.hits.slice(0, 10).map(h => el("div", {class: "at-f"}, el("span", {class: `tag ${h.severity === "high" ? "error" : "warn"}`}, h.severity),
+        el("span", {class: "micro"}, new Date(h.t * 1000).toLocaleString()), el("span", {}, h.what), el("span", {class: "mono micro"}, h.ip),
+        h.detail ? el("span", {class: "micro"}, h.detail) : null, el("span", {class: "micro"}, h.ua.slice(0, 60)))),
+      el("div", {class: "row mt16"}, el("button", {class: "btn sm danger", type: "button", onclick: () => del(x)}, "Remove"))));
+    const out = el("span", {class: "note m0"});
+    return [el("p", {class: "note"}, "Decoys look valuable but are never used legitimately, so any use is an alarm: an intruder is looking around. Guardian creates them; you place them. Hits go to your alert channels and the SIEM. They need Guardian's address to be reachable from where the decoy is used."),
+      el("div", {class: "f3 field"}, el("div", {}, el("label", {for: "sd-kind"}, "Kind"), kind), el("div", {}, el("label", {for: "sd-label"}, "Where you'll place it"), label),
+        el("div", {class: "row end"}, el("button", {class: "btn primary", type: "button", onclick: async () => {
+          try { await api(`/api/sites/${id}/decoys`, {kind: kind.value, label: label.value}); render(); } catch (e) { out.textContent = e.message; } }}, "Create"), out)),
+      ...(cards.length ? cards : [el("p", {class: "note"}, "No decoys yet.")])];
   }
 
   function connectors() {

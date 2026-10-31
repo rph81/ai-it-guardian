@@ -33,6 +33,7 @@ const CHECKS = [
   ["persistence", "Persistence", "cron, services, login items, shell profile edits"],
   ["manipulation", "Attempts to fool the review", "text addressed to scanners or AI reviewers"],
   ["signals", "Repository signals", "new accounts, new repositories, archived projects"],
+  ["iac", "Infrastructure as code", "Terraform, Kubernetes, Dockerfiles, Bicep / ARM: open firewalls, public storage, privileged containers, secrets"],
 ];
 let ov = null, scan = null, shown = null, filter = "all", timer = null;
 const canRun = () => ov && ov.role !== "viewer";

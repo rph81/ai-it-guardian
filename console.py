@@ -14,6 +14,7 @@ import base64
 import collections
 import csv
 import ctypes
+import hashlib
 import hmac
 import io
 import json
@@ -41,6 +42,10 @@ from guardian import remediate
 from guardian import notify
 from guardian import ticketing
 from guardian import attack
+from guardian import siem
+from guardian import decoys
+from guardian import webscan
+from guardian import imagescan
 from guardian import sitestore
 from guardian import evidence
 from guardian import comppdf
@@ -487,7 +492,7 @@ STATIC = {"/console.css": ("console.css", "text/css"), "/theme.js": ("theme.js",
           "/passkey.js": ("passkey.js", "text/javascript"), "/agents.js": ("agents.js", "text/javascript"),
           "/remediate.js": ("remediate.js", "text/javascript"), "/code.js": ("code.js", "text/javascript"),
           "/plan.js": ("plan.js", "text/javascript"), "/schedule.js": ("schedule.js", "text/javascript"),
-          "/ticketing.js": ("ticketing.js", "text/javascript"), "/sites.js": ("sites.js", "text/javascript"), "/sitecfg.js": ("sitecfg.js", "text/javascript"),
+          "/ticketing.js": ("ticketing.js", "text/javascript"), "/sites.js": ("sites.js", "text/javascript"), "/sitecfg.js": ("sitecfg.js", "text/javascript"), "/vdp.js": ("vdp.js", "text/javascript"), "/integrations.js": ("integrations.js", "text/javascript"), "/webcheck.js": ("webcheck.js", "text/javascript"),
           "/evidence.js": ("evidence.js", "text/javascript")}
 PAGES = {"/": "console.html", "/settings": "settings.html", "/signin": "signin.html"}
 
@@ -506,7 +511,8 @@ async def _startup():
 
 @app.middleware("http")
 async def guard(request: Request, call_next):
-    if request.method not in ("GET", "HEAD"):
+    if request.method not in ("GET", "HEAD") and request.url.path != "/mcp" and not request.url.path.startswith("/c/"):
+        # /mcp: bearer token, no cookies (checked there); /c/: decoy sign-in pages, which accept anyone and change nothing
         # Cross-site requests can't set this header without a CORS preflight, which is never allowed.
         if request.headers.get("x-guardian") != "1":
             return JSONResponse({"detail": "Bad request"}, status_code=403)
@@ -1415,6 +1421,10 @@ def after_run(run_id, mode, note=None):
             sync_tickets(run_id, auto=True)
         except Exception as e:                                      # noqa: BLE001 - tickets must not block alerts
             vault.audit("system", "ticketing-failed", str(e)[:200])
+    try:
+        siem_after_run(run_id)
+    except Exception as e:                                          # noqa: BLE001 - the SIEM must not block alerts
+        vault.audit("system", "siem-failed", str(e)[:200])
     cfg = notify_cfg()
     if not any(cfg[c].get("on") for c in ("email", "teams", "slack", "webhook")):
         return
@@ -1999,6 +2009,800 @@ def sites_revoke(site_id: str, request: Request):
     n = sites_db().revoke(site_id)
     vault.audit(user["email"], "collector-revoked", f"{site_id} {st['name']}")
     return {"revoked": n}
+
+
+# -- integrations: SIEM output and the MCP server ---------------------------------------------------------------------
+SIEM_DEFAULT = {"only_new": True, "sentinel": {"on": False, "tenant_id": "", "client_id": "", "endpoint": "", "dcr_id": "", "stream": "Custom-GuardianFindings"},
+                "splunk": {"on": False, "url": "", "index": ""}, "syslog": {"on": False, "host": "", "port": 6514, "proto": "tls"}}
+SIEM_FIELDS = {"sentinel": ("tenant_id", "client_id", "endpoint", "dcr_id", "stream"), "splunk": ("url", "index"), "syslog": ("host", "port", "proto")}
+
+
+def siem_cfg():
+    raw = vault.get("siem", {})
+    return {"only_new": raw.get("only_new", True), **{d: {**SIEM_DEFAULT[d], **(raw.get(d) or {})} for d in siem.DESTS}}
+
+
+def siem_after_run(run_id):
+    cfg = siem_cfg()
+    if not any(cfg[d]["on"] for d in siem.DESTS):
+        return None
+    d = run_dir(run_id)
+    sid_ = run_site(d)
+    st = sites_db().site(sid_) or {"name": sid_, "customer": ""}
+    evs = siem.events(_read_graph(d), run_id, sid_, " · ".join(x for x in (st.get("customer"), st["name"]) if x), cfg["only_new"])
+    result = siem.send(cfg, vault.get("siem_secrets", {}), evs)
+    vault.put("siem_last", {"t": time.time(), "run": run_id, "result": result})
+    vault.audit("system", "siem-sent", f"{run_id}: " + ", ".join(f"{k} {v[:40]}" for k, v in result.items()))
+    return result
+
+
+class SiemBody(BaseModel):
+    only_new: bool = True
+    sentinel: dict = {}
+    splunk: dict = {}
+    syslog: dict = {}
+    secrets: dict = {}
+
+
+@app.get("/api/siem")
+def siem_get(request: Request):
+    require(request, "admin")
+    sec = vault.get("siem_secrets", {})
+    return {**siem_cfg(), "secret_set": {d: bool(sec.get(d)) for d in siem.DESTS if siem.SECRET[d]}, "last": vault.get("siem_last")}
+
+
+@app.post("/api/siem")
+def siem_set(body: SiemBody, request: Request):
+    sid, s, user = require(request, "admin")
+    cfg = siem_cfg()
+    cfg["only_new"] = body.only_new
+    for dname in siem.DESTS:
+        given = getattr(body, dname) or {}
+        c = cfg[dname]
+        c["on"] = bool(given.get("on"))
+        for k in SIEM_FIELDS[dname]:
+            if k in given:
+                c[k] = _clean(given[k], k, 300) if k != "port" else int(given[k] or 0)
+        if c["on"]:
+            try:
+                if dname == "splunk":
+                    siem._https(c["url"])
+                elif dname == "sentinel":
+                    siem._https(c["endpoint"])
+                    if not all(c[k] for k in SIEM_FIELDS["sentinel"]):
+                        raise ValueError("Fill in every Sentinel field")
+                elif not c["host"] or c["proto"] not in ("tls", "tcp", "udp") or not 1 <= c["port"] <= 65535:
+                    raise ValueError("Syslog needs a host, a port and TLS, TCP or UDP")
+            except ValueError as e:
+                raise HTTPException(400, f"{dname}: {e}")
+    sec = vault.get("siem_secrets", {})
+    for dname, v in (body.secrets or {}).items():
+        if dname in siem.SECRET and siem.SECRET[dname] and v:
+            sec[dname] = _clean(v, "secret", 2000)
+    vault.put("siem_secrets", sec)
+    for dname in siem.DESTS:
+        if cfg[dname]["on"] and siem.SECRET[dname] and not sec.get(dname):
+            raise HTTPException(400, f"{dname}: enter the {siem.SECRET[dname].replace('_', ' ')}")
+    vault.put("siem", cfg)
+    vault.audit(user["email"], "siem-changed", ", ".join(f"{d} {'on' if cfg[d]['on'] else 'off'}" for d in siem.DESTS))
+    return siem_get(request)
+
+
+@app.post("/api/siem/test")
+def siem_test(request: Request):
+    sid, s, user = require(request, "admin")
+    ev = [{"type": "test", "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "message": "Test event from AI IT Guardian"}]
+    cfg = siem_cfg()
+    if not any(cfg[d]["on"] for d in siem.DESTS):
+        raise HTTPException(400, "Turn on a destination first")
+    return siem.send(cfg, vault.get("siem_secrets", {}), ev)
+
+
+# MCP (Model Context Protocol) over Streamable HTTP: JSON-RPC 2.0 on POST /mcp, read-only tools, bearer tokens.
+MCP_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
+MCP_TOOLS = [
+    {"name": "list_sites", "description": "The customer sites this token may read.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "portfolio", "description": "Every site with its latest assessment: score, open priority 1 findings, overdue items, open findings.",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "list_findings", "description": "Open findings of a site's latest assessment, most urgent first.",
+     "inputSchema": {"type": "object", "properties": {"site": {"type": "string"}, "max_priority": {"type": "integer", "minimum": 1, "maximum": 4},
+                                                      "limit": {"type": "integer", "minimum": 1, "maximum": 200}}, "required": ["site"]}},
+    {"name": "get_finding", "description": "One finding with evidence, recommendation, priority, ATT&CK techniques and tracking (owner, due, status).",
+     "inputSchema": {"type": "object", "properties": {"run": {"type": "string"}, "id": {"type": "string"}}, "required": ["run", "id"]}},
+    {"name": "attack_paths", "description": "The attack paths of a site's latest assessment, with choke points.",
+     "inputSchema": {"type": "object", "properties": {"site": {"type": "string"}}, "required": ["site"]}},
+    {"name": "attack_matrix", "description": "MITRE ATT&CK techniques enabled by a site's open findings, by tactic.",
+     "inputSchema": {"type": "object", "properties": {"site": {"type": "string"}}, "required": ["site"]}},
+]
+
+
+def _mcp_token(request):
+    auth = request.headers.get("authorization", "")
+    if not auth.lower().startswith("bearer "):
+        return None
+    h = hashlib.sha256(auth[7:].strip().encode()).hexdigest()
+    for t in vault.get("mcp_tokens", []):
+        if hmac.compare_digest(t["hash"], h):
+            return t
+    return None
+
+
+def _mcp_latest(site_id):
+    runs = sorted((d for d in RUNS.iterdir() if d.is_dir() and RUN_ID.match(d.name) and run_site(d) == site_id and (d / "graph.json").exists()),
+                  reverse=True) if RUNS.exists() else []
+    return runs[0] if runs else None
+
+
+def _mcp_call(tok, name, args):
+    allowed = lambda s: tok.get("sites") is None or s in tok["sites"]
+    def need_site():
+        s_ = str(args.get("site") or "")
+        if not allowed(s_) or not sites_db().site(s_):
+            raise ValueError("unknown site (see list_sites)")
+        d = _mcp_latest(s_)
+        if not d:
+            raise ValueError("this site has no assessment yet")
+        return s_, d
+    if name == "list_sites":
+        return [{"id": x["id"], "name": x["name"], "customer": x["customer"]} for x in sites_db().sites() if allowed(x["id"])]
+    if name == "portfolio":
+        out = []
+        for x in sites_db().sites():
+            if not allowed(x["id"]):
+                continue
+            d, row = _mcp_latest(x["id"]), {"site": x["id"], "name": x["name"], "customer": x["customer"]}
+            if d:
+                g, rows = _read_graph(d), None
+                rows = tracking_rows(d, g)
+                row.update(run=d.name, score=(g.get("summary") or {}).get("score"),
+                           p1_open=sum(1 for r in rows if r["priority"] == 1 and r["status"] in ("open", "in_progress")),
+                           overdue=sum(1 for r in rows if r["overdue"]), open=sum(1 for r in rows if r["status"] in ("open", "in_progress")))
+            out.append(row)
+        return out
+    if name == "list_findings":
+        s_, d = need_site()
+        mp, lim = int(args.get("max_priority") or 4), min(int(args.get("limit") or 50), 200)
+        rows = [r for r in tracking_rows(d, _read_graph(d)) if r["status"] in ("open", "in_progress") and r["priority"] <= mp]
+        return {"run": d.name, "findings": [{k: r[k] for k in ("id", "title", "asset", "severity", "priority", "kev", "exposure", "due", "owner",
+                                                                  "status", "attack")} for r in rows[:lim]], "total": len(rows)}
+    if name == "get_finding":
+        run, fid = str(args.get("run") or ""), str(args.get("id") or "")
+        if not RUN_ID.match(run) or not (RUNS / run).is_dir() or not allowed(run_site(RUNS / run)):
+            raise ValueError("unknown run")
+        d = RUNS / run
+        g = _read_graph(d)
+        f = next((x for x in g.get("findings") or [] if x["id"] == fid), None)
+        row = next((r for r in tracking_rows(d, g) if r["id"] == fid), None)
+        if not f or not row:
+            raise ValueError("unknown finding")
+        return {**{k: f.get(k) for k in ("id", "title", "asset", "severity", "layer", "evidence", "recommendation", "impact", "cves", "source")},
+                **{k: row[k] for k in ("priority", "reason", "kev", "epss", "exposure", "due", "owner", "status", "note", "attack")}}
+    if name == "attack_paths":
+        s_, d = need_site()
+        return {"run": d.name, "paths": _read_graph(d).get("attack_paths") or []}
+    if name == "attack_matrix":
+        s_, d = need_site()
+        m = attack.matrix([f for f in _read_graph(d).get("findings") or [] if is_open(f)])
+        return {"run": d.name, "techniques": m["techniques"], "tactics": [{"tactic": c["name"], "techniques": [{"id": t["id"], "name": t["name"],
+                "findings": t["findings"]} for t in c["techniques"]]} for c in m["tactics"] if c["techniques"]]}
+    raise ValueError("unknown tool")
+
+
+@app.post("/mcp")
+async def mcp_endpoint(request: Request):
+    tok = _mcp_token(request)
+    if not tok:
+        return JSONResponse({"error": "invalid or missing token"}, status_code=401, headers={"WWW-Authenticate": "Bearer"})
+    origin = request.headers.get("origin")
+    if origin and origin.split("://", 1)[-1] != request.headers.get("host"):          # DNS rebinding / browser pages
+        return JSONResponse({"error": "origin not allowed"}, status_code=403)
+    raw = await request.body()
+    if len(raw) > 100_000:
+        return JSONResponse({"error": "too large"}, status_code=413)
+    try:
+        msg = json.loads(raw)
+    except ValueError:
+        return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}}, status_code=400)
+    if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0":
+        return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Send one JSON-RPC 2.0 request"}}, status_code=400)
+    mid, method, params = msg.get("id"), msg.get("method"), msg.get("params") or {}
+    if mid is None:                                                    # notifications (e.g. notifications/initialized)
+        return Response(status_code=202)
+    ok = lambda result: JSONResponse({"jsonrpc": "2.0", "id": mid, "result": result})
+    if method == "initialize":
+        want = params.get("protocolVersion")
+        return ok({"protocolVersion": want if want in MCP_VERSIONS else MCP_VERSIONS[0], "capabilities": {"tools": {"listChanged": False}},
+                   "serverInfo": {"name": "ai-it-guardian", "version": "1.0"},
+                   "instructions": "Read-only access to Guardian's security assessments: sites, findings, attack paths and ATT&CK. Nothing can be changed."})
+    if method == "ping":
+        return ok({})
+    if method == "tools/list":
+        return ok({"tools": MCP_TOOLS})
+    if method == "tools/call":
+        name, args = params.get("name"), params.get("arguments") or {}
+        try:
+            res = await asyncio.to_thread(_mcp_call, tok, name, args if isinstance(args, dict) else {})
+            text, err = json.dumps(res, default=str)[:200_000], False
+        except (ValueError, TypeError) as e:
+            text, err = str(e), True
+        toks = vault.get("mcp_tokens", [])
+        for t in toks:
+            if t["id"] == tok["id"]:
+                t["last_used"] = time.time()
+        vault.put("mcp_tokens", toks)
+        return ok({"content": [{"type": "text", "text": text}], "isError": err})
+    return JSONResponse({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "Method not found"}})
+
+
+@app.get("/mcp")
+def mcp_get():
+    return Response(status_code=405, headers={"Allow": "POST"})          # no server-initiated stream
+
+
+class GithubTokenBody(BaseModel):
+    token: str = ""                     # "" removes it
+
+
+@app.get("/api/github-token")
+def github_token_get(request: Request):
+    require(request, "admin")
+    return {"set": bool(vault.get("api_keys_set", {}).get("github"))}
+
+
+@app.post("/api/github-token")
+def github_token_set(body: GithubTokenBody, request: Request):
+    sid, s, user = require(request, "admin", unlocked=True)
+    t = body.token.strip()
+    if t and not re.fullmatch(r"(?:github_pat_[A-Za-z0-9_]{60,120}|gh[pousr]_[A-Za-z0-9]{36,})", t):
+        raise HTTPException(400, "That doesn't look like a GitHub token (github_pat_… or ghp_…)")
+    rec = api_keys() or {"kind": "api-keys"}
+    if t:
+        rec["github"] = t
+    else:
+        rec.pop("github", None)
+    vault.save_record("api-keys", "settings", rec)
+    flags = vault.get("api_keys_set", {})
+    flags["github"] = bool(t)
+    vault.put("api_keys_set", flags)
+    vault.audit(user["email"], "secret-changed", "GitHub token " + ("saved" if t else "removed"))
+    return {"set": bool(t)}
+
+
+class McpTokenBody(BaseModel):
+    name: str
+    sites: Optional[list] = None
+
+
+@app.get("/api/mcp/tokens")
+def mcp_tokens(request: Request):
+    require(request, "admin")
+    return {"tokens": [{k: t.get(k) for k in ("id", "name", "created", "last_used", "sites", "by")} for t in vault.get("mcp_tokens", [])],
+            "url": f"{site()[1]}/mcp", "sites": [{"id": x["id"], "name": x["name"], "customer": x["customer"]} for x in sites_db().sites()]}
+
+
+@app.post("/api/mcp/tokens")
+def mcp_token_new(body: McpTokenBody, request: Request):
+    sid, s, user = require_fresh(request)
+    s["fresh_at"] = 0
+    name = _clean(body.name, "Name", 60)
+    if not name:
+        raise HTTPException(400, "Give the token a name, e.g. Claude Desktop")
+    sites_ = None if body.sites is None else [x for x in body.sites if isinstance(x, str) and sites_db().site(x)]
+    raw = "gdn_" + secrets.token_urlsafe(32)
+    toks = vault.get("mcp_tokens", [])
+    if len(toks) >= 20:
+        raise HTTPException(400, "Up to 20 tokens: remove one first")
+    t = {"id": secrets.token_hex(4), "name": name, "hash": hashlib.sha256(raw.encode()).hexdigest(), "created": time.time(),
+         "last_used": None, "sites": sites_, "by": user["email"]}
+    vault.put("mcp_tokens", toks + [t])
+    vault.audit(user["email"], "mcp-token-created", f"{name} ({'all sites' if sites_ is None else len(sites_)})")
+    return {"token": raw, "id": t["id"]}
+
+
+@app.delete("/api/mcp/tokens/{tid}")
+def mcp_token_delete(tid: str, request: Request):
+    sid, s, user = require(request, "admin")
+    toks = vault.get("mcp_tokens", [])
+    t = next((x for x in toks if x["id"] == tid), None)
+    if not t:
+        raise HTTPException(404, "Unknown token")
+    vault.put("mcp_tokens", [x for x in toks if x["id"] != tid])
+    vault.audit(user["email"], "mcp-token-removed", t["name"])
+    return {"ok": True}
+
+
+# -- decoys (canary tokens) --------------------------------------------------------------------------------------------
+DECOY_TOKEN = re.compile(r"^[A-Za-z0-9_-]{20,30}$")
+decoy_alerted = {}                                   # decoy id -> last alert time (process memory)
+
+
+def decoy_by_token(token):
+    if not DECOY_TOKEN.match(token or ""):
+        return None
+    return next((d for d in vault.get("decoys", []) if d.get("on") and hmac.compare_digest(d["token"], token)), None)
+
+
+def decoy_url(d):
+    return f"{site()[1]}/c/{d['token']}"
+
+
+def decoy_hit(d, request, what, severity="medium", detail=""):
+    """Record a hit, alert (at most every 10 minutes per decoy, always for a sign-in with the planted password)."""
+    ip = request.client.host if request.client else "?"
+    hit = {"t": time.time(), "ip": ip, "ua": (request.headers.get("user-agent") or "")[:200], "what": what, "severity": severity, "detail": detail[:200]}
+    allv = vault.get("decoys", [])
+    for x in allv:
+        if x["id"] == d["id"]:
+            x["hits"] = ([hit] + x.get("hits", []))[:100]
+    vault.put("decoys", allv)
+    vault.audit("public", "decoy-hit", f"{d['label']} ({decoys.KINDS[d['kind']]}): {what} from {ip}")
+    if severity != "high" and time.time() - decoy_alerted.get(d["id"], 0) < 600:
+        return
+    decoy_alerted[d["id"]] = time.time()
+    st = sites_db().site(d["site"]) or {"name": d["site"], "customer": ""}
+    line = f"Decoy triggered ({severity}): {d['label']} at {st['customer'] or st['name']}: {what} from {ip}" + (f" ({detail})" if detail else "")
+    try:
+        cfg = notify_cfg()
+        if any(cfg[c].get("on") for c in ("email", "teams", "slack", "webhook")):
+            notify.send(_notify_secrets(cfg), {"subject": f"Guardian: decoy triggered ({severity})", "lines": [line],
+                                               "body": line + "\n\nSomeone used something that only an intruder would find. Check Settings › Sites › Decoys."})
+        scfg = siem_cfg()
+        if any(scfg[x]["on"] for x in siem.DESTS):
+            siem.send(scfg, vault.get("siem_secrets", {}), [{"type": "decoy", "site": d["site"], "decoy": d["label"], "kind": d["kind"],
+                                                             "what": what, "severity": severity, "ip": ip, "user_agent": hit["ua"],
+                                                             "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}])
+    except Exception as e:                                             # noqa: BLE001 - the hit is recorded either way
+        print(f"decoy alert failed: {e}", file=sys.stderr, flush=True)
+
+
+NOT_FOUND = "<!doctype html><title>404 Not Found</title><h1>Not Found</h1><p>The requested URL was not found on this server.</p>"
+DECOY_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; form-action 'self'; frame-ancestors 'none'"
+
+
+@app.get("/c/{token}")
+def decoy_link(token: str, request: Request):
+    d = decoy_by_token(token)
+    if d:
+        decoy_hit(d, request, "link opened")
+    return HTMLResponse(NOT_FOUND, status_code=404)
+
+
+@app.get("/c/{token}/i.gif")
+def decoy_image(token: str, request: Request):
+    d = decoy_by_token(token)
+    if d:
+        decoy_hit(d, request, "document opened" if d["kind"] == "docx" else "image loaded")
+    return Response(decoys.GIF, media_type="image/gif", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/c/{token}/login")
+def decoy_login_page(token: str, request: Request):
+    d = decoy_by_token(token)
+    if not d or d["kind"] not in ("login", "docx"):
+        return HTMLResponse(NOT_FOUND, status_code=404)
+    decoy_hit(d, request, "fake admin portal visited")
+    return HTMLResponse(decoys.LOGIN_PAGE.replace("{msg}", ""), headers={"Content-Security-Policy": DECOY_CSP})
+
+
+@app.post("/c/{token}/login")
+async def decoy_login(token: str, request: Request):
+    d = decoy_by_token(token)
+    if not d or d["kind"] not in ("login", "docx"):
+        return HTMLResponse(NOT_FOUND, status_code=404)
+    raw = (await request.body())[:4000]
+    form = urllib.parse.parse_qs(raw.decode(errors="replace"))
+    user, pw = (form.get("user") or [""])[0][:100], (form.get("password") or [""])[0]
+    match = bool(pw) and hmac.compare_digest(pw.encode(), (d.get("password") or "").encode())
+    await asyncio.to_thread(decoy_hit, d, request, "sign-in with the planted password" if match else "sign-in attempt",
+                            "high" if match else "medium", f"user {''.join(c for c in user if c.isprintable())[:60]!r}")
+    await asyncio.sleep(1)
+    return HTMLResponse(decoys.LOGIN_PAGE.replace("{msg}", '<p style="color:#b91c1c">Invalid user or password.</p>'),
+                        status_code=401, headers={"Content-Security-Policy": DECOY_CSP})
+
+
+class DecoyBody(BaseModel):
+    kind: str
+    label: str
+
+
+@app.get("/api/sites/{site_id}/decoys")
+def site_decoys(site_id: str, request: Request):
+    require(request, "operator")
+    site_or_404(site_id)
+    return {"kinds": decoys.KINDS, "decoys": [{**{k: x.get(k) for k in ("id", "kind", "label", "on", "hits", "created_by")},
+                                                "url": decoy_url(x), "text": decoys.placement_text(x, decoy_url(x))}
+                                               for x in vault.get("decoys", []) if x["site"] == site_id]}
+
+
+@app.post("/api/sites/{site_id}/decoys")
+def site_decoy_new(site_id: str, body: DecoyBody, request: Request):
+    sid, s, user = require(request, "admin")
+    st = site_or_404(site_id)
+    label = _clean(body.label, "Label", 80)
+    if body.kind not in decoys.KINDS or not label:
+        raise HTTPException(400, "Choose a kind and give the decoy a label (where you'll place it)")
+    allv = vault.get("decoys", [])
+    if len(allv) >= 200:
+        raise HTTPException(400, "Up to 200 decoys")
+    d = decoys.new(body.kind, label, site_id, user["email"])
+    vault.put("decoys", allv + [d])
+    vault.audit(user["email"], "decoy-created", f"{site_id} {st['name']}: {label} ({decoys.KINDS[body.kind]})")
+    return {"id": d["id"]}
+
+
+@app.get("/api/sites/{site_id}/decoys/{did}/file")
+def site_decoy_file(site_id: str, did: str, request: Request):
+    require(request, "admin")
+    d = next((x for x in vault.get("decoys", []) if x["id"] == did and x["site"] == site_id), None)
+    if not d or d["kind"] != "docx":
+        raise HTTPException(404, "No file for this decoy")
+    return Response(decoys.docx(d, decoy_url(d)), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    headers={"Content-Disposition": 'attachment; filename="IT-passwords.docx"'})
+
+
+@app.delete("/api/sites/{site_id}/decoys/{did}")
+def site_decoy_delete(site_id: str, did: str, request: Request):
+    sid, s, user = require(request, "admin")
+    allv = vault.get("decoys", [])
+    d = next((x for x in allv if x["id"] == did and x["site"] == site_id), None)
+    if not d:
+        raise HTTPException(404, "Unknown decoy")
+    vault.put("decoys", [x for x in allv if x["id"] != did])
+    vault.audit(user["email"], "decoy-removed", f"{site_id}: {d['label']}")
+    return {"ok": True}
+
+
+# -- safe web app checks -----------------------------------------------------------------------------------------------
+WEBSCAN_DIR = STATE / "webscans"
+WEBSCAN_ID = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{4}$")
+webjob = {"id": None, "scan": None}
+
+
+class WebScanBody(BaseModel):
+    url: str
+    site: str = LOCAL
+    auth_name: str = ""                 # e.g. Authorization or Cookie; the value is kept in memory only
+    auth_value: str = ""
+    max_pages: int = 150
+    verify_tls: bool = True
+    authorized: bool = False
+
+
+def _webscan_save(scan_id, data):
+    WEBSCAN_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = WEBSCAN_DIR / f"{scan_id}.tmp"
+    tmp.write_text(json.dumps(data, default=str))
+    os.replace(tmp, WEBSCAN_DIR / f"{scan_id}.json")
+
+
+def _webscan_read(scan_id):
+    if not WEBSCAN_ID.match(scan_id or ""):
+        raise HTTPException(404, "Unknown web check")
+    try:
+        return json.loads((WEBSCAN_DIR / f"{scan_id}.json").read_text())
+    except (OSError, ValueError):
+        raise HTTPException(404, "Unknown web check")
+
+
+@app.get("/api/webscan")
+def webscan_list(request: Request):
+    sid, s, user = require(request)
+    WEBSCAN_DIR.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for p in sorted(WEBSCAN_DIR.glob("*.json"), reverse=True)[:50]:
+        try:
+            d = json.loads(p.read_text())
+        except (OSError, ValueError):
+            continue
+        if can_see(user, d.get("site", LOCAL)):
+            rows.append({k: d.get(k) for k in ("id", "kind", "target", "site", "status", "started", "pages", "counts", "by", "signed_in")})
+    return {"scans": rows, "running": webjob["id"], "sites": visible_sites(user)}
+
+
+@app.post("/api/webscan")
+async def webscan_start(body: WebScanBody, request: Request):
+    sid, s, user = require_fresh(request)
+    s["fresh_at"] = 0
+    if not body.authorized:
+        raise HTTPException(400, "Confirm that you're allowed to test this app")
+    if webjob["id"]:
+        raise HTTPException(409, "A web check is already running")
+    if not sites_db().site(body.site) or not can_see(user, body.site):
+        raise HTTPException(400, "Unknown site")
+    auth = None
+    if body.auth_value:
+        name = body.auth_name.strip() or "Authorization"
+        if not re.fullmatch(r"[A-Za-z0-9-]{1,40}", name) or any(ord(c) < 32 for c in body.auth_value) or len(body.auth_value) > 8000:
+            raise HTTPException(400, "The sign-in header must be a header name and a single-line value")
+        auth = (name, body.auth_value)
+    try:
+        scan = webscan.Scan(body.url, auth, body.max_pages, 2.0, body.verify_tls)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    scan_id = time.strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(2)
+    meta = {"id": scan_id, "target": scan.start, "site": body.site, "by": user["name"], "started": time.time(), "status": "running",
+            "signed_in": bool(auth), "auth_header": auth[0] if auth else None, "pages": 0, "requests": 0, "counts": {}, "findings": []}
+    _webscan_save(scan_id, meta)
+    webjob.update(id=scan_id, scan=scan)
+    vault.audit(user["email"], "web-check", f"{scan.start} ({'signed in with ' + auth[0] if auth else 'not signed in'})")
+
+    def progress(**k):
+        meta.update(pages=k.get("pages", meta["pages"]), requests=k.get("requests", meta["requests"]))
+
+    def work():
+        scan.progress = progress
+        try:
+            res = scan.run()
+            meta.update(res, status="stopped" if scan.stop else "done", ended=time.time())
+        except Exception as e:                                         # noqa: BLE001 - reported in the result
+            meta.update(status="error", error=str(e)[:300], ended=time.time())
+        finally:
+            _webscan_save(scan_id, meta)
+            webjob.update(id=None, scan=None)
+
+    async def runner():
+        await asyncio.to_thread(work)
+    asyncio.create_task(runner())
+    return {"id": scan_id}
+
+
+class ImageScanBody(BaseModel):
+    image: str
+    site: str = LOCAL
+    user: str = ""
+    token: str = ""                     # pull token for private registries; in memory only
+
+
+@app.post("/api/imagescan")
+async def imagescan_start(body: ImageScanBody, request: Request):
+    sid, s, user = require(request, "operator")
+    if webjob["id"]:
+        raise HTTPException(409, "A web or image check is already running")
+    if not sites_db().site(body.site) or not can_see(user, body.site):
+        raise HTTPException(400, "Unknown site")
+    try:
+        imagescan.parse_ref(body.image)
+    except imagescan.ImageError as e:
+        raise HTTPException(400, str(e))
+    scan_id = time.strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(2)
+    meta = {"id": scan_id, "kind": "image", "target": body.image.strip(), "site": body.site, "by": user["name"], "started": time.time(),
+            "status": "running", "signed_in": bool(body.token), "pages": 0, "requests": 0, "counts": {}, "findings": [], "stage": "manifest"}
+    _webscan_save(scan_id, meta)
+    webjob.update(id=scan_id, scan=None)
+    vault.audit(user["email"], "image-check", body.image.strip()[:200])
+    tok, usr = body.token.strip() or None, body.user.strip() or None
+
+    def work():
+        try:
+            res = imagescan.scan(body.image, usr, tok, progress=lambda **k: meta.update(stage=k.get("stage"), layer=k.get("layer"), layers=k.get("layers")),
+                                 osv=imagescan.osv_batch)
+            meta.update(res, status="done", ended=time.time(), target=res["image"])
+        except imagescan.ImageError as e:
+            meta.update(status="error", error=str(e), ended=time.time())
+        except Exception as e:                                         # noqa: BLE001 - reported in the result
+            meta.update(status="error", error=f"{type(e).__name__}: {e}"[:300], ended=time.time())
+        finally:
+            _webscan_save(scan_id, meta)
+            webjob.update(id=None, scan=None)
+
+    async def runner():
+        await asyncio.to_thread(work)
+    asyncio.create_task(runner())
+    return {"id": scan_id}
+
+
+@app.get("/api/webscan/{scan_id}")
+def webscan_get(scan_id: str, request: Request):
+    sid, s, user = require(request)
+    d = _webscan_read(scan_id)
+    if not can_see(user, d.get("site", LOCAL)):
+        raise HTTPException(404, "Unknown web check")
+    if webjob["id"] == scan_id and webjob["scan"]:
+        sc = webjob["scan"]
+        d.update(pages=len(sc.pages), requests=sc.requests)
+    return d
+
+
+@app.post("/api/webscan/stop")
+def webscan_stop(request: Request):
+    sid, s, user = require(request, "operator")
+    if not webjob["scan"]:
+        raise HTTPException(409, "No web check is running")
+    webjob["scan"].stop = True
+    vault.audit(user["email"], "web-check-stopped", "")
+    return {"ok": True}
+
+
+@app.post("/api/webscan/{scan_id}/findings/{n}/fix-plan")
+def webscan_to_plan(scan_id: str, n: int, request: Request):
+    sid, s, user = require(request, "operator")
+    d = _webscan_read(scan_id)
+    site_id = d.get("site", LOCAL)
+    if not can_see(user, site_id):
+        raise HTTPException(404, "Unknown web check")
+    if not 0 <= n < len(d.get("findings") or []):
+        raise HTTPException(404, "Unknown finding")
+    f = d["findings"][n]
+    if f.get("finding"):
+        raise HTTPException(409, "Already in the Fix plan")
+    runs = sorted((x for x in RUNS.iterdir() if x.is_dir() and RUN_ID.match(x.name) and run_site(x) == site_id and (x / "graph.json").exists()),
+                  reverse=True) if RUNS.exists() else []
+    if not runs:
+        raise HTTPException(400, "This site has no assessment yet: create one on the dashboard first")
+    g = Graph(str(runs[0]))
+    image = d.get("kind") == "image"
+    fid = g.add_finding({"title": f["title"], "severity": f["severity"] if f["severity"] != "info" else "low",
+                         "asset": d["target"][:120] if image else urllib.parse.urlsplit(d["target"]).netloc, "layer": "web",
+                         "status": "open", "source": "Image check" if image else "Web check",
+                         "first_seen": time.strftime("%Y-%m-%d"), "recommendation": f["recommendation"],
+                         "evidence": (f"{'Image' if image else 'Web'} check {scan_id} of {d['target']}: {f['evidence']}"
+                                      + (" Pages: " + ", ".join(f["urls"][:8]) if f.get("urls") else ""))[:3000]})
+    g.save()
+    f.update(finding=fid, run=runs[0].name)
+    _webscan_save(scan_id, d)
+    vault.audit(user["email"], "web-check-to-plan", f"{scan_id} {f['title'][:60]} -> {runs[0].name}/{fid}")
+    return {"run": runs[0].name, "finding": fid}
+
+
+# -- vulnerability-disclosure page (public, per site) -----------------------------------------------------------------
+VDP_TOKEN = re.compile(r"^[A-Za-z0-9_-]{22,43}$")
+VDP_LIMITS = {"ip_hour": 5, "site_day": 50, "kept": 500}
+vdp_hits = collections.defaultdict(list)          # ip -> times; site -> times (process memory: resets on restart)
+
+
+def vdp_site(token):
+    """(site_id, settings) for a public token, or 404. Only sites with the page switched on answer."""
+    if not VDP_TOKEN.match(token or ""):
+        raise HTTPException(404, "Not found")
+    for sid_, cfg in vault.get("site_settings", {}).items():
+        v = (cfg or {}).get("vdp") or {}
+        if v.get("on") and v.get("token") and hmac.compare_digest(v["token"], token):
+            st = sites_db().site(sid_)
+            if st:
+                return sid_, st, v
+    raise HTTPException(404, "Not found")
+
+
+def vdp_public_url(token):
+    return f"{site()[1]}/vdp/{token}"
+
+
+@app.get("/vdp/{token}")
+def vdp_page(token: str):
+    vdp_site(token)
+    return _page("vdp.html")
+
+
+@app.get("/vdp/{token}/info")
+def vdp_info(token: str):
+    sid_, st, v = vdp_site(token)
+    return {"organisation": st["customer"] or st["name"], "policy": v.get("policy") or VDP_POLICY, "contact": v.get("contact") or ""}
+
+
+@app.get("/vdp/{token}/security.txt")
+def vdp_security_txt(token: str):
+    sid_, st, v = vdp_site(token)
+    exp = time.strftime("%Y-%m-%dT00:00:00.000Z", time.gmtime(time.time() + 330 * 86400))
+    lines = [f"Contact: {vdp_public_url(token)}"] + ([f"Contact: mailto:{v['contact']}"] if v.get("contact") else []) + \
+            [f"Expires: {exp}", f"Policy: {vdp_public_url(token)}", "Preferred-Languages: en, de, fr"]
+    return Response("\n".join(lines) + "\n", media_type="text/plain; charset=utf-8")
+
+
+class VdpReport(BaseModel):
+    title: str
+    description: str
+    affected: str = ""
+    contact: str = ""
+
+
+@app.post("/vdp/{token}/report")
+def vdp_report(token: str, body: VdpReport, request: Request):
+    sid_, st, v = vdp_site(token)
+    ip = request.client.host if request.client else "?"
+    now = time.time()
+    for key, window, cap in ((f"ip:{ip}", 3600, VDP_LIMITS["ip_hour"]), (f"site:{sid_}", 86400, VDP_LIMITS["site_day"])):
+        vdp_hits[key] = [t for t in vdp_hits[key] if now - t < window]
+        if len(vdp_hits[key]) >= cap:
+            raise HTTPException(429, "Too many reports right now. Please try again later.")
+    clean = lambda s, n: "".join(c for c in str(s or "") if c in "\n\t" or ord(c) >= 32)[:n].strip()
+    rep = {"id": secrets.token_hex(6), "t": now, "title": clean(body.title, 200), "description": clean(body.description, 8000),
+           "affected": clean(body.affected, 500), "contact": clean(body.contact, 200), "status": "new"}
+    if len(rep["title"]) < 5 or len(rep["description"]) < 20:
+        raise HTTPException(400, "Please give a short title and describe what you found (at least a couple of sentences).")
+    for key in (f"ip:{ip}", f"site:{sid_}"):
+        vdp_hits[key].append(now)
+    allr = vault.get("vdp_reports", {})
+    allr[sid_] = ([rep] + allr.get(sid_, []))[:VDP_LIMITS["kept"]]
+    vault.put("vdp_reports", allr)
+    vault.audit("public", "vdp-report", f"{sid_} {st['name']}: {rep['title'][:80]}")
+    try:
+        cfg = notify_cfg()
+        if any(cfg[c].get("on") for c in ("email", "teams", "slack", "webhook")):
+            line = f"New vulnerability report for {st['customer'] or st['name']}: {rep['title']}"
+            notify.send(_notify_secrets(cfg), {"subject": "Guardian: new vulnerability report", "body": line + "\n\nOpen Settings › Sites › Disclosure to review it.",
+                                               "lines": [line]})
+    except Exception as e:                                             # noqa: BLE001 - the report is stored either way
+        print(f"vdp notify failed: {e}", file=sys.stderr, flush=True)
+    return {"ok": True, "reference": rep["id"]}
+
+
+VDP_POLICY = ("We welcome reports of security weaknesses in our systems. Please describe what you found and how to reproduce it. "
+              "Act in good faith: don't access, change or delete data that isn't yours, don't disrupt services, and give us reasonable "
+              "time to fix the issue before telling anyone else. We won't take legal action against good-faith research that follows "
+              "these rules.")
+
+
+class VdpSettings(BaseModel):
+    on: bool = False
+    contact: str = ""
+    policy: str = ""
+    new_link: bool = False
+
+
+@app.get("/api/sites/{site_id}/vdp")
+def site_vdp_get(site_id: str, request: Request):
+    require(request, "operator")
+    site_or_404(site_id)
+    v = site_settings(site_id).get("vdp") or {}
+    return {"on": bool(v.get("on")), "contact": v.get("contact", ""), "policy": v.get("policy") or VDP_POLICY,
+            "url": vdp_public_url(v["token"]) if v.get("token") else None,
+            "reports": vault.get("vdp_reports", {}).get(site_id, [])}
+
+
+@app.post("/api/sites/{site_id}/vdp")
+def site_vdp_set(site_id: str, body: VdpSettings, request: Request):
+    sid, s, user = require(request, "admin")
+    st = site_or_404(site_id)
+    contact = body.contact.strip()
+    if contact and not EMAIL.match(contact):
+        raise HTTPException(400, "The contact must be an e-mail address")
+    policy = body.policy.strip()[:4000]
+    cfg = site_settings(site_id)
+    v = cfg.get("vdp") or {}
+    if body.new_link or not v.get("token"):
+        v["token"] = secrets.token_urlsafe(24)
+    v.update(on=body.on, contact=contact, policy=policy if policy and policy != VDP_POLICY else "")
+    cfg["vdp"] = v
+    save_site_settings(site_id, cfg)
+    vault.audit(user["email"], "vdp-changed", f"{site_id} {st['name']}: {'on' if body.on else 'off'}" + (", new link" if body.new_link else ""))
+    return site_vdp_get(site_id, request)
+
+
+class VdpAction(BaseModel):
+    action: str                     # "fix-plan" or "dismiss"
+    severity: str = "medium"
+
+
+@app.post("/api/sites/{site_id}/vdp/{rid}")
+def site_vdp_action(site_id: str, rid: str, body: VdpAction, request: Request):
+    sid, s, user = require(request, "operator")
+    st = site_or_404(site_id)
+    allr = vault.get("vdp_reports", {})
+    rep = next((r for r in allr.get(site_id, []) if r["id"] == rid), None)
+    if not rep:
+        raise HTTPException(404, "Unknown report")
+    if body.action == "dismiss":
+        rep["status"] = "dismissed"
+    elif body.action == "fix-plan":
+        if body.severity not in ("critical", "high", "medium", "low"):
+            raise HTTPException(400, "Unknown severity")
+        runs = sorted((d for d in RUNS.iterdir() if d.is_dir() and RUN_ID.match(d.name) and run_site(d) == site_id and (d / "graph.json").exists()),
+                      reverse=True) if RUNS.exists() else []
+        if not runs:
+            raise HTTPException(400, "This site has no assessment yet: create one on the dashboard first")
+        g = Graph(str(runs[0]))
+        fid = g.add_finding({"title": rep["title"], "severity": body.severity, "asset": (rep["affected"] or "site")[:120], "layer": "import",
+                             "status": "open", "source": "Disclosure", "first_seen": time.strftime("%Y-%m-%d"),
+                             "evidence": f"Reported through the vulnerability-disclosure page on {time.strftime('%Y-%m-%d', time.localtime(rep['t']))}"
+                                         f" (reference {rep['id']}): {rep['description']}"[:3000],
+                             "recommendation": "Reproduce the report, fix it, then re-check. Thank the reporter if they left a contact."})
+        g.save()
+        rep.update(status="in-fix-plan", run=runs[0].name, finding=fid)
+    else:
+        raise HTTPException(400, "Unknown action")
+    vault.put("vdp_reports", allr)
+    vault.audit(user["email"], "vdp-report-" + body.action, f"{site_id} {st['name']}: {rep['title'][:80]}")
+    return rep
 
 
 # -- multi-site: settings, portfolio, access -------------------------------------------------------------------------
@@ -3018,6 +3822,10 @@ async def code_scan(body: CodeScanBody, request: Request):
         raise HTTPException(409, "A code scan is already running")
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LANG": "C.UTF-8", "PYTHONUNBUFFERED": "1",
            "HOME": str(BASE), **{k: v for k, v in os.environ.items() if k.startswith("GUARDIAN_")}}
+    gh_token = api_keys().get("github") if sid in vault.holders else None
+    if gh_token:
+        env["GITHUB_TOKEN"] = gh_token                           # read-only, for private repositories; in memory only
+        vault.audit(user["email"], "secret-used", "GitHub token for a code scan")
     ai = body.ai
     if ai:
         key = api_keys().get("anthropic") if sid in vault.holders else None

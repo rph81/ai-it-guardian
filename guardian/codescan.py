@@ -30,6 +30,7 @@ URL_RE = re.compile(r"^(?:https?://)?(?:www\.)?github\.com/([A-Za-z0-9](?:[A-Za-
                     r"(?:\.git)?(?:/tree/([A-Za-z0-9._/-]{1,200}))?/?(?:[?#].*)?$")
 REF_RE = re.compile(r"^[A-Za-z0-9._/-]{1,200}$")
 UA = "AI-IT-Guardian-codescan"
+TOKEN = os.environ.pop("GITHUB_TOKEN", "")          # handed over by the console in memory; removed from the environment
 
 MAX_REPO_KB = 400_000          # GitHub's own size estimate, checked before downloading
 MAX_ARCHIVE = 200 * 2**20      # compressed download
@@ -48,7 +49,7 @@ GROUPS = {
     "install": "Install-time scripts", "obfuscation": "Hidden or obfuscated code", "network": "Outbound connections",
     "credentials": "Credential theft", "secrets": "Leaked secrets", "deps": "Dependencies", "actions": "GitHub Actions",
     "binaries": "Binaries", "persistence": "Persistence", "manipulation": "Attempts to fool the review",
-    "signals": "Repository signals",
+    "signals": "Repository signals", "iac": "Infrastructure as code",
 }
 
 CODE_EXT = {".js", ".mjs", ".cjs", ".ts", ".jsx", ".tsx", ".py", ".pyw", ".sh", ".bash", ".zsh", ".ps1", ".psm1", ".bat",
@@ -160,6 +161,66 @@ RULES = [
      r"\$\{\{\s*github\.event\.(?:issue|pull_request|comment|review|review_comment|discussion|head_commit|commits)[^}]{0,60}\.(?:title|body|ref|message|label|name|email)\b",
      workflow, 0),
 ]
+# Infrastructure as code: misconfigurations that ship with the templates (modelled on Checkov / tfsec / Wiz Code).
+def terraform(path):
+    return path.lower().endswith((".tf", ".tf.json", ".tfvars"))
+
+
+def kube(path):
+    p = path.lower()
+    return p.endswith((".yaml", ".yml")) and not workflow(path)
+
+
+def dockerfile(path):
+    n = path.lower().rsplit("/", 1)[-1]
+    return n == "dockerfile" or n.startswith("dockerfile.") or n.endswith(".dockerfile") or n == "containerfile"
+
+
+def azure_tpl(path):
+    return path.lower().endswith((".bicep", ".json"))
+
+
+IAC_RULES = [
+    ("tf-open-world", "iac", "medium", "Firewall rule open to the whole internet", "A security group or firewall rule allows 0.0.0.0/0 (or ::/0).",
+     "Limit the source to the addresses that need it; never open SSH, RDP or databases to everyone.", r"(?:cidr_blocks|source_address_prefix(?:es)?|source_ranges|ipv6_cidr_blocks)\s*=\s*\[?\s*\"(?:0\.0\.0\.0/0|::/0|\*|Internet)\"", terraform, re.I),
+    ("tf-public-acl", "iac", "high", "Storage bucket made public", "A bucket or container ACL grants public read or write.",
+     "Remove public ACLs and turn on Block Public Access.", r"acl\s*=\s*\"public-read(?:-write)?\"|container_access_type\s*=\s*\"(?:blob|container)\"", terraform, re.I),
+    ("tf-public-db", "iac", "high", "Database reachable from the internet", "publicly_accessible = true on a database.",
+     "Keep databases on private networks.", r"publicly_accessible\s*=\s*true", terraform, re.I),
+    ("tf-no-encryption", "iac", "medium", "Encryption at rest turned off", "A disk, volume or database has encryption disabled.",
+     "Turn encryption on (it's free on every major cloud).", r"\b(?:encrypted|storage_encrypted|encryption_enabled|enable_encryption)\s*=\s*false", terraform, re.I),
+    ("tf-tls-old", "iac", "medium", "Old TLS versions allowed", "A minimum TLS version below 1.2 is configured.",
+     "Require TLS 1.2 or later.", r"min(?:imum)?_tls_version\s*=\s*\"(?:TLS1_0|TLS1_1|1\.0|1\.1)\"", terraform, re.I),
+    ("tf-https-off", "iac", "medium", "HTTPS not enforced", "https_only / enable_https_traffic_only is false.",
+     "Enforce HTTPS.", r"(?:https_only|enable_https_traffic_only|https_traffic_only_enabled)\s*=\s*false", terraform, re.I),
+    ("tf-wildcard-iam", "iac", "high", "IAM policy allows every action", "A policy grants Action \"*\" (often on Resource \"*\").",
+     "Grant only the actions the role needs.", r"\"Action\"\s*:\s*\"\*\"|actions\s*=\s*\[\s*\"\*\"\s*\]", terraform, 0),
+    ("tf-secret-literal", "iac", "high", "Password written into the template", "A password or secret is a literal string in Terraform.",
+     "Use a secret store or a variable marked sensitive, and rotate the value.", r"\b(?:password|admin_password|secret|client_secret)\s*=\s*\"[^\"$\s]{6,}\"", terraform, re.I),
+    ("k8s-privileged", "iac", "high", "Privileged container", "privileged: true gives the container full control of the node.",
+     "Remove privileged mode; add only the capabilities that are needed.", r"^\s*privileged:\s*true\b", kube, re.M),
+    ("k8s-host", "iac", "medium", "Container shares the host's network, processes or files", "hostNetwork, hostPID, hostIPC or hostPath is used.",
+     "Avoid host namespaces and hostPath volumes.", r"^\s*(?:hostNetwork|hostPID|hostIPC):\s*true\b|^\s*hostPath:", kube, re.M),
+    ("k8s-escalation", "iac", "medium", "Privilege escalation allowed", "allowPrivilegeEscalation: true, or the container runs as user 0.",
+     "Set allowPrivilegeEscalation: false and runAsNonRoot: true.", r"^\s*allowPrivilegeEscalation:\s*true\b|^\s*runAsUser:\s*0\b", kube, re.M),
+    ("k8s-latest", "iac", "low", "Image without a fixed version", "image: …:latest (or no tag) changes under you.",
+     "Pin images to a version or digest.", r"^\s*-?\s*image:\s*[\"']?[\w./-]+(?::latest)?[\"']?\s*$", kube, re.M),
+    ("docker-root", "iac", "medium", "Container runs as root", "The Dockerfile switches to USER root (or never sets a user).",
+     "Add a non-root USER before the entrypoint.", r"^\s*USER\s+(?:root|0)\s*$", dockerfile, re.M | re.I),
+    ("docker-add-url", "iac", "medium", "Dockerfile downloads files with ADD", "ADD from a URL fetches unverified content at build time.",
+     "Download with checksums in a RUN step, or COPY files from the build context.", r"^\s*ADD\s+https?://", dockerfile, re.M | re.I),
+    ("docker-secret-env", "iac", "high", "Secret baked into the image", "An ENV or ARG sets a password, token or key; anyone with the image can read it.",
+     "Pass secrets at run time (secrets mount or environment), never in the Dockerfile.", r"^\s*(?:ENV|ARG)\s+\w*(?:PASSWORD|PASSWD|SECRET|TOKEN|API_KEY|PRIVATE_KEY)\w*[= ]\s*\S{4,}", dockerfile, re.M | re.I),
+    ("docker-latest", "iac", "low", "Base image without a fixed version", "FROM uses :latest or no tag.",
+     "Pin the base image to a version or digest.", r"^\s*FROM\s+(?!scratch\b)[\w./-]+(?::latest)?(?:\s+AS\s+\w+)?\s*$", dockerfile, re.M | re.I),
+    ("az-https-off", "iac", "medium", "HTTPS not enforced (Azure template)", "supportsHttpsTrafficOnly / httpsOnly is false.",
+     "Enforce HTTPS.", r"(?:supportsHttpsTrafficOnly|httpsOnly)[\"']?\s*:\s*false", azure_tpl, re.I),
+    ("az-blob-public", "iac", "high", "Public blob access allowed (Azure template)", "allowBlobPublicAccess is true.",
+     "Set allowBlobPublicAccess to false.", r"allowBlobPublicAccess[\"']?\s*:\s*true", azure_tpl, re.I),
+    ("az-tls-old", "iac", "medium", "Old TLS versions allowed (Azure template)", "minimumTlsVersion is TLS1_0 or TLS1_1.",
+     "Require TLS1_2.", r"minimumTlsVersion[\"']?\s*:\s*[\"']TLS1_[01][\"']", azure_tpl, re.I),
+]
+RULES += IAC_RULES
 SECRETS = [
     ("aws-key", "high", "AWS access key", r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
     ("private-key", "high", "Private key", r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP |ENCRYPTED )?PRIVATE KEY-----"),
@@ -207,11 +268,14 @@ def http(url, data=None, limit=8 * 2**20, accept="application/vnd.github+json", 
     if host not in ("api.github.com", "codeload.github.com", "api.osv.dev"):
         raise ValueError(f"Not an allowed address: {host}")
     headers = {"User-Agent": UA, "Accept": accept}
+    if TOKEN and host == "api.github.com":
+        headers["Authorization"] = f"Bearer {TOKEN}"         # read-only token for private repositories, from the vault
     if data is not None:
         data, headers["Content-Type"] = json.dumps(data).encode(), "application/json"
     req = urllib.request.Request(url, data=data, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as r:
-        if urllib.parse.urlsplit(r.geturl()).hostname != host:
+        final = urllib.parse.urlsplit(r.geturl()).hostname
+        if final != host and not (host == "api.github.com" and final == "codeload.github.com"):
             raise ValueError("Unexpected redirect")
         out = r.read(limit + 1)
     if len(out) > limit:
@@ -301,12 +365,13 @@ class Scan:
             meta = gh(f"/repos/{self.owner}/{self.repo}")
         except urllib.error.HTTPError as e:
             if e.code == 404:
-                raise RuntimeError("Repository not found. Only public repositories can be scanned.") from None
+                raise RuntimeError("Repository not found." + ("" if TOKEN else " Private repositories need a GitHub token (Settings › Integrations).")) from None
             if e.code == 403:
                 raise RuntimeError("GitHub's rate limit for anonymous requests was reached. Try again in an hour.") from None
             raise
-        if meta.get("private"):
-            raise RuntimeError("This repository is private. Only public repositories can be scanned.")
+        if meta.get("private") and not TOKEN:
+            raise RuntimeError("This repository is private: add a read-only GitHub token in Settings › Integrations.")
+        self.d["private"] = bool(meta.get("private"))
         if (meta.get("size") or 0) > MAX_REPO_KB:
             raise RuntimeError(f"Repository is too large to scan ({meta['size'] // 1024} MB).")
         ref = self.ref or meta.get("default_branch") or "main"
@@ -336,8 +401,9 @@ class Scan:
         except Exception:                                           # noqa: BLE001 - optional detail
             pass
         self.stage("fetch", text=f"Downloading commit {sha[:7]}")
-        data = http(f"https://codeload.github.com/{self.owner}/{self.repo}/tar.gz/{sha}", limit=MAX_ARCHIVE,
-                    accept="*/*", timeout=180)
+        url = (f"https://api.github.com/repos/{self.owner}/{self.repo}/tarball/{sha}" if self.d.get("private")
+               else f"https://codeload.github.com/{self.owner}/{self.repo}/tar.gz/{sha}")
+        data = http(url, limit=MAX_ARCHIVE, accept="*/*", timeout=180)
         self.archive = data
         self.stage("fetch", "done", f"Commit {sha[:7]}, {len(data) / 2**20:.1f} MB archive")
 

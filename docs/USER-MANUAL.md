@@ -287,14 +287,30 @@ sign-in block (report-only); NinjaOne OS patches. Details: [FIXES.md](FIXES.md).
 
 ---
 
-## 8. Code: GitHub repository scan
+## 8. Code & web apps
 
 ![Code scan](manual/12-code-scan.png)
 
-Paste the address of a **public** GitHub repository to check it for malicious or risky code before you use it:
-install scripts, obfuscated code, suspicious network calls, leaked secrets, typo-squatted dependencies, risky GitHub
-workflows. The result is a verdict (clean, caution, dangerous) with each finding, the file and line. Optional AI review
-of the riskiest files (uses API credit).
+**Repository scan.** Paste the address of a GitHub repository to check it for malicious or risky code before you use
+it: install scripts, obfuscated code, suspicious network calls, leaked secrets, typo-squatted dependencies, risky GitHub
+workflows, and **infrastructure-as-code** mistakes (Terraform, Kubernetes, Dockerfiles, Bicep / ARM: open firewalls,
+public storage, privileged containers, secrets in templates). Private repositories need a read-only GitHub token
+(Settings › Integrations). The result is a verdict with each finding, the file and line. Optional AI review of the
+riskiest files (uses API credit).
+
+![Web app and image checks](manual/12-web-check.png)
+
+**Web app check.** A safe, read-only check of a web app you're responsible for: security headers, cookies, exposed
+files (.git, .env, backups, actuator), error pages that leak details, CORS, directory listings, and, with a test
+account's sign-in header, pages for signed-in users that also load without signing in. GET and HEAD only, the app's
+own address only, at most 2 requests a second; links that look like actions are skipped and forms are never sent. An
+admin starts it with a passkey and confirms being allowed to test the app. The sign-in value is never stored.
+
+**Container image check.** Give an image (nginx:1.27, ghcr.io/org/app:2.1); Guardian reads it from the registry without
+running it and checks the packages inside (Debian, Ubuntu, Alpine, Python, npm) against known vulnerabilities and
+malware (OSV), plus root user, secrets in environment variables and a base OS out of support.
+
+Both list their findings with **Add to Fix plan** (into the chosen site's latest assessment). Details: [WEB-AND-IMAGE-CHECKS.md](WEB-AND-IMAGE-CHECKS.md).
 
 ---
 
@@ -395,6 +411,16 @@ Paused by customer, Disconnected by customer or Not reachable. Details: [ONSITE-
 
 ![Site access](manual/10-site-access.png)
 
+- **Disclosure**: a public vulnerability-disclosure page for this customer (NIS2 expects one) and a ready-made
+  security.txt. Reports land here; **Add to Fix plan** or **Dismiss**. Details: [DISCLOSURE.md](DISCLOSURE.md).
+
+![Disclosure page](manual/13-disclosure-page.png)
+
+- **Decoys**: tracking links, fake admin logins (honey credentials) and bait Word documents. Guardian creates them, you
+  place them; any use raises an alert (a sign-in with the planted password is high). Details: [DECOYS.md](DECOYS.md).
+
+![Decoys](manual/10-site-decoys.png)
+
 - **Connectors** and **Schedule**: where to find them for this site. Details: [MULTISITE.md](MULTISITE.md).
 
 ### Schedules & alerts
@@ -417,6 +443,18 @@ change with the system (address, API user, secret, and where tickets go: board, 
 automatic tickets after each assessment for a chosen priority, closing the ticket when Guardian verifies the fix, and
 **Test the connection**. These are the defaults; each site can send its tickets elsewhere (Sites & collectors ›
 Settings › Ticketing). Details: [TICKETING.md](TICKETING.md).
+
+### Integrations
+
+![Integrations](manual/10-settings-integrations.png)
+
+- **SIEM output**: after each run, one event per finding (new ones only, or all) to Microsoft Sentinel (Logs ingestion
+  API), Splunk (HTTP Event Collector) or syslog (RFC 5424 over TLS, TCP or UDP). **Send a test event** checks them.
+- **GitHub**: a read-only token for scanning private repositories.
+- **MCP server**: tokens that let other AI tools (Claude Desktop, Claude Code and others) read Guardian's sites,
+  findings, attack paths and ATT&CK map. Creating one needs your passkey; remove it to cut access at once.
+
+Details: [INTEGRATIONS.md](INTEGRATIONS.md).
 
 ### Appearance
 

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en" data-theme="ember" data-scheme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Report a Vulnerability</title>
+<script src="/theme.js"></script>
+<link rel="stylesheet" href="/console.css">
+<script src="/vdp.js" defer></script>
+</head>
+<body>
+<main class="vdp">
+  <div class="crumb"><b>//</b>Security / <span id="org"></span></div>
+  <h1 class="ptitle">Report a vulnerability.</h1>
+  <p class="sub" id="policy"></p>
+  <form class="card stack" id="vdp-form">
+    <div><label for="v-title">Short title</label><input id="v-title" maxlength="200" required placeholder="Admin page reachable without sign-in"></div>
+    <div><label for="v-affected">Affected address, page or system</label><input id="v-affected" maxlength="500" placeholder="https://example.com/admin"></div>
+    <div><label for="v-desc">What you found and how to reproduce it</label><textarea id="v-desc" maxlength="8000" rows="9" required></textarea></div>
+    <div><label for="v-contact">Your e-mail or other contact (optional, if you want an answer)</label><input id="v-contact" maxlength="200"></div>
+    <div class="row"><button class="btn primary" type="submit">Send report</button><span class="note m0" id="v-out"></span></div>
+    <p class="help">Don't include personal data or credentials you came across. Please don't send exploit code that changes or deletes data.</p>
+  </form>
+  <p class="help" id="contact"></p>
+</main>
+</body>
+</html>

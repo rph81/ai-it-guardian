@@ -52,11 +52,15 @@ for s in ["connectors", "users", "security", "account", "ai", "scope", "evidence
 nav("/settings#connectors", 3)
 js("(()=>{const h=[...document.querySelectorAll('#s-connectors *')].find(e=>e.children.length===0&&e.textContent.trim().toLowerCase()==='business systems');if(h){h.scrollIntoView({block:'start'});scrollBy(0,-20)}})()"); time.sleep(0.8)
 shot("10-settings-business", height=700)
-for t, name in [("General", "10-site-general"), ("Ticketing", "10-site-ticketing"), ("Access", "10-site-access")]:
+for t, name in [("General", "10-site-general"), ("Ticketing", "10-site-ticketing"), ("Access", "10-site-access"), ("Disclosure", "10-site-disclosure"), ("Decoys", "10-site-decoys")]:
     nav("/settings#sites", 2)
     js("(()=>{const z=[...document.querySelectorAll('#si-rows tr')].find(r=>r.textContent.includes('Zürich'));z.querySelector('button').click()})()"); time.sleep(1)
-    js(f"[...document.querySelectorAll('#sc-tabs button')].find(x=>x.textContent==='{t}').click()"); time.sleep(0.6)
+    js(f"[...document.querySelectorAll('#sc-tabs button')].find(x=>x.textContent==='{t}').click()"); time.sleep(1.2)
     shot(name, "#sc-card", height=1000, pad=6)
+nav("/vdp/DemoDisclosureLink-0000000000", 2); shot("13-disclosure-page", height=900)
+nav("/settings#integrations", 2); shot("10-settings-integrations", height=1500)
+nav("/code", 3); js("(()=>{const r=[...document.querySelectorAll('#wc-history tr')][0]; r && r.click()})()"); time.sleep(1.5)
+shot("12-web-check", "section[aria-labelledby=wc-title]", height=1800, pad=6)
 nav("/fix"); shot("11-fix", height=1400); shot("11-fix-accounts", "section[aria-labelledby=fa-title]", height=1800, pad=6)
 nav("/code"); shot("12-code-scan")
 ws.close(); chrome.terminate()
