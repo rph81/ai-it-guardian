@@ -37,6 +37,8 @@ cmd("Page.enable"); cmd("Runtime.enable")
 cmd("Emulation.setDeviceMetricsOverride", width=1440, height=900, deviceScaleFactor=1, mobile=False)
 cmd("Emulation.setEmulatedMedia", features=[{"name": "prefers-color-scheme", "value": "dark"}])
 nav("/", 2); js("localStorage.setItem('guardian-site','all')"); nav("/", 4); shot("01b-all-sites", height=700)
+js("(async()=>{const o=await (await fetch('/api/overview')).json();const z=o.sites.find(x=>x.name.includes('Zürich'));localStorage.setItem('guardian-site',z.id)})()"); time.sleep(1)
+nav("/", 4); shot("01c-remote-site", height=420)
 js("localStorage.setItem('guardian-site','local')"); nav("/", 4); shot("01-dashboard"); shot("02-dashboard-full", height=2000)
 for t, name in [("report", "03-report"), ("plan", "04-fix-plan"), ("paths", "05-attack-paths"), ("attack", "05b-attack-matrix"), ("comp", "06-compliance"), ("agents", "07-agents"), ("map", "08-map-chat"), ("log", "09-live-log")]:
     js(f"showTab('{t}')"); time.sleep(2.5)
@@ -54,7 +56,7 @@ js("(()=>{const h=[...document.querySelectorAll('#s-connectors *')].find(e=>e.ch
 shot("10-settings-business", height=700)
 js("(()=>{const h=[...document.querySelectorAll('#s-connectors *')].find(e=>e.children.length===0&&e.textContent.trim().toLowerCase()==='cloud');if(h){h.scrollIntoView({block:'start'});scrollBy(0,-20)}})()"); time.sleep(0.8)
 shot("10-settings-cloud", height=420)
-for t, name in [("General", "10-site-general"), ("Ticketing", "10-site-ticketing"), ("Access", "10-site-access"), ("Disclosure", "10-site-disclosure"), ("Decoys", "10-site-decoys")]:
+for t, name in [("General", "10-site-general"), ("Ticketing", "10-site-ticketing"), ("Access", "10-site-access"), ("Disclosure", "10-site-disclosure"), ("Decoys", "10-site-decoys"), ("Schedule", "10-site-schedule")]:
     nav("/settings#sites", 2)
     js("(()=>{const z=[...document.querySelectorAll('#si-rows tr')].find(r=>r.textContent.includes('Zürich'));z.querySelector('button').click()})()"); time.sleep(1)
     js(f"[...document.querySelectorAll('#sc-tabs button')].find(x=>x.textContent==='{t}').click()"); time.sleep(1.2)

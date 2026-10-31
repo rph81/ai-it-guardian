@@ -1,0 +1,25 @@
+# Optional: the customer's status page on the LAN. Set its password first: sudo guardian-collector page-password
+[Unit]
+Description=Guardian site collector status page
+After=network-online.target guardian-collector.service
+
+[Service]
+User=guardian-collector
+Group=guardian-collector
+Environment=GUARDIAN_COLLECTOR_DATA=/var/lib/guardian-collector
+ExecStart=/opt/guardian-collector/venv/bin/python /opt/guardian-collector/launch.py page --listen 0.0.0.0:8443
+Restart=always
+RestartSec=10
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/guardian-collector
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

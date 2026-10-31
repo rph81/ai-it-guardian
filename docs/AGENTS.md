@@ -185,7 +185,7 @@ fixed list of paths, never follows paging links to other hosts, and passes only 
 
 ## Coming next
 
-Integrations with business systems; the AWS posture agent; remote scans through the collector. (Fixes and patching: [FIXES.md](FIXES.md); evidence and the compliance PDF: [COMPLIANCE.md](COMPLIANCE.md); the full user manual: [USER-MANUAL.md](USER-MANUAL.md).)
+Real-system testing of every agent. For customer sites, the network specialists' probes and the on-site connector checks run through the site's collector ([ONSITE-COLLECTOR.md](ONSITE-COLLECTOR.md)). (Fixes and patching: [FIXES.md](FIXES.md); evidence and the compliance PDF: [COMPLIANCE.md](COMPLIANCE.md); the full user manual: [USER-MANUAL.md](USER-MANUAL.md).)
 | **Microsoft 365 & Entra ID** | Microsoft Secure Score / Defender, Tenable Identity Exposure for Entra, Qualys SaaS posture | Microsoft 365 connector (read-only Graph app) |
 | **Device fleet** | Tenable / Qualys / Rapid7 endpoint agents, Defender Vulnerability Management | Microsoft 365 connector (Intune, Defender) |
 | **Azure** | Defender for Cloud, Wiz, Orca, Prisma Cloud (CSPM) | Azure connector (Reader + Security Reader) |

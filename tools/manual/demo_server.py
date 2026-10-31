@@ -62,6 +62,16 @@ console.WEBSCAN_DIR = console.STATE / "webscans"; console.WEBSCAN_DIR.mkdir(pare
       {"title": "openssl 1.1.1n-0+deb11u5 has 9 known vulnerabilities", "severity": "high", "urls": [], "evidence": "Debian:11 package libssl1.1: CVE-2023-0286, CVE-2023-0464, …", "recommendation": "Rebuild on an updated base image.", "count": 1},
       {"title": "Image is more than a year old", "severity": "low", "urls": [], "evidence": "Built 2023-09-08", "recommendation": "Rebuild regularly.", "count": 1},
       {"title": "Container runs as root", "severity": "medium", "urls": [], "evidence": "Image config User: (not set)", "recommendation": "Use a non-root USER.", "count": 1}]}))
+# an online collector at the Zürich site, so the remote-site dashboard shows its buttons
+code, _ = st.create_code(sid, "admin@demo.example")
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey as _K
+from cryptography.hazmat.primitives import serialization as _ser
+c_, _s = st.enroll(code, _K.generate().public_key().public_bytes(_ser.Encoding.Raw, _ser.PublicFormat.Raw), "zrh-collector-01", "1.1.0",
+                   ["10.20.0.0/22", "10.20.8.0/24"], "198.51.100.23")
+st.heartbeat(c_["id"], "connected", None, "zrh-collector-01", "1.1.0", ["10.20.0.0/22", "10.20.8.0/24"], "198.51.100.23")
+ss = v.get("site_settings")
+ss[sid]["schedule"] = {"quick": {"every": "daily", "time": "02:00", "day": 0, "mday": 1}, "full": {"every": "monthly", "time": "03:00", "day": 6, "mday": 1}, "last": {}}
+v.put("site_settings", ss)
 tech = v.create_user("tech@demo.example", "Demo Technician", "operator"); v.update_user(tech, status="active")
 v.put("user_sites", {tech: [sid, bsid]})
 from guardian import importers

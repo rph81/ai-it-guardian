@@ -1953,6 +1953,13 @@ def sites_db():
                     pass
             _site_store = sitestore.Store(db)
             _site_store.set_meta("job_pubkey", job_pubkey())
+            try:                                   # phase D: the collector release, signed with the job key
+                from guardian import release
+                rel = release.build(BASE, JOB_KEY)
+                _site_store.set_meta("collector_release", json.dumps(rel))
+                _site_store.set_meta("collector_release_version", rel["manifest"]["version"])
+            except Exception as e:                 # noqa: BLE001 - collectors keep their version
+                print(f"collector release not published: {e}", file=sys.stderr, flush=True)
         return _site_store
 
 
@@ -2961,7 +2968,7 @@ def remote_tick():
         if r.get("ai") and not job.running:
             key = (api_keys().get("anthropic") if vault.unlocked else None) or unattended_key()
             if key:
-                start_job("resume", d.name, r["by"], {"ANTHROPIC_API_KEY": key}, stdin=connector_handoff(site_id))
+                start_job("resume", d.name, r["by"], {"ANTHROPIC_API_KEY": key}, stdin=connector_handoff(site_id, d.name))
                 vault.audit("system", "remote-ai-started", f"{d.name} ({site_id})")
             else:
                 r["errors"].append("AI assessment skipped: the vault was locked and unattended AI runs are off")
@@ -3339,7 +3346,7 @@ def launch(mode, run_id, sid, user, inbox=None):
         vault.audit(user["email"], "secret-used", "API keys for an AI assessment")
     stdin = None
     if mode in ("full", "resume", "followup"):
-        stdin = connector_handoff(rsite)
+        stdin = connector_handoff(rsite, run_id)
         if stdin:
             vault.audit(user["email"], "secret-used", "Connectors for the connector agents (AD, Microsoft 365, devices, patch & configuration)")
     if inbox:
@@ -3353,15 +3360,22 @@ HANDOFF_TYPES = ("active_directory", "linux_ssh", "synology", "proxmox_ve", "pro
                  "sap_abap", "sap_btp", "salesforce", "aws")
 
 
-def connector_handoff(site_id=LOCAL):
+def connector_handoff(site_id=LOCAL, run=None):
     """The connectors the connector agents use, decrypted, as bytes for the run's stdin. None when there are none.
-    For a remote site only internet-reachable (cloud / SaaS) connectors: the rest run on site in phase C."""
+    For a remote site, cloud / SaaS connectors are used from here; the others run at the customer through the
+    collector (phase C), their records sealed per job to the collector's own key."""
     if not vault.unlocked:
         return None
+    via = None
+    if site_id != LOCAL:
+        c = sites_db().active_collector(site_id)
+        if c and c.get("seal_key"):
+            via = {"collector": c["id"], "seal_key": c["seal_key"], "site": site_id, "run": run}
     items = [{"id": c["id"], "type": c["type"], "name": c.get("name") or conn.CATALOG[c["type"]]["label"],
-              "fields": store.fields_with_secrets(c), "pin": c.get("pin")}
+              "fields": store.fields_with_secrets(c), "pin": c.get("pin"),
+              **({"via": via} if site_id != LOCAL and c["type"] not in CLOUD_TYPES else {})}
              for c in store.connectors() if c.get("type") in HANDOFF_TYPES and (c.get("site") or LOCAL) == site_id
-             and (site_id == LOCAL or c["type"] in CLOUD_TYPES)]
+             and (site_id == LOCAL or c["type"] in CLOUD_TYPES or via)]
     if not items:
         return None
     key = next((r["private"] for r in vault.load_records("secret") if "private" in r), None) \

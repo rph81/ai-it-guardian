@@ -57,6 +57,38 @@ def _get(cid, types):
     return c
 
 
+def _on_site(fn):
+    """Connectors of a remote site run at the customer: the record is sealed to that site's collector and sent as a job."""
+    import functools
+    import inspect
+    sig = inspect.signature(fn)
+
+    @functools.wraps(fn)
+    def wrapper(cid, *args, **kwargs):
+        c = next((x for x in _CONNECTORS if x["id"] == cid), None)
+        if not c or not c.get("via"):
+            return fn(cid, *args, **kwargs)
+        from pathlib import Path
+        from . import jobs, sitestore
+        bound = sig.bind(cid, *args, **kwargs)
+        bound.apply_defaults()
+        call = {k: v for k, v in bound.arguments.items() if k != "cid"}
+        v = c["via"]
+        record = {"type": c["type"], "fields": c["fields"], "pin": c.get("pin"),
+                  "ssh_private_key": _SSH["private"] if c["type"] == "linux_ssh" else None}
+        sealed = jobs.seal(v["seal_key"], json.dumps(record).encode(), ("guardian-connector:" + v["collector"]).encode())
+        base = Path(__file__).resolve().parent.parent
+        store = sitestore.Store(Path(os.environ.get("GUARDIAN_GATEWAY_DATA", base / "gateway")) / "gateway.db")
+        key = Path(os.environ.get("GUARDIAN_STATE_DIR", base / "console")) / "job-signing.key"
+        try:
+            jid = jobs.submit(store, key, v["site"], v["collector"], "connector", {"fn": fn.__name__, "args": call, "sealed": sealed},
+                              "agent:connector", v.get("run"))
+            return json.loads(jobs.wait(store, jid, 600))
+        except (RuntimeError, ValueError) as e:
+            return {"error": f"at the customer: {e}"}
+    return wrapper
+
+
 # -- SSH (Linux servers) ----------------------------------------------------------------------------------
 def _key_path():
     if not _SSH["private"]:
@@ -112,6 +144,7 @@ LINUX_CHECKS = {
 }
 
 
+@_on_site
 def linux_check(cid, host, check):
     c = _get(cid, {"linux_ssh"})
     f = c["fields"]
@@ -178,6 +211,7 @@ def linux_vulnerable_packages(cid, host):
 
 
 # -- Synology DSM (normal, non-admin user) ----------------------------------------------------------------
+@_on_site
 def synology_info(cid):
     c = _get(cid, {"synology"})
     f = c["fields"]
@@ -216,6 +250,7 @@ PBS_PATHS = [r"/version", r"/nodes/localhost/status", r"/nodes/localhost/apt/upd
              r"/nodes/localhost/certificates/info"]
 
 
+@_on_site
 def proxmox_get(cid, path):
     c = _get(cid, {"proxmox_ve", "proxmox_bs"})
     ve = c["type"] == "proxmox_ve"
@@ -307,6 +342,7 @@ def _ftime(v):
         return str(v)[:30]
 
 
+@_on_site
 def ad_query(cid, query, days=90):
     import ldap3
     c = _get(cid, {"active_directory"})
@@ -687,6 +723,7 @@ WINDOWS_CHECKS = {
 }
 
 
+@_on_site
 def windows_check(cid, host, check):
     c = _get(cid, {"windows"})
     f = c["fields"]

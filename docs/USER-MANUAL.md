@@ -88,8 +88,15 @@ only when an admin or operator confirms with their passkey, and closes on sign-o
 ![Dashboard](manual/01-dashboard.png)
 
 **Site** (under the title, when there is more than one site): choose the customer site you work on, or **All sites**.
-Everything below shows that site only. Remote sites have **New assessment** instead of the scan buttons: it creates an
-assessment you fill by importing another scanner's report in its Fix plan (remote scans come with the collector).
+Everything below shows that site only.
+
+![Customer site with a collector](manual/01c-remote-site.png)
+
+A customer site with a collector has **Scan through collector** and **Scan + AI through collector**: the scan and
+the AI agents' network checks run at the customer, and its on-site connectors (AD, Linux, Windows, Synology, Proxmox)
+are checked there too, with the credentials sealed to that collector. The buttons are greyed out while the collector
+is offline or paused by the customer. **New assessment** creates an assessment you fill by importing another
+scanner's report in its Fix plan.
 
 ![All sites](manual/01b-all-sites.png)
 
@@ -398,7 +405,7 @@ the vault key and checked against their fingerprint.
 
 ![Sites](manual/10-settings-sites.png)
 
-Customer sites assessed through an on-site collector (phase A: sites, enrollment, status). **Add a site**, **Install**
+Customer sites assessed through an on-site collector. **Add a site**, **Install**
 (passkey: a one-time code and the commands for the Linux app, Docker or VM appliance), **Revoke**. Status shows Online,
 Paused by customer, Disconnected by customer or Not reachable. Details: [ONSITE-COLLECTOR.md](ONSITE-COLLECTOR.md).
 
@@ -428,7 +435,15 @@ Paused by customer, Disconnected by customer or Not reachable. Details: [ONSITE-
 
 ![Decoys](manual/10-site-decoys.png)
 
-- **Connectors** and **Schedule**: where to find them for this site. Details: [MULTISITE.md](MULTISITE.md).
+- **Connectors**: where to find this site's connectors. Details: [MULTISITE.md](MULTISITE.md).
+- **Schedule**: a quick scan (daily or weekly) and a full scan + AI (weekly or monthly) through the site's
+  collector. Skipped while the collector is offline or paused.
+
+![Site schedule](manual/10-site-schedule.png)
+
+**What the customer controls** on the collector: pause / resume and disconnect, quiet hours when no jobs run, a
+status page on their LAN (HTTPS, own password) and automatic updates on or off. Every job is signed by Guardian and
+checked against the customer's scope before it runs. Details: [ONSITE-COLLECTOR.md](ONSITE-COLLECTOR.md).
 
 ### Schedules & alerts
 

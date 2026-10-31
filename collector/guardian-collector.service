@@ -7,7 +7,7 @@ Wants=network-online.target
 User=guardian-collector
 Group=guardian-collector
 Environment=GUARDIAN_COLLECTOR_DATA=/var/lib/guardian-collector
-ExecStart=/opt/guardian-collector/venv/bin/python /opt/guardian-collector/guardian_collector.py run
+ExecStart=/opt/guardian-collector/venv/bin/python /opt/guardian-collector/launch.py run
 Restart=always
 RestartSec=10
 UMask=0077

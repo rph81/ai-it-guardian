@@ -99,8 +99,9 @@ exposure) and `previous` (the same issue in the previous assessment).
    compliance PDF and evidence pack (ZIP with checksums).
    **Fixes and patching (now)**: agentless Linux and Windows updates and hardening, Microsoft 365 fixes through a
    separate fix app, NinjaOne patch status and patch jobs; Proxmox snapshots before Linux updates.
-   **On-site collector, phase A (now)**: sites, collector gateway, enrollment, heartbeat, revoke; collector with
-   pause / disconnect. Phase B: scans and AI assessments through the collector.
+   **On-site collector (now, phases A–D)**: sites, collector gateway, enrollment, revoke; signed jobs, remote scans and
+   AI runs, per-site schedules; connector checks at the customer with sealed credentials; signed updates; quiet hours
+   and a LAN status page for the customer; Debian package, Docker image, VM appliance ([docs](docs/ONSITE-COLLECTOR.md)).
    **Ticketing (now)**: ServiceNow, ConnectWise PSA, Autotask PSA, HaloPSA, Jira Service Management.
    **MITRE ATT&CK (now)**: every finding mapped to techniques; ATT&CK tab, report section, PDF appendix.
    **Scanner import (now)**: Nessus, OpenVAS / Greenbone, Qualys, Rapid7 InsightVM, CSV into a run's Fix plan.
@@ -110,7 +111,7 @@ exposure) and `previous` (the same issue in the previous assessment).
    **Gap features (now)**: vulnerability-disclosure page, SIEM output and MCP server, decoys, safe web app check,
    private repos, infrastructure-as-code and container image checks.
    **AWS (now)**: AWS posture agent with CIS AWS Foundations ([docs](docs/AWS.md)).
-   **Next**: on-site collector phases B–D. Then a **final testing phase** against real systems (real AI run, AD, Microsoft 365, fix recipes, NinjaOne,
+   **Next**: a **final testing phase** against real systems (real AI run, AD, Microsoft 365, fix recipes, NinjaOne,
    Azure, Windows, ServiceNow, alert channels, collector packages, outside penetration test of the gateway).
    Built-in VPN client: on hold pending a design review (the on-site collector covers most of the need).
 2. **Next**: agents use the connectors (inside view of NAS, hypervisors, servers); more connector sign-in methods

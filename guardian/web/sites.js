@@ -55,13 +55,13 @@ const Sites = (() => {
     const scope = ($("si-scope").value.trim() || "<customer subnets>").split(/[\s,]+/).filter(Boolean).join(",");
     const args = `${current.url} ${current.code} --pin ${current.pin || "<gateway not running>"} --scope ${scope}`;
     const cmd = {
-      linux: `# On a Linux host at the customer (Debian/Ubuntu, Python 3.11+):\nsudo guardian-collector enroll ${args}\nsudo systemctl enable --now guardian-collector`,
-      docker: `docker volume create guardian-collector\ndocker run --rm -v guardian-collector:/data guardian-collector:1.0.0 enroll ${args}\ndocker run -d --name guardian-collector --restart unless-stopped --network host \\\n  --cap-add NET_RAW --cap-add NET_ADMIN -v guardian-collector:/data guardian-collector:1.0.0 run`,
+      linux: `# On a Linux host at the customer (Debian/Ubuntu, Python 3.11+), after installing the package:\nsudo guardian-collector enroll ${args}\nsudo systemctl enable --now guardian-collector\n# optional status page for the customer:\nsudo guardian-collector page-password && sudo systemctl enable --now guardian-collector-page`,
+      docker: `docker volume create guardian-collector\ndocker run --rm -v guardian-collector:/data guardian-collector:1.1.0 enroll ${args}\ndocker run -d --name guardian-collector --restart unless-stopped --network host \\\n  --cap-add NET_RAW --cap-add NET_ADMIN -v guardian-collector:/data guardian-collector:1.1.0 run`,
       vm: `Import the Guardian collector appliance, start it, and on its console choose "Enroll" and enter:\n  Server:  ${current.url}\n  Code:    ${current.code}\n  Pin:     ${current.pin || "-"}\n  Subnets: ${scope}`}[tab];
     $("si-cmd").textContent = cmd;
-    $("si-help").textContent = {linux: "The Linux package is published with phase D; until then install from the repository's collector/ folder (see docs/ONSITE-COLLECTOR.md).",
-      docker: "Build the image from collector/Dockerfile until the published image is available (phase D).",
-      vm: "The VM appliance image comes with phase D."}[tab];
+    $("si-help").textContent = {linux: "Install with the .deb (collector/packaging/build-deb.sh) or from the repository's collector/ folder (sudo ./install.sh). Updates after that are signed and automatic unless the customer turns them off.",
+      docker: "Build the image from the repository root: docker build -f collector/Dockerfile -t guardian-collector:1.1.0 .",
+      vm: "Build the appliance with collector/packaging/appliance/build-appliance.sh (qcow2 for Proxmox/KVM, VMDK for VMware). On first sign-in it asks for these values."}[tab];
     for (const b of $("si-tabs").children) b.setAttribute("aria-pressed", String(b.dataset.k === tab));
   }
 

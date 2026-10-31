@@ -97,6 +97,8 @@ class Store:
         self.db.execute("PRAGMA busy_timeout=5000")
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.executescript(SCHEMA)
+        if "seal_key" not in [r[1] for r in self.db.execute("PRAGMA table_info(collectors)")]:
+            self.db.execute("ALTER TABLE collectors ADD COLUMN seal_key TEXT")
         self.db.execute("INSERT OR IGNORE INTO sites (id, name, customer, created) VALUES (?, ?, '', ?)",
                         (LOCAL_SITE, "This network", time.time()))
 
@@ -196,6 +198,10 @@ class Store:
         return n
 
     # -- collectors (gateway) ----------------------------------------------------------------------------
+    @locked
+    def set_seal_key(self, cid, seal_key):
+        self.db.execute("UPDATE collectors SET seal_key=? WHERE id=? AND status='active'", (seal_key, cid))
+
     @locked
     def enroll(self, code, pubkey, host, version, scope, ip):
         """Use a code once. Returns (collector, site) or None. Older collectors of the site are revoked."""

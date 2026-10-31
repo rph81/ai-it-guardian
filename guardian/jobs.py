@@ -15,12 +15,16 @@ import secrets
 import time
 from pathlib import Path
 
-TYPES = ("discover", "scan", "probe", "http", "tls")
+TYPES = ("discover", "scan", "probe", "http", "tls", "connector")
+# phase C: connector checks run at the customer, credentials sealed to the collector's own X25519 key
+CONNECTOR_FNS = {"ad_query": {"query": str, "days": int}, "linux_check": {"host": str, "check": str},
+                 "windows_check": {"host": str, "check": str}, "synology_info": {}, "proxmox_get": {"path": str}}
+CONNECTOR_TYPES = {"active_directory", "linux_ssh", "windows", "synology", "proxmox_ve", "proxmox_bs"}
 SCRIPTS = {"ssl-enum-ciphers", "ssl-cert", "http-headers", "http-methods", "http-title", "http-robots.txt", "http-server-header",
            "ssh2-enum-algos", "ssh-auth-methods", "ssh-hostkey", "smb-protocols", "smb2-security-mode", "rdp-enum-encryption",
            "ntp-info", "dns-recursion", "upnp-info", "snmp-info", "ftp-anon", "smtp-commands", "mysql-info", "ms-sql-info",
            "vnc-info", "sip-methods", "mqtt-subscribe", "banner", "rtsp-methods"}
-TTL = {"discover": 3600, "scan": 3 * 3600, "probe": 900, "http": 600, "tls": 600}
+TTL = {"discover": 3600, "scan": 3 * 3600, "probe": 900, "http": 600, "tls": 600, "connector": 900}
 JOB_ID = re.compile(r"^j_[0-9a-f]{16}$")
 MAX_RESULT = 6 * 2**20                    # compressed bytes
 
@@ -75,6 +79,17 @@ def check_params(kind, p):
         if p.get("method", "GET") not in ("GET", "HEAD"):
             raise ValueError("method")
         return {"url": url, "method": p.get("method", "GET")}
+    if kind == "connector":
+        fn, args, sealed = p.get("fn"), p.get("args"), p.get("sealed")
+        spec = CONNECTOR_FNS.get(fn)
+        if spec is None or not isinstance(args, dict) or set(args) - set(spec):
+            raise ValueError("connector function")
+        for k, t in spec.items():
+            if k in args and (not isinstance(args[k], t) or (t is str and not re.fullmatch(r"[\w./:@ -]{1,200}", args[k]))):
+                raise ValueError(f"connector argument {k}")
+        if not isinstance(sealed, str) or not re.fullmatch(r"[A-Za-z0-9_-]{60,16000}", sealed):
+            raise ValueError("sealed credentials")
+        return {"fn": fn, "args": {k: args[k] for k in spec if k in args}, "sealed": sealed}
     if kind == "tls":
         port = p.get("port")
         if not isinstance(port, int) or not 1 <= port <= 65535:
@@ -88,6 +103,8 @@ def targets(kind, p):
         return p["networks"]
     if kind == "scan":
         return p["hosts"]
+    if kind == "connector":
+        return []                       # the hosts are inside the sealed record: the collector checks them after opening it
     if kind == "http":
         m = re.match(r"^https?://(?:\[([0-9a-fA-F:]+)\]|([0-9.]+))", p["url"])
         return [m.group(1) or m.group(2)]
@@ -125,6 +142,36 @@ def verify(envelope, pubkey_b64, collector_id, now=None):
         raise ValueError("expired")
     job["params"] = check_params(job.get("type"), job.get("params"))
     return job
+
+
+SEAL_INFO = b"guardian-seal-v1"
+
+
+def seal(recipient_pub_b64, plaintext: bytes, aad: bytes):
+    """Encrypt for one collector: ephemeral X25519 + HKDF-SHA256 + AES-256-GCM. Only its private seal key opens it."""
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    rpub = unb64(recipient_pub_b64)
+    eph = X25519PrivateKey.generate()
+    epub = eph.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    shared = eph.exchange(X25519PublicKey.from_public_bytes(rpub))
+    key = HKDF(hashes.SHA256(), 32, epub + rpub, SEAL_INFO).derive(shared)
+    nonce = secrets.token_bytes(12)
+    return b64(epub + nonce + AESGCM(key).encrypt(nonce, plaintext, aad))
+
+
+def unseal(private_key, blob_b64, aad: bytes):
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    raw = unb64(blob_b64)
+    epub, nonce, ct = raw[:32], raw[32:44], raw[44:]
+    rpub = private_key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    key = HKDF(hashes.SHA256(), 32, epub + rpub, SEAL_INFO).derive(private_key.exchange(X25519PublicKey.from_public_bytes(epub)))
+    return AESGCM(key).decrypt(nonce, ct, aad)
 
 
 def pack(data: bytes):

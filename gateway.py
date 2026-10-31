@@ -70,6 +70,7 @@ class EnrollBody(Strict):
     host: str = Field(pattern=HOST)
     version: str = Field(pattern=VERSION)
     scope: list[str] = Field(min_length=1, max_length=32)
+    seal_key: Optional[str] = Field(default=None, pattern=PUBKEY)
 
 
 class Stats(Strict):
@@ -84,6 +85,7 @@ class HeartbeatBody(Strict):
     version: str = Field(pattern=VERSION)
     scope: list[str] = Field(min_length=1, max_length=32)
     stats: Optional[Stats] = None
+    seal_key: Optional[str] = Field(default=None, pattern=PUBKEY)
 
 
 class DisconnectBody(Strict):
@@ -246,6 +248,8 @@ async def enroll(request, ip):
         log.warning("enrollment refused from %s", ip)
         raise Fail(401)
     c, site = got
+    if b.seal_key:
+        store.set_seal_key(c["id"], b.seal_key)
     log.info("collector %s enrolled for site %s from %s", c["id"], site["id"], ip)
     return reply(200, {"collector_id": c["id"], "site": {"id": site["id"], "name": site["name"]}, "job_key": job_key})
 
@@ -260,7 +264,10 @@ async def heartbeat(request, ip):
     except ValueError:
         raise Fail(400)
     store.heartbeat(c["id"], b.state, b.reason, b.host, b.version, scope, ip)
-    return reply(200, {"ok": True, "time": int(time.time())})
+    if b.seal_key and b.seal_key != c.get("seal_key"):
+        store.set_seal_key(c["id"], b.seal_key)
+    rel = store.meta("collector_release_version")
+    return reply(200, {"ok": True, "time": int(time.time()), **({"latest": rel} if rel else {})})
 
 
 @guarded
@@ -302,12 +309,25 @@ async def result(request, ip):
     return reply(200, {"ok": True})
 
 
+@guarded
+async def update(request, ip):
+    """The current collector release, signed by the console (the gateway only relays it; it can't sign one)."""
+    body = await read_body(request)
+    authenticate(request, body)
+    parse(Empty, body)
+    rel = store.meta("collector_release")
+    if not rel:
+        raise Fail(404)
+    return reply(200, json.loads(rel))
+
+
 async def not_found(request, exc):
     return reply(404)
 
 
 app = Starlette(routes=[Route(f"/c/v1/{name}", fn, methods=["POST"]) for name, fn in
-                        (("enroll", enroll), ("heartbeat", heartbeat), ("disconnect", disconnect), ("jobs", jobs), ("result", result))],
+                        (("enroll", enroll), ("heartbeat", heartbeat), ("disconnect", disconnect), ("jobs", jobs), ("result", result),
+                         ("update", update))],
                 exception_handlers={HTTPException: not_found, 404: not_found, 405: not_found, Exception: not_found})
 
 

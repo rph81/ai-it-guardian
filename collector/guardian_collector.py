@@ -145,12 +145,58 @@ def in_scope(st, ip):
 
 
 # -- jobs (phase B): checked here, whatever the server asks ---------------------------------------------------------
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-try:
-    import guardian_jobs as jobs                     # shipped next to this file by install.sh / the Dockerfile
-except ImportError:                                  # running from the repository
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from guardian import jobs
+for _p in (Path(__file__).resolve().parent, Path(__file__).resolve().parent.parent):   # installed: guardian/ next to this file
+    if (_p / "guardian" / "jobs.py").exists():
+        sys.path.insert(0, str(_p))
+        break
+from guardian import jobs  # noqa: E402 - path set just above
+
+
+class OutOfScope(Exception):
+    pass
+
+
+def seal_private():
+    """The collector's X25519 key: connector credentials from Guardian are sealed to it and open only here."""
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+    path = DATA / "seal.pem"
+    if not path.exists():
+        k = X25519PrivateKey.generate()
+        write_private(path, k.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+    return serialization.load_pem_private_key(path.read_bytes(), None)
+
+
+def seal_public():
+    return jobs.b64(seal_private().public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw))
+
+
+def connector_hosts(record):
+    f = record.get("fields") or {}
+    names = [f.get("host"), f.get("server"), *(f.get("hosts") or "").split()]
+    return [n for n in names if n]
+
+
+def run_connector(st, p):
+    record = json.loads(jobs.unseal(seal_private(), p["sealed"], ("guardian-connector:" + st["collector_id"]).encode()))
+    if record.get("type") not in jobs.CONNECTOR_TYPES:
+        raise OutOfScope("connector type not allowed here")
+    for name in connector_hosts(record):
+        try:
+            ips = {a[4][0] for a in socket.getaddrinfo(name, None)}
+        except OSError:
+            raise OutOfScope(f"{name} doesn't resolve here")
+        bad = [ip for ip in ips if not target_in_scope(st, ip)]
+        if bad:
+            raise OutOfScope(f"{name} ({', '.join(bad)}) is outside the scope set here")
+    from guardian import access
+    access.load({"connectors": [{"id": "onsite", "type": record["type"], "name": record["type"], "fields": record["fields"],
+                                 "pin": record.get("pin")}], "ssh_private_key": record.get("ssh_private_key")}, str(DATA / "connectors"))
+    try:
+        return json.dumps(getattr(access, p["fn"])("onsite", **p["args"]), default=str).encode()
+    finally:
+        access._wipe()
+        access._CONNECTORS.clear()
+        access._SSH.update(private=None, path=None)
 
 NMAP = os.environ.get("GUARDIAN_NMAP", "nmap")
 DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
@@ -215,6 +261,8 @@ def run_job(job):
         except (urllib.error.URLError, OSError) as e:
             return json.dumps({"error": str(getattr(e, "reason", e))[:200]}).encode()
         return json.dumps({"status": status, "headers": headers, "body": body.decode("utf-8", "replace")}).encode()
+    if k == "connector":
+        return run_connector(load_state(), p)
     if k == "tls":
         ctx = ssl.create_default_context()
         ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE
@@ -256,6 +304,8 @@ def handle_job(st, key, env):
     else:
         try:
             data = jobs.pack(run_job(job))
+        except OutOfScope as e:
+            status, error = "refused", str(e)[:300]
         except Exception as e:                         # noqa: BLE001 - reported, never raised
             status, error = "failed", f"{type(e).__name__}: {e}"[:300]
     activity("job-" + status, f"{job['id']} {job['type']} {', '.join(jobs.targets(job['type'], job['params']))[:150]}" + (f" ({error})" if error else ""))
@@ -338,10 +388,42 @@ def call(st, path, body, key=None, timeout=20):
         conn.close()
 
 
+def maybe_update(st, key, latest):
+    """Fetch, check and stage a newer release; the launcher starts it after the restart. 'updates off' stops this."""
+    from guardian import release
+    if not latest or st.get("updates", "auto") != "auto" or not release.newer(latest, VERSION):
+        return False
+    r = call(st, "/c/v1/update", {}, key, timeout=60)
+    release.verify(r["manifest"], r["sig"], st["job_key"])
+    v = r["manifest"]["version"]
+    dest = DATA / "release" / v
+    import gzip as _gz
+    for p, h in r["manifest"]["files"].items():
+        b = _gz.decompress(base64.b64decode(r["files"][p]))
+        if hashlib.sha256(b).hexdigest() != h:
+            raise ValueError(f"{p} doesn't match the signed release")
+        (dest / p).parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        write_private(dest / p, b)
+    write_private(dest / "release.json", json.dumps({"manifest": r["manifest"], "sig": r["sig"]}).encode())
+    write_private(DATA / "release" / "current", v.encode())
+    activity("updated", f"{VERSION} → {v} (signature checked); restarting")
+    return True
+
+
 def heartbeat(st, key):
+    r = _heartbeat(st, key)
+    try:
+        if maybe_update(st, key, r.get("latest")):
+            sys.exit(0)                                # systemd restarts the service; the launcher picks the new release
+    except (Refused, OSError, ssl.SSLError, ValueError, KeyError) as e:
+        activity("update-refused", str(e)[:200])
+    return r
+
+
+def _heartbeat(st, key):
     return call(st, "/c/v1/heartbeat", {"state": "paused" if st["state"] == "paused" else "connected",
                                         "reason": st.get("reason") or None, "host": st["host"], "version": VERSION,
-                                        "scope": st["scope"]}, key)
+                                        "scope": st["scope"], "seal_key": seal_public()}, key)
 
 
 # -- commands -----------------------------------------------------------------------------------------------------
@@ -364,7 +446,7 @@ def cmd_enroll(a):
     st = {"url": url, "pin": a.pin, "host": host, "scope": scope}
     try:
         r = call(st, "/c/v1/enroll", {"code": a.code.upper(), "pubkey": base64.urlsafe_b64encode(pub).decode().rstrip("="),
-                                     "host": host, "version": VERSION, "scope": scope})
+                                     "host": host, "version": VERSION, "scope": scope, "seal_key": seal_public()})
     except Refused as e:
         sys.exit({401: "Enrollment refused: the code is wrong, used or expired.", 429: "Too many attempts; try again later."}
                  .get(e.status, f"Enrollment failed ({e.status})."))
@@ -421,7 +503,7 @@ def cmd_run(a):
 def _tell(st):
     """Report a pause / resume / connect to Guardian right away (the service would otherwise do it within ~30 s)."""
     try:
-        heartbeat(st, load_key())
+        _heartbeat(st, load_key())
     except Refused as e:
         print("Guardian no longer accepts this collector (revoked or removed); enroll again with a new code."
               if e.status == 401 else f"Saved here; Guardian answered {e.status}.", file=sys.stderr)
@@ -479,12 +561,22 @@ def cmd_connect(a):
     print("Connected.")
 
 
+def cmd_updates(a):
+    st = load_state()
+    st["updates"] = "auto" if a.mode == "auto" else "off"
+    save_state(st)
+    activity("updates", st["updates"])
+    print("Automatic updates " + ("on: signed releases from Guardian are installed and checked at every start."
+                                  if st["updates"] == "auto" else "off: this collector stays on its version until updated here."))
+
+
 def cmd_status(a):
     st = load_state()
     ok, n = verify_log()
     print(f"Site:       {st['site']['name']} ({st['collector_id']})\nServer:     {st['url']}  pin {st['pin']}\n"
           f"State:      {st['state']}" + (f'  "{st["reason"]}"' if st.get("reason") else "") +
-          f"\nScope:      {', '.join(st['scope'])}\nQuiet:      {quiet_text(st.get('quiet'))}\nVersion:    {VERSION}\n"
+          f"\nScope:      {', '.join(st['scope'])}\nQuiet:      {quiet_text(st.get('quiet'))}\nVersion:    {VERSION}"
+          f" (updates {st.get('updates', 'auto')})\n"
           f"Activity:   {n} entries, chain {'intact' if ok else 'BROKEN (entries were changed or removed)'}")
 
 
@@ -707,11 +799,12 @@ def main():
     sub.add_parser("log").add_argument("-n", type=int, default=50)
     sub.add_parser("quiet", help='quiet hours: "mon-fri 08:00-18:00; sat 00:00-24:00" or "off"').add_argument("spec")
     sub.add_parser("page-password", help="set the status page password")
+    sub.add_parser("updates", help="automatic signed updates: auto (default) or off").add_argument("mode", choices=["auto", "off"])
     sub.add_parser("page", help="serve the status page on the LAN").add_argument("--listen", default="0.0.0.0:8443")
     a = p.parse_args()
     {"enroll": cmd_enroll, "run": cmd_run, "status": cmd_status, "pause": cmd_pause, "resume": cmd_resume,
      "disconnect": cmd_disconnect, "connect": cmd_connect, "log": cmd_log, "quiet": cmd_quiet, "page-password": page_password,
-     "page": cmd_page}[a.cmd](a)
+     "page": cmd_page, "updates": cmd_updates}[a.cmd](a)
 
 
 if __name__ == "__main__":
