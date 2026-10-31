@@ -428,6 +428,10 @@ Paused by customer, Disconnected by customer or Not reachable. Details: [ONSITE-
 - **Disclosure**: a public vulnerability-disclosure page for this customer (NIS2 expects one) and a ready-made
   security.txt. Reports land here; **Add to Fix plan** or **Dismiss**. Details: [DISCLOSURE.md](DISCLOSURE.md).
 
+![Site disclosure settings](manual/10-site-disclosure.png)
+
+What the reporter sees:
+
 ![Disclosure page](manual/13-disclosure-page.png)
 
 - **Decoys**: tracking links, fake admin logins (honey credentials) and bait Word documents. Guardian creates them, you
@@ -551,7 +555,15 @@ workspace you use for Guardian.
 | Schedules, alerts, fix plan | [SCHEDULES-ALERTS.md](SCHEDULES-ALERTS.md) |
 | Ticketing (ServiceNow, ConnectWise, Autotask, HaloPSA, Jira) | [TICKETING.md](TICKETING.md) |
 | Azure posture agent | [AZURE.md](AZURE.md) |
+| AWS posture agent | [AWS.md](AWS.md) |
+| SAP, SAP BTP and Salesforce | [BUSINESS-SYSTEMS.md](BUSINESS-SYSTEMS.md) |
+| MITRE ATT&CK mapping | [ATTACK.md](ATTACK.md) |
 | Compliance evidence and PDF | [COMPLIANCE.md](COMPLIANCE.md) |
 | Fixes and patching | [FIXES.md](FIXES.md) |
 | Importing other scanners' results | [IMPORT.md](IMPORT.md) |
 | On-site collector | [ONSITE-COLLECTOR.md](ONSITE-COLLECTOR.md) |
+| Several customers (sites, access, ticketing per site) | [MULTISITE.md](MULTISITE.md) |
+| SIEM output and MCP server | [INTEGRATIONS.md](INTEGRATIONS.md) |
+| Vulnerability-disclosure page | [DISCLOSURE.md](DISCLOSURE.md) |
+| Decoys | [DECOYS.md](DECOYS.md) |
+| Web app and container image checks | [WEB-AND-IMAGE-CHECKS.md](WEB-AND-IMAGE-CHECKS.md) |
