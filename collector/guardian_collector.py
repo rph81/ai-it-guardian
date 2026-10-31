@@ -32,7 +32,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography import x509
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 DATA = Path(os.environ.get("GUARDIAN_COLLECTOR_DATA", "/var/lib/guardian-collector"))
 SERVICE_USER = "guardian-collector"
 HEARTBEAT = 60

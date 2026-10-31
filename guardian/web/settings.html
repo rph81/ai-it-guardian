@@ -318,10 +318,17 @@
           <p class="help" id="in-last"></p>
         </div>
         <div class="card">
-          <h2>GitHub (private repositories)</h2>
-          <p class="note">To scan private repositories on the Code page, create a <b>fine-grained personal access token</b> on GitHub (Settings › Developer settings) with access to the repositories Guardian should read and only <b>Contents: Read-only</b> and <b>Metadata: Read-only</b>. It's stored in the vault and handed to each code scan in memory.</p>
-          <div class="f3 field"><div><label for="in-gh">Token <span class="tag" id="in-gh-state"></span></label><input id="in-gh" class="mono" type="password" autocomplete="new-password" placeholder="github_pat_…"></div>
+          <h2>Private repositories (GitHub, GitLab, Azure DevOps)</h2>
+          <p class="note">To scan private repositories on the Code page, give Guardian a read-only token. They're stored in the vault and handed to each code scan in memory.</p>
+          <p class="help"><b>GitHub</b>: a fine-grained personal access token (Settings › Developer settings) with access to the repositories Guardian should read and only <b>Contents: Read-only</b> and <b>Metadata: Read-only</b>.</p>
+          <div class="f3 field"><div><label for="in-gh">GitHub token <span class="tag" id="in-gh-state"></span></label><input id="in-gh" class="mono" type="password" autocomplete="new-password" placeholder="github_pat_…"></div>
             <div class="row end"><button class="btn" type="button" id="in-gh-save">Save</button><button class="btn danger" type="button" id="in-gh-del">Remove</button></div></div>
+          <p class="help mt16"><b>GitLab</b>: a project or group access token (or a personal one) with the <b>Reporter</b> role and only the <b>read_api</b> and <b>read_repository</b> scopes.</p>
+          <div class="f3 field"><div><label for="in-gitlab">GitLab token <span class="tag" id="in-gitlab-state"></span></label><input id="in-gitlab" class="mono" type="password" autocomplete="new-password" placeholder="glpat-…"></div>
+            <div class="row end"><button class="btn" type="button" id="in-gitlab-save">Save</button><button class="btn danger" type="button" id="in-gitlab-del">Remove</button></div></div>
+          <p class="help mt16"><b>Azure DevOps</b>: a personal access token (User settings › Personal access tokens) for the organization with only <b>Code: Read</b>.</p>
+          <div class="f3 field"><div><label for="in-azure_devops">Azure DevOps token <span class="tag" id="in-azure_devops-state"></span></label><input id="in-azure_devops" class="mono" type="password" autocomplete="new-password"></div>
+            <div class="row end"><button class="btn" type="button" id="in-azure_devops-save">Save</button><button class="btn danger" type="button" id="in-azure_devops-del">Remove</button></div></div>
         </div>
         <div class="card">
           <h2>MCP server</h2>

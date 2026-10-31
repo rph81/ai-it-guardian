@@ -18,8 +18,9 @@ from pathlib import Path
 TYPES = ("discover", "scan", "probe", "http", "tls", "connector")
 # phase C: connector checks run at the customer, credentials sealed to the collector's own X25519 key
 CONNECTOR_FNS = {"ad_query": {"query": str, "days": int}, "linux_check": {"host": str, "check": str},
-                 "windows_check": {"host": str, "check": str}, "synology_info": {}, "proxmox_get": {"path": str}}
-CONNECTOR_TYPES = {"active_directory", "linux_ssh", "windows", "synology", "proxmox_ve", "proxmox_bs"}
+                 "windows_check": {"host": str, "check": str}, "synology_info": {}, "proxmox_get": {"path": str},
+                 "firewall_get": {"path": str}, "vmware_get": {"path": str}, "docker_query": {"query": str}, "k8s_query": {"query": str}}
+CONNECTOR_TYPES = {"active_directory", "linux_ssh", "windows", "synology", "proxmox_ve", "proxmox_bs", "firewall", "vmware", "docker", "kubernetes"}
 SCRIPTS = {"ssl-enum-ciphers", "ssl-cert", "http-headers", "http-methods", "http-title", "http-robots.txt", "http-server-header",
            "ssh2-enum-algos", "ssh-auth-methods", "ssh-hostkey", "smb-protocols", "smb2-security-mode", "rdp-enum-encryption",
            "ntp-info", "dns-recursion", "upnp-info", "snmp-info", "ftp-anon", "smtp-commands", "mysql-info", "ms-sql-info",

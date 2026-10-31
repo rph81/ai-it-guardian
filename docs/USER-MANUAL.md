@@ -15,7 +15,7 @@ reading the results, fixing issues, compliance evidence and the settings.
 5. [Running an assessment](#5-running-an-assessment)
 6. [Run detail: the eight tabs](#6-run-detail-the-eight-tabs)
 7. [Fix: remediation](#7-fix-remediation)
-8. [Code: GitHub repository scan](#8-code-github-repository-scan)
+8. [Code & web apps](#8-code--web-apps)
 9. [Settings](#9-settings)
 10. [Everyday workflows](#10-everyday-workflows)
 11. [Costs](#11-costs)
@@ -191,7 +191,12 @@ Every open finding, ranked by the Risk analyst. Each row shows:
 description, solution), click **Preview** to see how many findings and devices it holds, then **Import**. Imported
 findings show a **from Nessus** (etc.) chip and get a priority like the others (actively exploited CVEs and services
 forwarded to the internet first). A finding Guardian already has on the same device (same CVE or title) isn't
-duplicated: it shows **also 1 scanner**. Details: [IMPORT.md](IMPORT.md).
+duplicated: it shows **also 1 scanner**.
+
+**Or pull them directly**: with a **Tenable**, **Qualys** or **Rapid7 InsightVM** connector for the run's site (Settings ›
+Connectors › Scanners), pick it under the file box, **Preview**, then **Import**. Guardian reads the open findings
+(medium and above) through the scanner's API with a read-only user; Tenable exports can take a few minutes. Details:
+[IMPORT.md](IMPORT.md).
 
 Filters: **Open**, **Overdue**, **Priority 1–2**, **Done**, **All**. Owners, dates, statuses and notes carry over to the
 next assessment when the Risk analyst recognises the same issue.
@@ -219,9 +224,14 @@ the compliance PDF. Details: [ATTACK.md](ATTACK.md).
 
 ![Compliance](manual/06-compliance.png)
 
-One tab per framework (CIS Controls v8 IG1, ISO/IEC 27001:2022 Annex A, NIS2 Art. 21(2), Swiss revFADP / nLPD, and CIS
-Microsoft Azure Foundations when the Azure agent ran). The bar shows **Met / Partly / Gap / Not assessed**; filter by
-status below it.
+One tab per framework: CIS Controls v8 IG1, ISO/IEC 27001:2022 Annex A, NIS2 Art. 21(2), Swiss revFADP / nLPD,
+**PCI DSS v4.0** and **SOC 2** (Trust Services Criteria), plus CIS Microsoft Azure and CIS AWS Foundations when those
+agents ran. The bar shows **Met / Partly / Gap / Not assessed**; filter by status below it.
+
+![PCI DSS](manual/06b-compliance-pci.png)
+
+PCI DSS and SOC 2 are mostly about processes, so many of their controls stay **Not assessed** until you add your own
+status or evidence. Their control titles are paraphrased: check the official texts before an audit.
 
 Click a control to:
 - read the agent's note and the findings behind it;
@@ -298,11 +308,11 @@ sign-in block (report-only); NinjaOne OS patches. Details: [FIXES.md](FIXES.md).
 
 ![Code scan](manual/12-code-scan.png)
 
-**Repository scan.** Paste the address of a GitHub repository to check it for malicious or risky code before you use
+**Repository scan.** Paste the address of a **GitHub**, **GitLab** (gitlab.com) or **Azure DevOps** repository to check it for malicious or risky code before you use
 it: install scripts, obfuscated code, suspicious network calls, leaked secrets, typo-squatted dependencies, risky GitHub
 workflows, and **infrastructure-as-code** mistakes (Terraform, Kubernetes, Dockerfiles, Bicep / ARM: open firewalls,
-public storage, privileged containers, secrets in templates). Private repositories need a read-only GitHub token
-(Settings › Integrations). The result is a verdict with each finding, the file and line. Optional AI review of the
+public storage, privileged containers, secrets in templates). Private repositories need a read-only token for that
+service (Settings › Integrations). The result is a verdict with each finding, the file and line. Optional AI review of the
 riskiest files (uses API credit).
 
 ![Web app and image checks](manual/12-web-check.png)
@@ -330,7 +340,8 @@ The left menu lists the sections. Some are for admins only.
 ![Connectors](manual/10-settings-connectors.png)
 
 With more than one site, the **Site** box at the top chooses whose connectors you see and add; a connector belongs to
-one site. Today the connector agents use This network's connectors.
+one site. For a customer site, connectors to systems inside its network (AD, Linux, Windows, Synology, Proxmox,
+firewalls, VMware, Docker, Kubernetes) are checked at the customer through its collector; cloud ones from the server.
 
 ![Business systems connectors](manual/10-settings-business.png)
 
@@ -345,6 +356,22 @@ needs a read-only technical user or service key; the steps are on the card. Deta
 (a read-only role with SecurityAudit and ViewOnlyAccess, reached through sts:AssumeRole with an external ID; [AWS.md](AWS.md)).
 The AWS agent checks root and IAM users, public S3 buckets and snapshots, security groups open to the internet, RDS,
 CloudTrail, GuardDuty, Security Hub, Config and KMS, and maps them to CIS AWS Foundations in the compliance view.
+**Google Cloud** and **Google Workspace** use a service account key with read-only roles and scopes; the Google agent
+checks IAM (public or personal members, owners, old keys), open firewall rules, public buckets and Cloud SQL, and in
+Workspace 2-step verification, admins, suspicious logins and alerts ([GOOGLE.md](GOOGLE.md)).
+
+![Infrastructure connectors](manual/10-settings-infra.png)
+
+**Infrastructure** connectors feed the Infrastructure agent: **VMware vSphere** (vCenter, Read-only role),
+**Docker** (through a read-only socket proxy, because Docker's own API has no read-only mode) and **Kubernetes** (a
+service account that can't read secrets). The **Firewall** connector (Endpoints & network: OPNsense, pfSense,
+FortiGate, UniFi) reads firmware, rules, port forwards, admin access and VPN settings. Answers have passwords and keys
+hidden. Details: [INFRASTRUCTURE.md](INFRASTRUCTURE.md).
+
+![Scanner connectors](manual/10-settings-scanners.png)
+
+**Scanners** (Tenable, Qualys, Rapid7 InsightVM) aren't used by agents: they let you pull those tools' findings into a
+run's Fix plan (§6.2).
 
 Connectors let Guardian look **inside** systems with a read-only account you create. **Suggested from your last scan**
 proposes connectors for devices it found (e.g. a Synology NAS); **All connectors** lists every type with what it checks
@@ -357,6 +384,11 @@ than needed.
 | Linux (SSH), Windows (WinRM), Synology DSM, Proxmox VE / Backup Server | Patch & configuration agent |
 | Microsoft 365 / Entra ID | Microsoft 365 & Entra ID, Device fleet agents |
 | Microsoft Azure (separate Reader app) | Azure agent ([AZURE.md](AZURE.md)) |
+| Amazon Web Services | AWS agent ([AWS.md](AWS.md)) |
+| Google Workspace, Google Cloud | Google agent ([GOOGLE.md](GOOGLE.md)) |
+| SAP S/4HANA / ECC, SAP BTP, Salesforce | Business systems agent ([BUSINESS-SYSTEMS.md](BUSINESS-SYSTEMS.md)) |
+| Firewall, VMware vSphere, Docker, Kubernetes | Infrastructure agent ([INFRASTRUCTURE.md](INFRASTRUCTURE.md)) |
+| Tenable, Qualys, Rapid7 InsightVM | Fix plan › Import (pull findings) |
 | NinjaOne (RMM) | Patch & configuration agent |
 | Email domain (DNS) | Internet perimeter (SPF, DKIM, DMARC) |
 
@@ -476,7 +508,8 @@ Settings › Ticketing). Details: [TICKETING.md](TICKETING.md).
 
 - **SIEM output**: after each run, one event per finding (new ones only, or all) to Microsoft Sentinel (Logs ingestion
   API), Splunk (HTTP Event Collector) or syslog (RFC 5424 over TLS, TCP or UDP). **Send a test event** checks them.
-- **GitHub**: a read-only token for scanning private repositories.
+- **Private repositories**: read-only tokens for GitHub, GitLab and Azure DevOps, for scanning private repositories on
+  the Code page.
 - **MCP server**: tokens that let other AI tools (Claude Desktop, Claude Code and others) read Guardian's sites,
   findings, attack paths and ATT&CK map. Creating one needs your passkey; remove it to cut access at once.
 
@@ -556,6 +589,8 @@ workspace you use for Guardian.
 | Ticketing (ServiceNow, ConnectWise, Autotask, HaloPSA, Jira) | [TICKETING.md](TICKETING.md) |
 | Azure posture agent | [AZURE.md](AZURE.md) |
 | AWS posture agent | [AWS.md](AWS.md) |
+| Google Workspace and Google Cloud | [GOOGLE.md](GOOGLE.md) |
+| Firewalls, VMware, Docker, Kubernetes | [INFRASTRUCTURE.md](INFRASTRUCTURE.md) |
 | SAP, SAP BTP and Salesforce | [BUSINESS-SYSTEMS.md](BUSINESS-SYSTEMS.md) |
 | MITRE ATT&CK mapping | [ATTACK.md](ATTACK.md) |
 | Compliance evidence and PDF | [COMPLIANCE.md](COMPLIANCE.md) |

@@ -67,7 +67,37 @@ const Plan = (() => {
     file.addEventListener("change", () => { go.disabled = true; out.textContent = ""; });
     return el("details", {class: "co-export"}, el("summary", {}, "Import results from another scanner"),
       el("p", {class: "note"}, "Nessus (.nessus), OpenVAS / Greenbone, Qualys or Rapid7 InsightVM XML, or a CSV with ip, title, severity and optionally cve, port, description, solution. Up to 50 MB."),
-      el("div", {class: "row mt16"}, file, pre, go), out);
+      el("div", {class: "row mt16"}, file, pre, go), out, pullRow());
+  }
+
+  // pull open findings straight from a scanner connector (Tenable, Qualys, Rapid7) of this site
+  function pullRow() {
+    const box = el("div", {class: "mt16"});
+    const out = el("div", {class: "note"});
+    const pick = el("select", {"aria-label": "Scanner connector"});
+    const send = commit => api(`/api/runs/${S.run}/pull/${encodeURIComponent(pick.value)}?commit=${commit}`, {});
+    const go = el("button", {class: "btn sm primary", type: "button", disabled: true, onclick: async () => {
+      out.textContent = "Importing…";
+      try { const d = await send(1); out.textContent = `Imported: ${d.added} new finding(s), ${d.merged} merged into existing ones.`; go.disabled = true; refresh("plan"); }
+      catch (e) { out.textContent = e.message; } }}, "Import");
+    const pre = el("button", {class: "btn sm", type: "button", onclick: async () => {
+      out.textContent = "Reading from the scanner (Tenable exports can take a few minutes)…"; go.disabled = true;
+      try {
+        let d;
+        try { d = await send(0); }
+        catch (e) { if (!/Unlock the vault/.test(e.message) || !confirm(e.message + "\n\nUnlock now?") || !await unlock()) throw e; d = await send(0); }
+        const sev = Object.entries(d.by_severity).filter(([, n]) => n).map(([k, n]) => `${n} ${k}`).join(", ");
+        out.replaceChildren(el("b", {}, `${d.format}: ${d.findings} finding(s) on ${d.devices} device(s)`),
+          ` (${sev || "none"}${d.new_devices ? `; ${d.new_devices} device(s) Guardian hasn't seen` : ""}). Duplicates of Guardian's findings are merged on import.`);
+        go.disabled = !d.findings;
+      } catch (e) { out.textContent = e.message; } }}, "Preview");
+    pick.addEventListener("change", () => { go.disabled = true; out.textContent = ""; });
+    api(`/api/runs/${S.run}/pull-sources`).then(d => {
+      if (!d.sources.length) { box.append(el("p", {class: "note"}, "Or pull them directly: add a Tenable, Qualys or Rapid7 InsightVM connector for this site in Settings › Connectors.")); return; }
+      pick.replaceChildren(...d.sources.map(x => el("option", {value: x.id}, `${x.name} (${x.label})`)));
+      box.append(el("p", {class: "note"}, "Or pull the open findings from a scanner connector of this site:"), el("div", {class: "row"}, pick, pre, go), out);
+    }).catch(() => {});
+    return box;
   }
 
   function row(r) {

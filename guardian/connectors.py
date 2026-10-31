@@ -237,12 +237,6 @@ CATALOG = {
                    F("client_id", "Client ID", mono=True),
                    F("client_secret", "Client secret", "password", secret=True)],
     },
-    "google_workspace": {"label": "Google Workspace", "icon": "GW", "color": "#34a853", "category": "Identity & productivity",
-                         "status": "planned", "always": True, "summary": "Cloud identity", "checks": "2-step verification, admins, sharing settings, third-party apps."},
-    "vmware": {"label": "VMware vSphere / ESXi", "icon": "VM", "color": "#5b7f3a", "category": "Infrastructure & storage",
-               "status": "planned", "summary": "Hypervisor", "checks": "Host versions, VM inventory, exposed services."},
-    "docker": {"label": "Docker / Kubernetes", "icon": "D", "color": "#1d63ed", "category": "Infrastructure & storage",
-               "status": "planned", "summary": "Containers", "checks": "Exposed APIs, outdated images, containers running as root."},
     "windows": {
         "label": "Windows (WinRM)", "icon": "WIN", "color": "#0284c7", "category": "Endpoints & network",
         "status": "available", "multi": True,
@@ -258,8 +252,146 @@ CATALOG = {
                    F("password", "Password", "password", secret=True),
                    F("port", "Port", "number", default=5986, mono=True), VERIFY],
     },
-    "firewall": {"label": "Firewall API (pfSense, OPNsense, FortiGate, UniFi)", "icon": "FW", "color": "#dc2626",
-                 "category": "Endpoints & network", "status": "planned", "summary": "Firewalls", "checks": "Rules, firmware, VPN settings."},
+    "firewall": {
+        "label": "Firewall (OPNsense, pfSense, FortiGate, UniFi)", "icon": "FW", "color": "#dc2626", "category": "Endpoints & network",
+        "status": "available", "multi": True,
+        "summary": "Firewall rules, firmware and VPN",
+        "checks": "Used by the Infrastructure agent: firmware and pending updates, rules allowing any-to-any or open from the "
+                  "internet, port forwards, admin access on the WAN side, admins and password policy, VPN settings, logging. "
+                  "A fixed list of read-only API paths per vendor; passwords and keys in answers are hidden.",
+        "steps": ["OPNsense: System › Access › Users › Add user guardian, no shell; Effective privileges: only the 'GUI' pages "
+                  "for Status, Firmware (read), Firewall: Rules (read), VPN status. Create an API key for it: you get a key "
+                  "and a secret.",
+                  "pfSense: install the REST API package (pfSense-pkg-RESTAPI), create a user with read-only privileges for "
+                  "the API, and an API key for it.",
+                  "FortiGate: System › Administrators › Create New › REST API Admin guardian with an admin profile set to "
+                  "Read for every group (no Read/Write), trusted hosts = Guardian or the collector. Copy the token.",
+                  "UniFi (UniFi OS): Settings › Control Plane › Integrations › Create API key (Network application API).",
+                  "Choose the vendor and paste the key below. For a customer site the check runs through its collector."],
+        "fields": [F("vendor", "Vendor", "select", options=["opnsense", "pfsense", "fortigate", "unifi"], default="opnsense"),
+                   HOST, F("port", "Port", "number", default=443, mono=True),
+                   F("key_id", "API key (OPNsense only; the other vendors use only the token)", mono=True, required=False),
+                   F("token", "Secret / API token", "password", secret=True), VERIFY],
+    },
+    "vmware": {
+        "label": "VMware vSphere (vCenter)", "icon": "VM", "color": "#5b7f3a", "category": "Infrastructure & storage",
+        "status": "available", "multi": True,
+        "summary": "vCenter, ESXi hosts and VMs",
+        "checks": "Used by the Infrastructure agent: vCenter version and health, SSH and shell access on the appliance, "
+                  "NTP, password policy, appliance firewall, ESXi host versions (end of support), VMs, guest OS and VMware "
+                  "Tools state, datastores. Read-only REST API (vCenter 7.0 or later).",
+        "steps": ["vSphere Client › Administration › Single Sign On › Users and Groups: add user guardian@vsphere.local.",
+                  "Administration › Access Control › Global Permissions › Add: user guardian@vsphere.local, role Read-only, "
+                  "propagate to children.",
+                  "Paste the vCenter address and the user below. Standalone ESXi hosts without vCenter aren't supported."],
+        "fields": [HOST, F("port", "Port", "number", default=443, mono=True),
+                   F("username", "User", default="guardian@vsphere.local", mono=True),
+                   F("password", "Password", "password", secret=True), VERIFY],
+    },
+    "docker": {
+        "label": "Docker (read-only socket proxy)", "icon": "D", "color": "#1d63ed", "category": "Infrastructure & storage",
+        "status": "available", "multi": True,
+        "summary": "Containers on a Docker host",
+        "checks": "Used by the Infrastructure agent: privileged containers, host network, Docker socket mounted into a "
+                  "container, containers running as root, ports published on all addresses, old images, Docker version.",
+        "steps": ["Docker's own API has no read-only mode (any access is root on the host), so Guardian reads through a "
+                  "socket proxy that only allows reading: on the Docker host run",
+                  "docker run -d --name guardian-dockerproxy --restart unless-stopped -p <LAN address>:2375:2375 "
+                  "-v /var/run/docker.sock:/var/run/docker.sock:ro -e CONTAINERS=1 -e IMAGES=1 -e INFO=1 -e VERSION=1 "
+                  "-e POST=0 tecnativa/docker-socket-proxy",
+                  "Allow port 2375 only from Guardian or the collector (host firewall). Enter the host and port below."],
+        "fields": [HOST, F("port", "Port", "number", default=2375, mono=True),
+                   F("use_tls", "The proxy uses HTTPS", "checkbox", default=False), VERIFY],
+    },
+    "kubernetes": {
+        "label": "Kubernetes", "icon": "K8s", "color": "#326ce5", "category": "Infrastructure & storage",
+        "status": "available", "multi": True,
+        "summary": "Cluster security posture",
+        "checks": "Used by the Infrastructure agent: Kubernetes and kubelet versions, privileged pods, host network / PID, "
+                  "containers as root, hostPath mounts, services exposed through LoadBalancer or NodePort, ingresses without "
+                  "TLS, namespaces without network policies or Pod Security labels, cluster-admin bindings, wildcard roles. "
+                  "Secrets and ConfigMaps are never read.",
+        "steps": ["Create a service account with a read-only ClusterRole (get, list on nodes, namespaces, pods, services, "
+                  "ingresses, networkpolicies, clusterroles, clusterrolebindings; no secrets, no configmaps):",
+                  "kubectl create serviceaccount guardian -n kube-system; kubectl create clusterrole guardian-read --verb=get,list "
+                  "--resource=nodes,namespaces,pods,services,ingresses.networking.k8s.io,networkpolicies.networking.k8s.io,"
+                  "clusterroles.rbac.authorization.k8s.io,clusterrolebindings.rbac.authorization.k8s.io; "
+                  "kubectl create clusterrolebinding guardian-read --clusterrole=guardian-read --serviceaccount=kube-system:guardian",
+                  "kubectl create token guardian -n kube-system --duration=8760h  (copy the token)",
+                  "Enter the API server address (the host in your kubeconfig) and the token below."],
+        "fields": [HOST, F("port", "Port", "number", default=6443, mono=True),
+                   F("token", "Service account token", "password", secret=True), VERIFY],
+    },
+    "google_workspace": {
+        "label": "Google Workspace", "icon": "GW", "color": "#34a853", "category": "Identity & productivity",
+        "status": "available", "multi": True, "always": True,
+        "summary": "Users, 2-step verification, admins",
+        "checks": "Used by the Google agent: 2-step verification enrolment and enforcement, super admins and admin roles, "
+                  "suspended and inactive users, domains, suspicious logins and alerts. Read-only Admin SDK scopes.",
+        "steps": ["Google Cloud console: create a project, enable the Admin SDK API and the Alert Center API, and create a "
+                  "service account with a JSON key (no roles needed in the project).",
+                  "Workspace Admin console › Security › Access and data control › API controls › Domain-wide delegation › Add: "
+                  "the service account's client ID with exactly these scopes: "
+                  "https://www.googleapis.com/auth/admin.directory.user.readonly, "
+                  "https://www.googleapis.com/auth/admin.directory.domain.readonly, "
+                  "https://www.googleapis.com/auth/admin.directory.rolemanagement.readonly, "
+                  "https://www.googleapis.com/auth/admin.reports.audit.readonly, "
+                  "https://www.googleapis.com/auth/apps.alerts",
+                  "Create an admin user guardian-read@ with a custom role that can only read users, roles and reports. "
+                  "Paste its address and the JSON key below."],
+        "fields": [F("admin_email", "Read-only admin to act as", placeholder="guardian-read@example.com", mono=True),
+                   F("service_account_json", "Service account key (JSON)", "password", secret=True, json=True)],
+    },
+    "gcp": {
+        "label": "Google Cloud", "icon": "GCP", "color": "#4285f4", "category": "Cloud",
+        "status": "available", "multi": True, "always": True,
+        "summary": "Google Cloud projects",
+        "checks": "Used by the Google agent: IAM (owners, primitive roles, public members, user-managed service account "
+                  "keys), firewall rules open to the internet, VMs with public IPs and default service accounts, public "
+                  "buckets, Cloud SQL exposure and backups, audit-log sinks.",
+        "steps": ["Create a service account guardian-read in a project you own, with a JSON key.",
+                  "Grant it Viewer and Security Reviewer on the customer's organization or folder (or on each project). "
+                  "Nothing that can change resources.",
+                  "Enable the Cloud Resource Manager, Compute, Cloud Storage, Cloud SQL Admin, IAM and Logging APIs in the "
+                  "project of the service account. Paste the key below; optionally limit to some project IDs."],
+        "fields": [F("service_account_json", "Service account key (JSON)", "password", secret=True, json=True),
+                   F("projects", "Only these project IDs (optional, space-separated)", mono=True, required=False)],
+    },
+    "tenable": {
+        "label": "Tenable Vulnerability Management", "icon": "TEN", "color": "#00a3e0", "category": "Scanners",
+        "status": "available", "multi": True, "always": True,
+        "summary": "Pull Tenable findings into the Fix plan",
+        "checks": "Fix plan › Import › Pull from a connector: open vulnerabilities (medium and above) from Tenable Vulnerability "
+                  "Management (cloud.tenable.com), merged with Guardian's own findings and prioritised with KEV and EPSS.",
+        "steps": ["Tenable: Settings › Access Control › Users › Create a user with the Basic role (read only) and access to the "
+                  "customer's assets. Sign in as that user › My Account › API Keys › Generate.",
+                  "Paste the access key and the secret key below."],
+        "fields": [F("access_key", "Access key", mono=True), F("secret_key", "Secret key", "password", secret=True)],
+    },
+    "qualys": {
+        "label": "Qualys VMDR", "icon": "QLS", "color": "#ed2e26", "category": "Scanners",
+        "status": "available", "multi": True, "always": True,
+        "summary": "Pull Qualys detections into the Fix plan",
+        "checks": "Fix plan › Import › Pull from a connector: confirmed detections (severity 3 to 5) per host from Qualys VMDR, "
+                  "with titles and CVEs from the Qualys knowledge base.",
+        "steps": ["Qualys: Users › New User with the Reader role, API access on, limited to the customer's asset groups.",
+                  "API server: the address of your Qualys platform, e.g. qualysapi.qg2.apps.qualys.eu (see Help › About).",
+                  "Paste the API server, user and password below."],
+        "fields": [F("api_server", "API server", placeholder="qualysapi.qg2.apps.qualys.eu", mono=True),
+                   F("username", "User", mono=True), F("password", "Password", "password", secret=True)],
+    },
+    "rapid7": {
+        "label": "Rapid7 InsightVM (console)", "icon": "R7", "color": "#e85e26", "category": "Scanners",
+        "status": "available", "multi": True, "always": True,
+        "summary": "Pull InsightVM findings into the Fix plan",
+        "checks": "Fix plan › Import › Pull from a connector: vulnerabilities per asset (CVSS 4 and above) from the InsightVM "
+                  "security console's API, with titles, CVEs and ports.",
+        "steps": ["InsightVM console › Administration › Users › Create a user with a role that can only view site and asset "
+                  "data (e.g. a custom role with 'View Site Asset Data'), limited to the customer's sites.",
+                  "Paste the console address (port 3780), user and password below. The console must be reachable from Guardian."],
+        "fields": [HOST, F("port", "Port", "number", default=3780, mono=True),
+                   F("username", "User", mono=True), F("password", "Password", "password", secret=True), VERIFY],
+    },
 }
 
 
@@ -337,6 +469,22 @@ def suggest(graph, store):
         elif any("Proxmox Backup Server" in t or "Proxmox Backup Server" in s for _, t, s, _ in titles):
             add(f"proxmox_bs:{mac}", "proxmox_bs", f"Proxmox Backup Server · {ip}", [ip], f"Backup server web interface on {ip}:8007",
                 {"name": "Proxmox Backup Server", "host": ip, "port": 8007}, [mac])
+        text = " ".join(f"{t} {s}" for _, t, s, _ in titles) + f" {vendor} {model}"
+        fw = next((v for v, rx in (("opnsense", r"OPNsense"), ("pfsense", r"pfSense"), ("fortigate", r"FortiGate|Fortinet"),
+                                   ("unifi", r"UniFi|Ubiquiti")) if re.search(rx, text, re.I)), None)
+        if fw and ports & {443, 8443, 4443}:
+            port = next(x for x in (443, 8443, 4443) if x in ports)
+            add(f"firewall:{mac}", "firewall", f"Firewall ({fw}) · {ip}", [ip], f"{fw} management interface on {ip}:{port}",
+                {"name": f"{fw} {ip}", "vendor": fw, "host": ip, "port": port}, [mac])
+        if re.search(r"vSphere|vCenter|VMware ESXi", text) and 443 in ports:
+            add(f"vmware:{mac}", "vmware", f"VMware vSphere · {ip}", [ip], f"VMware management interface on {ip}",
+                {"name": "vCenter", "host": ip, "port": 443}, [mac])
+        if 6443 in ports:
+            add(f"kubernetes:{mac}", "kubernetes", f"Kubernetes · {ip}", [ip], f"A Kubernetes API server answers on {ip}:6443",
+                {"name": f"Kubernetes {ip}", "host": ip, "port": 6443}, [mac])
+        if ports & {2375, 2376}:
+            add(f"docker:{mac}", "docker", f"Docker · {ip}", [ip], f"The Docker API is open on {ip} (port {min(ports & {2375, 2376})}): "
+                "that alone is a serious risk; a read-only proxy lets Guardian check the containers", {"name": f"Docker {ip}", "host": ip}, [mac])
         if any(t == "Home Assistant" for _, t, _, _ in titles):
             port, scheme = next(((p, "https" if tls else "http") for p, t, _, tls in titles if t == "Home Assistant"), (80, "http"))
             add(f"home_assistant:{mac}", "home_assistant", f"Home Assistant · {ip}", [ip], f"Home Assistant on {ip}:{port}",
@@ -885,6 +1033,113 @@ def _aws_test(f):
     return _done(level, message, details)
 
 
+FIREWALL_TEST = {"opnsense": "/api/core/firmware/info", "pfsense": "/api/v2/system/version",
+                 "fortigate": "/api/v2/monitor/system/status", "unifi": "/proxy/network/integration/v1/info"}
+
+
+def _test_firewall(f, pin):
+    from . import access
+    vendor = f.get("vendor")
+    if vendor == "opnsense" and not f.get("key_id"):
+        raise Result("error", "OPNsense needs both the API key and its secret")
+    host, port = f["host"], int(f.get("port") or 443)
+    ctx, pin = _tls_context(host, port, f.get("verify_tls"), pin)
+    st, d = _http(f"https://{host}:{port}{FIREWALL_TEST[vendor]}", ctx, access.firewall_auth(f))
+    if st in (401, 403):
+        raise Result("error", "The firewall refused the key: check it, and that the API user may read status pages")
+    if st != 200:
+        raise Result("error", f"Unexpected answer {st}: is this a {vendor} firewall with its API on this port?")
+    d = d if isinstance(d, dict) else {}
+    data = d.get("data") if isinstance(d.get("data"), dict) else {}
+    ver = d.get("product_version") or data.get("version") or d.get("version") or d.get("applicationVersion")
+    details = [f"{vendor} {ver or ''}".strip(), "Guardian only reads a fixed list of status and configuration pages; give the API "
+               "user read-only rights (FortiGate: an admin profile with Read everywhere)."]
+    return _done("ok", "Connected", details, pin=pin)
+
+
+def _test_vmware(f, pin):
+    from . import access
+    host, port = f["host"], int(f.get("port") or 443)
+    ctx, pin = _tls_context(host, port, f.get("verify_tls"), pin)
+    tok = access.vmware_session(f, ctx)
+    try:
+        st, v = _http(f"https://{host}:{port}/api/appliance/system/version", ctx, {"vmware-api-session-id": tok})
+        if st != 200:
+            raise Result("error", f"Signed in, but the version can't be read ({st}): vCenter 7.0 or later is needed")
+        return _done("ok", "Connected", [f"vCenter {(v or {}).get('version', '')} build {(v or {}).get('build', '')}".strip(),
+                                         "Make sure the user has the Read-only role and nothing more"], pin=pin)
+    finally:
+        access.vmware_logout(f, ctx, tok)
+
+
+def _test_docker(f, pin):
+    from . import access
+    base, ctx = access._docker_base({"fields": f, "pin": pin})
+    if f.get("use_tls"):
+        pin = _tls_context(f["host"], int(f.get("port") or 2375), f.get("verify_tls"), pin)[1]
+    st, v = _http(f"{base}/version", ctx)
+    if st != 200 or not isinstance(v, dict):
+        raise Result("error", f"No Docker API answered ({st}): is the socket proxy running on this port?")
+    st2, _ = _http(f"{base}/containers/json", ctx)
+    if st2 != 200:
+        raise Result("error", "The proxy doesn't allow listing containers: set CONTAINERS=1")
+    details = [f"Docker {v.get('Version', '')} on {v.get('Os', '')}", "Make sure the proxy runs with POST=0 so nothing can be changed"]
+    if not f.get("use_tls"):
+        details.append("Plain HTTP: allow the port only from Guardian or the collector")
+    return _done("ok", "Connected", details, pin=pin)
+
+
+def _test_kubernetes(f, pin):
+    host, port = f["host"], int(f.get("port") or 6443)
+    ctx, pin = _tls_context(host, port, f.get("verify_tls"), pin)
+    auth = {"Authorization": f"Bearer {f['token']}"}
+    st, v = _http(f"https://{host}:{port}/version", ctx, auth)
+    if st != 200:
+        raise Result("error", "The token was refused" if st in (401, 403) else f"No Kubernetes API answered ({st})")
+    st, ns = _http(f"https://{host}:{port}/api/v1/namespaces?limit=1", ctx, auth)
+    if st != 200:
+        raise Result("error", "The token can't list namespaces: bind the guardian-read cluster role")
+    writes = []
+    for verb, res in (("create", "pods"), ("delete", "pods"), ("get", "secrets"), ("create", "clusterrolebindings")):
+        body = json.dumps({"apiVersion": "authorization.k8s.io/v1", "kind": "SelfSubjectAccessReview",
+                           "spec": {"resourceAttributes": {"verb": verb, "resource": res}}}).encode()
+        req = urllib.request.Request(f"https://{host}:{port}/apis/authorization.k8s.io/v1/selfsubjectaccessreviews", data=body,
+                                     headers={**auth, "Content-Type": "application/json", "User-Agent": "ai-guardian"})
+        try:                                              # asks the API what the token may do; creates nothing
+            with urllib.request.urlopen(req, context=ctx, timeout=10) as r:
+                if (json.loads(r.read()).get("status") or {}).get("allowed"):
+                    writes.append(f"{verb} {res}")
+        except (urllib.error.URLError, OSError, ValueError):
+            pass
+    details = [f"Kubernetes {(v or {}).get('gitVersion', '')}"]
+    if writes:
+        details.append("The token may " + ", ".join(writes) + ". Use the read-only guardian-read role (no secrets).")
+        return _done("warn", "Connected, with a warning", details, pin=pin)
+    details.append("Token is read-only and can't read secrets")
+    return _done("ok", "Connected", details, pin=pin)
+
+
+def _test_google(kind, f):
+    from . import google
+    try:
+        level, message, details = google.test_workspace(f) if kind == "workspace" else google.test_gcp(f)
+    except google.GoogleError as e:
+        raise Result("error", str(e))
+    return _done(level, message, details)
+
+
+def _test_scanner(ctype, f, pin):
+    from . import importers
+    ctx = None
+    if ctype == "rapid7":
+        ctx, pin = _tls_context(f["host"], int(f.get("port") or 3780), f.get("verify_tls"), pin)
+    try:
+        level, message, details = importers.test_scanner(ctype, f, ctx)
+    except importers.ImportError_ as e:
+        raise Result("error", str(e))
+    return _done(level, message, details, pin=pin)
+
+
 def _bizsys():
     from . import bizsys                       # imported late: bizsys imports this module
     return bizsys
@@ -909,6 +1164,15 @@ def test(ctype, fields, pin=None, state_dir=None, vault=None):
         "sap_btp": lambda: _bizsys().test_btp(fields),
         "salesforce": lambda: _bizsys().test_sf(fields),
         "windows": lambda: _test_windows(fields),
+        "firewall": lambda: _test_firewall(fields, pin),
+        "vmware": lambda: _test_vmware(fields, pin),
+        "docker": lambda: _test_docker(fields, pin),
+        "kubernetes": lambda: _test_kubernetes(fields, pin),
+        "google_workspace": lambda: _test_google("workspace", fields),
+        "gcp": lambda: _test_google("gcp", fields),
+        "tenable": lambda: _test_scanner("tenable", fields, pin),
+        "qualys": lambda: _test_scanner("qualys", fields, pin),
+        "rapid7": lambda: _test_scanner("rapid7", fields, pin),
     }
     if ctype not in tests:
         return "error", "This connector can't be tested yet.", [], pin

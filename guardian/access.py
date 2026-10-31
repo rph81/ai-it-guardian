@@ -22,10 +22,11 @@ _CONNECTORS = []        # [{"id", "type", "name", "fields": {...incl. secrets}, 
 _SSH = {"private": None, "path": None}
 _STATE_DIR = None
 TYPES = {"active_directory", "linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "m365", "windows", "azure", "ninjaone",
-         "sap_abap", "sap_btp", "salesforce", "aws"}
+         "sap_abap", "sap_btp", "salesforce", "aws", "firewall", "vmware", "docker", "kubernetes", "google_workspace", "gcp"}
 CONNECTOR_AGENTS = {"ad": ["active_directory"], "patch": ["linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "windows", "ninjaone"],
                     "m365": ["m365"], "devices": ["m365"], "azure": ["azure"],
-                    "business": ["sap_abap", "sap_btp", "salesforce"], "aws": ["aws"]}
+                    "business": ["sap_abap", "sap_btp", "salesforce"], "aws": ["aws"],
+                    "infra": ["firewall", "vmware", "docker", "kubernetes"], "google": ["google_workspace", "gcp"]}
 
 
 def load(data, state_dir):
@@ -790,3 +791,288 @@ def aws_query(cid, query, region=None):
     if isinstance(res, dict) and "rows" in res:                     # regional reads: rows plus regions and errors
         return {**bizsys.cap(res["rows"]), **{k: v for k, v in res.items() if k != "rows"}}
     return bizsys.cap(res) if isinstance(res, list) else res
+
+
+# -- Infrastructure: firewalls, VMware vCenter, Docker, Kubernetes (fixed reads, run at the customer for remote sites) --
+SECRET_KEYS = re.compile(r"pass(word|wd|phrase)?|psk|secret|private|token|key$|keys$|^key|cert(ificate)?_?data|hash", re.I)
+
+
+def _scrub(o, depth=0):
+    """Drops values whose name says they hold a secret (passwords, PSKs, private keys, tokens) from what agents see."""
+    if depth > 12:
+        return "…"
+    if isinstance(o, dict):
+        return {k: ("[hidden]" if SECRET_KEYS.search(str(k)) and v not in (None, "", [], {}, False, True) and not isinstance(v, (int, float)) else _scrub(v, depth + 1))
+                for k, v in o.items()}
+    if isinstance(o, list):
+        return [_scrub(x, depth + 1) for x in o]
+    return o
+
+
+def _clip(st, data, limit=24000):
+    body = json.dumps(data, default=str)
+    if len(body) > limit:
+        return {"status": st, "data": body[:limit], "truncated": True}
+    return {"status": st, "data": data}
+
+
+FIREWALL_PATHS = {
+    "opnsense": [r"/api/core/firmware/status", r"/api/core/firmware/info", r"/api/core/system/status",
+                 r"/api/firewall/filter/search_rule", r"/api/firewall/alias/search_item", r"/api/core/service/search",
+                 r"/api/openvpn/instances/search", r"/api/ipsec/connections/search_connection",
+                 r"/api/wireguard/server/search_server", r"/api/trust/cert/search", r"/api/diagnostics/interface/get_interface_config"],
+    "pfsense": [r"/api/v2/system/version", r"/api/v2/firewall/rules", r"/api/v2/firewall/nat/port_forwards", r"/api/v2/users",
+                r"/api/v2/system/webgui/settings", r"/api/v2/services/ssh", r"/api/v2/vpn/openvpn/servers",
+                r"/api/v2/vpn/ipsec/phase1s", r"/api/v2/status/interfaces", r"/api/v2/system/packages"],
+    "fortigate": [r"/api/v2/monitor/system/status", r"/api/v2/monitor/system/firmware", r"/api/v2/monitor/license/status",
+                  r"/api/v2/cmdb/firewall/policy", r"/api/v2/cmdb/firewall/vip", r"/api/v2/cmdb/system/interface",
+                  r"/api/v2/cmdb/system/global", r"/api/v2/cmdb/system/admin", r"/api/v2/cmdb/system/password-policy",
+                  r"/api/v2/cmdb/vpn.ssl/settings", r"/api/v2/cmdb/vpn.ipsec/phase1-interface", r"/api/v2/cmdb/log/setting"],
+    "unifi": [r"/proxy/network/integration/v1/info", r"/proxy/network/integration/v1/sites",
+              r"/proxy/network/integration/v1/sites/[\w-]{1,64}/devices"],
+}
+
+
+def firewall_auth(f):
+    v, tok = f.get("vendor"), f.get("token") or ""
+    if v == "opnsense":
+        import base64
+        return {"Authorization": "Basic " + base64.b64encode(f"{f.get('key_id', '')}:{tok}".encode()).decode()}
+    if v == "fortigate":
+        return {"Authorization": f"Bearer {tok}"}
+    return {"X-API-Key": tok} if v == "pfsense" else {"X-API-KEY": tok}
+
+
+@_on_site
+def firewall_get(cid, path):
+    c = _get(cid, {"firewall"})
+    f = c["fields"]
+    allowed = FIREWALL_PATHS.get(f.get("vendor"), [])
+    path = "/" + path.strip().lstrip("/").split("?")[0]
+    if not any(re.fullmatch(p, path) for p in allowed):
+        return {"error": "path not in the read-only list", "allowed": allowed}
+    host, port = f["host"], int(f.get("port") or 443)
+    ctx = conn._tls_context(host, port, f.get("verify_tls"), c.get("pin"))[0]
+    st, d = conn._http(f"https://{host}:{port}{path}", ctx, firewall_auth(f), timeout=20)
+    return _clip(st, _scrub(d))
+
+
+VMWARE_PATHS = [r"/api/appliance/system/version", r"/api/appliance/health/system", r"/api/appliance/access/ssh",
+                r"/api/appliance/access/shell", r"/api/appliance/access/consolecli", r"/api/appliance/ntp",
+                r"/api/appliance/local-accounts/global-policy", r"/api/appliance/networking/firewall/inbound",
+                r"/api/vcenter/host", r"/api/vcenter/cluster", r"/api/vcenter/datastore", r"/api/vcenter/vm",
+                r"/api/vcenter/vm/vm-\d{1,9}", r"/api/vcenter/vm/vm-\d{1,9}/guest/identity", r"/api/vcenter/vm/vm-\d{1,9}/tools"]
+
+
+def vmware_session(f, ctx):
+    import base64
+    url = f"https://{f['host']}:{int(f.get('port') or 443)}/api/session"
+    req = urllib.request.Request(url, method="POST", headers={"User-Agent": "ai-guardian", "Authorization": "Basic "
+                                 + base64.b64encode(f"{f['username']}:{f['password']}".encode()).decode()})
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=15) as r:
+            return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        raise conn.Result("error", "vCenter refused the sign-in: check the user and password." if e.code == 401 else f"vCenter error {e.code}")
+    except (urllib.error.URLError, OSError) as e:
+        raise conn.Result("error", f"Can't reach vCenter: {getattr(e, 'reason', e)}")
+
+
+def vmware_logout(f, ctx, token):
+    try:
+        req = urllib.request.Request(f"https://{f['host']}:{int(f.get('port') or 443)}/api/session", method="DELETE",
+                                     headers={"vmware-api-session-id": token, "User-Agent": "ai-guardian"})
+        urllib.request.urlopen(req, context=ctx, timeout=10).close()
+    except (urllib.error.URLError, OSError):
+        pass
+
+
+@_on_site
+def vmware_get(cid, path):
+    c = _get(cid, {"vmware"})
+    f = c["fields"]
+    path = "/" + path.strip().lstrip("/").split("?")[0]
+    if not any(re.fullmatch(p, path) for p in VMWARE_PATHS):
+        return {"error": "path not in the read-only list", "allowed": VMWARE_PATHS}
+    ctx = conn._tls_context(f["host"], int(f.get("port") or 443), f.get("verify_tls"), c.get("pin"))[0]
+    try:
+        tok = vmware_session(f, ctx)
+    except conn.Result as e:
+        return {"error": e.message}
+    try:
+        st, d = conn._http(f"https://{f['host']}:{int(f.get('port') or 443)}{path}", ctx, {"vmware-api-session-id": tok}, timeout=30)
+        return _clip(st, _scrub(d))
+    finally:
+        vmware_logout(f, ctx, tok)
+
+
+DOCKER_QUERIES = ("version", "info", "containers", "images")
+
+
+def _docker_base(c):
+    f = c["fields"]
+    port = int(f.get("port") or 2375)
+    if f.get("use_tls"):
+        return f"https://{f['host']}:{port}", conn._tls_context(f["host"], port, f.get("verify_tls"), c.get("pin"))[0]
+    return f"http://{f['host']}:{port}", None
+
+
+@_on_site
+def docker_query(cid, query):
+    """Reads through a read-only Docker socket proxy (containers, images, info; no POST)."""
+    c = _get(cid, {"docker"})
+    if query not in DOCKER_QUERIES:
+        return {"error": "unknown query", "allowed": list(DOCKER_QUERIES)}
+    base, ctx = _docker_base(c)
+    if query in ("version", "info"):
+        st, d = conn._http(f"{base}/{query}", ctx, timeout=15)
+        if query == "info" and isinstance(d, dict):
+            d = {k: d.get(k) for k in ("ServerVersion", "OperatingSystem", "KernelVersion", "SecurityOptions", "Containers",
+                                       "ContainersRunning", "Images", "LiveRestoreEnabled", "Swarm", "RegistryConfig", "NoProxy")}
+        return _clip(st, _scrub(d))
+    if query == "images":
+        st, d = conn._http(f"{base}/images/json", ctx, timeout=20)
+        rows = [{"tags": i.get("RepoTags"), "created": i.get("Created"), "size_mb": round((i.get("Size") or 0) / 2**20)}
+                for i in (d if isinstance(d, list) else [])]
+        return _cap(rows[:500], len(rows) > 500)
+    st, lst = conn._http(f"{base}/containers/json?all=1", ctx, timeout=20)
+    if st != 200 or not isinstance(lst, list):
+        return {"status": st, "error": str(lst)[:300]}
+    rows = []
+    for ct in lst[:80]:
+        _, i = conn._http(f"{base}/containers/{urllib.parse.quote(ct.get('Id', ''))}/json", ctx, timeout=15)
+        i = i if isinstance(i, dict) else {}
+        hc, cfg = i.get("HostConfig") or {}, i.get("Config") or {}
+        mounts = [m.get("Source") for m in i.get("Mounts") or []]
+        rows.append({"name": (ct.get("Names") or ["?"])[0].lstrip("/"), "image": ct.get("Image"), "state": ct.get("State"),
+                     "status": ct.get("Status"), "privileged": hc.get("Privileged"), "network_mode": hc.get("NetworkMode"),
+                     "pid_mode": hc.get("PidMode"), "user": cfg.get("User") or "root (default)", "cap_add": hc.get("CapAdd"),
+                     "docker_sock_mounted": any("docker.sock" in (m or "") for m in mounts),
+                     "host_mounts": [m for m in mounts if m and m.startswith("/")][:10],
+                     "published": [f"{p.get('IP') or '0.0.0.0'}:{p.get('PublicPort')}->{p.get('PrivatePort')}/{p.get('Type')}"
+                                   for p in ct.get("Ports") or [] if p.get("PublicPort")],
+                     "restart": (hc.get("RestartPolicy") or {}).get("Name"), "readonly_rootfs": hc.get("ReadonlyRootfs")})
+    return _cap(rows, len(lst) > 80)
+
+
+K8S_QUERIES = ("version", "nodes", "namespaces", "pods_security", "services_exposed", "ingresses", "network_policies",
+               "cluster_admin_bindings", "rbac_wildcards")
+
+
+def _k8s(c, path):
+    f = c["fields"]
+    port = int(f.get("port") or 6443)
+    ctx = conn._tls_context(f["host"], port, f.get("verify_tls"), c.get("pin"))[0]
+    items, cont = [], None
+    for _ in range(5):
+        q = "?limit=500" + (f"&continue={urllib.parse.quote(cont)}" if cont else "")
+        st, d = conn._http(f"https://{f['host']}:{port}{path}{q if path != '/version' else ''}", ctx,
+                           {"Authorization": f"Bearer {f['token']}"}, timeout=30)
+        if st != 200:
+            raise conn.Result("error", f"{path}: {st} {str(d)[:200]}")
+        if path == "/version":
+            return d, False
+        items += (d or {}).get("items") or []
+        cont = ((d or {}).get("metadata") or {}).get("continue")
+        if not cont:
+            break
+    return items, bool(cont)
+
+
+def _sc(pod_sc, sc):
+    return {**(pod_sc or {}), **(sc or {})}
+
+
+@_on_site
+def k8s_query(cid, query):
+    """Fixed Kubernetes reads, summarised to the security-relevant fields. Secrets and ConfigMaps are never read."""
+    c = _get(cid, {"kubernetes"})
+    if query not in K8S_QUERIES:
+        return {"error": "unknown query", "allowed": list(K8S_QUERIES)}
+    try:
+        if query == "version":
+            d, _ = _k8s(c, "/version")
+            return {"status": 200, "data": {k: d.get(k) for k in ("gitVersion", "platform", "buildDate")}}
+        if query == "nodes":
+            items, more = _k8s(c, "/api/v1/nodes")
+            rows = [{"name": n["metadata"]["name"], **{k: (n.get("status") or {}).get("nodeInfo", {}).get(k) for k in
+                     ("kubeletVersion", "osImage", "kernelVersion", "containerRuntimeVersion")},
+                     "ready": next((x.get("status") for x in (n.get("status") or {}).get("conditions") or [] if x.get("type") == "Ready"), None)}
+                    for n in items]
+        elif query == "namespaces":
+            items, more = _k8s(c, "/api/v1/namespaces")
+            rows = [{"name": n["metadata"]["name"], "pod_security": {k: v for k, v in (n["metadata"].get("labels") or {}).items()
+                                                                       if k.startswith("pod-security.kubernetes.io/")}} for n in items]
+        elif query == "pods_security":
+            items, more = _k8s(c, "/api/v1/pods")
+            rows = []
+            for p in items:
+                spec, md = p.get("spec") or {}, p.get("metadata") or {}
+                cts = (spec.get("containers") or []) + (spec.get("initContainers") or [])
+                scs = [_sc(spec.get("securityContext"), ct.get("securityContext")) for ct in cts]
+                rows.append({"namespace": md.get("namespace"), "pod": md.get("name"), "images": [ct.get("image") for ct in cts],
+                             "privileged": any(s.get("privileged") for s in scs),
+                             "host_network": spec.get("hostNetwork", False), "host_pid": spec.get("hostPID", False),
+                             "host_ipc": spec.get("hostIPC", False),
+                             "may_run_as_root": any(not s.get("runAsNonRoot") and s.get("runAsUser", 0) == 0 for s in scs),
+                             "privilege_escalation": any(s.get("allowPrivilegeEscalation", True) for s in scs),
+                             "caps_added": sorted({x for s in scs for x in ((s.get("capabilities") or {}).get("add") or [])}),
+                             "host_path": [v.get("hostPath", {}).get("path") for v in spec.get("volumes") or [] if v.get("hostPath")],
+                             "service_account": spec.get("serviceAccountName"),
+                             "automount_token": spec.get("automountServiceAccountToken", True)})
+        elif query == "services_exposed":
+            items, more = _k8s(c, "/api/v1/services")
+            rows = [{"namespace": s["metadata"].get("namespace"), "name": s["metadata"].get("name"), "type": s["spec"].get("type"),
+                     "ports": [f"{p.get('port')}/{p.get('protocol')}" + (f" node {p['nodePort']}" if p.get("nodePort") else "") for p in s["spec"].get("ports") or []],
+                     "external": [i.get("ip") or i.get("hostname") for i in ((s.get("status") or {}).get("loadBalancer") or {}).get("ingress") or []]}
+                    for s in items if (s.get("spec") or {}).get("type") in ("LoadBalancer", "NodePort")]
+        elif query == "ingresses":
+            items, more = _k8s(c, "/apis/networking.k8s.io/v1/ingresses")
+            rows = [{"namespace": i["metadata"].get("namespace"), "name": i["metadata"].get("name"),
+                     "hosts": [r.get("host") for r in (i.get("spec") or {}).get("rules") or []],
+                     "tls_hosts": [h for t in (i.get("spec") or {}).get("tls") or [] for h in t.get("hosts") or []]} for i in items]
+        elif query == "network_policies":
+            items, more = _k8s(c, "/apis/networking.k8s.io/v1/networkpolicies")
+            by = {}
+            for n in items:
+                by[n["metadata"].get("namespace")] = by.get(n["metadata"].get("namespace"), 0) + 1
+            rows = [{"namespace": k, "policies": v} for k, v in sorted(by.items())]
+        elif query == "cluster_admin_bindings":
+            items, more = _k8s(c, "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings")
+            rows = [{"binding": b["metadata"]["name"], "role": b["roleRef"]["name"],
+                     "subjects": [f"{s.get('kind')}:{s.get('namespace', '') + '/' if s.get('namespace') else ''}{s.get('name')}" for s in b.get("subjects") or []]}
+                    for b in items if b["roleRef"]["name"] == "cluster-admin"
+                    or any(s.get("name") in ("system:anonymous", "system:unauthenticated", "system:authenticated") for s in b.get("subjects") or [])]
+        else:
+            items, more = _k8s(c, "/apis/rbac.authorization.k8s.io/v1/clusterroles")
+            rows = [{"role": r["metadata"]["name"], "rules": [{k: x.get(k) for k in ("apiGroups", "resources", "verbs")} for x in r.get("rules") or []
+                                                              if "*" in (x.get("verbs") or []) or "*" in (x.get("resources") or [])
+                                                              or ("secrets" in (x.get("resources") or []) and set(x.get("verbs") or []) & {"get", "list", "*"})]}
+                    for r in items if not r["metadata"]["name"].startswith("system:")]
+            rows = [r for r in rows if r["rules"]]
+    except conn.Result as e:
+        return {"error": e.message}
+    return _cap(rows, more, {"query": query})
+
+
+# -- Google Workspace and Google Cloud (read-only service account) ----------------------------------------------------
+def google_query(cid, query):
+    from . import bizsys, google
+    c = _get(cid, {"google_workspace"})
+    try:
+        res, more = google.workspace(c["fields"], query)
+    except google.GoogleError as e:
+        return {"error": str(e)}
+    return bizsys.cap(res) if isinstance(res, list) else {"status": 200, **res, "more": more}
+
+
+def gcp_query(cid, query, project=None):
+    from . import bizsys, google
+    c = _get(cid, {"gcp"})
+    try:
+        res, _ = google.gcp(c["fields"], query, project)
+    except google.GoogleError as e:
+        return {"error": str(e)}
+    if isinstance(res, dict) and "rows" in res:
+        return {**bizsys.cap(res["rows"]), **{k: v for k, v in res.items() if k != "rows"}}
+    return bizsys.cap(res)

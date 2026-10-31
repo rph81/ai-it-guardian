@@ -54,7 +54,12 @@ g.data["attack_paths"] = [{"id": "AP01", "title": "From the internet to the file
     "choke_points": [{"fix": "Put RDP behind a VPN and require NLA", "finding": "F001"}], "summary": "One exposed service plus missing patches give an attacker the file server."}]
 g.data["compliance"] = {"cis_ig1": {"1.1": {"status": "met", "findings": [], "note": "12 devices identified."}, "4.4": {"status": "partial", "findings": ["F004"], "note": "SMBv1 open."},
                         "6.5": {"status": "gap", "findings": ["F005"], "note": "2 admins without MFA."}, "7.3": {"status": "gap", "findings": ["F003", "F009"], "note": "Patching stalled."}},
-                        "iso27001": {"8.8": {"status": "gap", "findings": ["F001", "F003", "F007"], "note": "Known exploited vulnerabilities open."}, "8.5": {"status": "gap", "findings": ["F005"], "note": "MFA not enforced."}}}
+                        "iso27001": {"8.8": {"status": "gap", "findings": ["F001", "F003", "F007"], "note": "Known exploited vulnerabilities open."}, "8.5": {"status": "gap", "findings": ["F005"], "note": "MFA not enforced."}},
+                        "pci_dss": {"PCI-6.3": {"status": "gap", "findings": ["F001", "F003"], "note": "Actively exploited vulnerabilities unpatched."},
+                                    "PCI-8.4": {"status": "gap", "findings": ["F005"], "note": "2 admins without MFA."},
+                                    "PCI-1.3": {"status": "partial", "findings": ["F002"], "note": "NAS admin page forwarded to the internet."}},
+                        "soc2": {"CC6.1": {"status": "partial", "findings": ["F005", "F006"], "note": "MFA gaps and legacy authentication."},
+                                 "CC7.1": {"status": "met", "findings": [], "note": "Weekly scans with change alerts."}}}
 for name, cost in [("orchestrator", .21), ("discovery", .32), ("network", .58), ("os", .49), ("web", .37), ("firmware", .41), ("wan", .29), ("m365", .44), ("patch", .62), ("risk", .36), ("paths", .27), ("compliance", .39), ("report", .15)]:
     g.agent(name, status="done", activity="Finished", rounds=6, cost=cost, checks={"probe": 4})
 g.data["cost_total"] = 4.9

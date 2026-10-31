@@ -18,7 +18,8 @@ All agents follow the same rules (the `COMMON` prompt):
 Scanner ─▶ Discovery ─▶ Orchestrator ─▶ Specialists (in parallel, scaled for big sites)
                                             Network · OS & endpoints · Web & APIs · Firmware · Internet perimeter
                                             + through connectors: Active Directory · Microsoft 365 & Entra ID · Device fleet ·
-                                              Azure · AWS · Business systems · Patch & configuration
+                                              Azure · AWS · Google · Business systems · Infrastructure ·
+                                              Patch & configuration
                                    ─▶ Analysts (one after another)
                                             Risk analyst ─▶ Attack paths ─▶ Compliance
                                    ─▶ Report writer
@@ -51,6 +52,8 @@ several copies for large sites; analysts always run as one copy.
 | **Azure** | Azure subscriptions, through the Azure connector (separate app, Reader + Security Reader); see [AZURE.md](AZURE.md) | 29 fixed Resource Graph queries, 22 read-only management paths |
 | **AWS** | AWS accounts, through the AWS connector (read-only role, SecurityAudit + ViewOnlyAccess); see [AWS.md](AWS.md) | 6 account-wide and 9 per-region read-only reads, SigV4-signed by Guardian |
 | **Business systems** | SAP S/4HANA / ECC, SAP BTP and Salesforce through their connectors; see [BUSINESS-SYSTEMS.md](BUSINESS-SYSTEMS.md) | 10 fixed SAP table reads, 6 BTP reads, 9 Salesforce queries |
+| **Google Workspace & Cloud** | Workspace users, 2-step verification, admins, login and admin events, alerts; Google Cloud IAM, firewalls, VMs, buckets, Cloud SQL, log sinks; see [GOOGLE.md](GOOGLE.md) | 6 Workspace and 8 Cloud read-only queries |
+| **Infrastructure** | Firewalls (OPNsense, pfSense, FortiGate, UniFi), VMware vCenter, Docker hosts and Kubernetes clusters; see [INFRASTRUCTURE.md](INFRASTRUCTURE.md) | fixed API paths per firewall vendor and for vCenter, 4 Docker and 9 Kubernetes queries, CVE and end-of-life lookups |
 
 ## Specialists that sign in through a connector (Agents v2, wave 2)
 
@@ -133,7 +136,7 @@ Nothing is exploited and nothing is invented: if the findings don't support a pa
 **Modelled on:** Qualys Policy Compliance, Microsoft Defender for Cloud's regulatory compliance dashboard, the
 compliance reports of PTaaS providers.
 
-Gives every control of four frameworks a status, with the evidence:
+Gives every control of each framework a status, with the evidence:
 
 | Framework | Controls | Source in Guardian |
 |---|---|---|
@@ -141,6 +144,9 @@ Gives every control of four frameworks a status, with the evidence:
 | ISO/IEC 27001:2022 Annex A | 93 controls | |
 | NIS2 Directive, Article 21(2) | 10 measures | |
 | Swiss revFADP / nLPD and the Data Protection Ordinance, data security | 9 requirements | |
+| PCI DSS v4.0, by requirement (titles paraphrased) | 44 requirements | |
+| SOC 2 Trust Services Criteria (common criteria, availability, confidentiality; titles paraphrased) | 38 criteria | |
+| CIS Microsoft Azure / CIS AWS Foundations (when those agents ran) | 54 / 38 by section | |
 
 | Status | Meaning |
 |---|---|

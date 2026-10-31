@@ -1,7 +1,10 @@
 # Compliance: evidence and the compliance PDF
 
 After each AI assessment the **Compliance** agent maps the findings to CIS Controls v8 IG1, ISO/IEC 27001:2022 Annex A,
-NIS2 Article 21(2), the Swiss revFADP / nLPD and, when the Azure agent ran, CIS Microsoft Azure Foundations. A
+NIS2 Article 21(2), the Swiss revFADP / nLPD, **PCI DSS v4.0** (by requirement) and **SOC 2** (Trust Services
+Criteria: common criteria, availability, confidentiality) and, when those agents ran, CIS Microsoft Azure and CIS AWS
+Foundations. PCI DSS and SOC 2 control titles are paraphrased (the official texts are copyrighted): use the control
+numbers to find the exact wording. A
 technical assessment can't see everything (policies, training, contracts, physical security), so you can add your own
 evidence and decisions, and export the result as a PDF or an evidence pack for an auditor.
 

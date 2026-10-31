@@ -15,6 +15,22 @@ Fix plan, report, compliance map and ticketing flow.
 
 The format is recognised from the file's content. Severity becomes critical / high / medium / low (CVSS 9+, 7+, 4+).
 
+## Pulling from a scanner's API (Tenable, Qualys, Rapid7)
+
+Instead of exporting a file, add a scanner connector for the site (Settings › Connectors › **Scanners**) and pick it in
+**Fix plan › Import results from another scanner › Or pull the open findings from a scanner connector**.
+
+| Scanner | Account | What is pulled |
+|---|---|---|
+| **Tenable Vulnerability Management** (cloud.tenable.com) | A user with the **Basic** role and API keys | Open and reopened vulnerabilities, medium and above, through the export API (can take a few minutes) |
+| **Qualys VMDR** | A **Reader** user with API access, limited to the customer's asset groups; your platform's API server | Confirmed detections, severity 3 to 5, with titles, CVEs and solutions from the knowledge base |
+| **Rapid7 InsightVM** (security console, port 3780) | A user whose role can only view site and asset data | Vulnerabilities per asset, CVSS 4 and above, with titles, CVEs, ports and proof |
+
+The connector test signs in with a light read and warns when the Tenable user can change things. Preview reads the
+findings; Import uses what the preview read (within 15 minutes) instead of reading again. Everything after that is the
+same as a file import. The credentials are read from the vault for the pull only (unlock it first), and redirects are
+not followed.
+
 ## How it works
 
 1. **Fix plan › Import results from another scanner**: choose the file, **Preview** (format, findings, devices, how many
@@ -42,4 +58,6 @@ The format is recognised from the file's content. Severity becomes critical / hi
 28 checks: each format with a sample export, info / log entries skipped, unsafe XML refused (entities, external DTD),
 unknown files and CSVs without the needed columns refused, preview not changing the run, merge of a duplicate, KEV +
 internet exposure → P1, new devices added, report rebuilt, re-importing the same file adding nothing, the Fix plan
-showing the source. Not yet tested with real exports from each product.
+showing the source. Not yet tested with real exports from each product. The API pulls were tested against stand-ins
+for each product's API (export polling, Qualys DOCTYPE handling and knowledge-base lookup, Rapid7 paging), not yet
+against real accounts.

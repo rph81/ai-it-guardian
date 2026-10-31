@@ -40,8 +40,8 @@ credentials, and public vulnerability lookups (NVD, CISA KEV, FIRST EPSS, endofl
 | **Orchestrator chat** (`guardian/chat.py`) | Ask about a run; ask for re-checks. It proposes orders; an operator confirms each one before an agent gets it. |
 | **Vault** (`guardian/vault.py`) | Users, passkeys (with PRF), encrypted secrets (API keys, connector passwords, SSH key), tamper-evident audit log. |
 | **Sign-in** (`guardian/auth.py`) | Passkeys (Touch ID, Face ID, Windows Hello, security keys); optionally Google / Microsoft accounts. Roles: viewer, operator, admin. |
-| **Connectors** (`guardian/connectors.py`) | Read-only accounts on systems (Synology, Proxmox, Linux SSH, SNMPv3, AD, e-mail domain…), suggested from the scan. Tested and stored now; used by agents in a later phase. |
-| **Code scan** (`guardian/codescan.py`, `/code`) | Paste a public GitHub link: Guardian reads one archive of that commit in memory (never runs it), applies static rules (install scripts, hidden code, exfiltration, credential theft, leaked keys, risky Actions, binaries, typosquats), checks dependencies with OSV (CVEs and known malware), and the Code agent reviews the flagged files and gives a verdict. Runs in its own process with memory, CPU and time limits. |
+| **Connectors** (`guardian/connectors.py`) | Read-only accounts on systems (AD, Microsoft 365, Azure, AWS, Google, SAP, Salesforce, Linux, Windows, Synology, Proxmox, firewalls, VMware, Docker, Kubernetes, scanners…), suggested from the scan and used by the connector agents; for customer sites through their collector. |
+| **Code scan** (`guardian/codescan.py`, `/code`) | Paste a GitHub, GitLab or Azure DevOps link (private ones with a read-only token): Guardian reads one archive of that commit in memory (never runs it), applies static rules (install scripts, hidden code, exfiltration, credential theft, leaked keys, risky Actions, binaries, typosquats), checks dependencies with OSV (CVEs and known malware), and the Code agent reviews the flagged files and gives a verdict. Runs in its own process with memory, CPU and time limits. |
 | **Report** (`guardian/report.py`) | One self-contained HTML file: score, summary, fix-first list, attack paths, compliance summary, findings with priority and evidence. |
 
 ## What it costs to run
@@ -111,6 +111,10 @@ exposure) and `previous` (the same issue in the previous assessment).
    **Gap features (now)**: vulnerability-disclosure page, SIEM output and MCP server, decoys, safe web app check,
    private repos, infrastructure-as-code and container image checks.
    **AWS (now)**: AWS posture agent with CIS AWS Foundations ([docs](docs/AWS.md)).
+   **More coverage (now)**: Infrastructure agent for firewalls (OPNsense, pfSense, FortiGate, UniFi), VMware vCenter,
+   Docker and Kubernetes ([docs](docs/INFRASTRUCTURE.md)); Google agent for Google Workspace and Google Cloud
+   ([docs](docs/GOOGLE.md)); pulling findings from Tenable, Qualys and Rapid7 by API; PCI DSS v4.0 and SOC 2 in the
+   compliance map; GitLab and Azure DevOps repositories on the Code page.
    **Next**: a **final testing phase** against real systems (real AI run, AD, Microsoft 365, fix recipes, NinjaOne,
    Azure, Windows, ServiceNow, alert channels, collector packages, outside penetration test of the gateway).
    Built-in VPN client: on hold pending a design review (the on-site collector covers most of the need).

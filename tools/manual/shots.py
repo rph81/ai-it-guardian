@@ -22,7 +22,7 @@ def js(code):
     return (cmd("Runtime.evaluate", expression=code, awaitPromise=True, returnByValue=True).get("result") or {}).get("value")
 def nav(path, wait=3):
     cmd("Page.navigate", url=B + path); time.sleep(wait); js("scrollTo(0,0)")
-def shot(name, selector=None, height=900, pad=0):
+def shot(name, selector=None, height=900, pad=0, y=None):
     if selector:
         r = js(f"(()=>{{const e=document.querySelector({json.dumps(selector)}); if(!e) return null; e.scrollIntoView({{block:'start'}}); const r=e.getBoundingClientRect(); return {{x:r.left+scrollX,y:r.top+scrollY,w:r.width,h:r.height}}}})()")
         time.sleep(0.6)
@@ -30,7 +30,7 @@ def shot(name, selector=None, height=900, pad=0):
             print("missing", selector); return
         clip = {"x": max(0, r["x"] - pad), "y": max(0, r["y"] - pad), "width": r["w"] + 2 * pad, "height": min(r["h"] + 2 * pad, height), "scale": 1}
     else:
-        clip = {"x": 0, "y": js("scrollY") or 0, "width": 1440, "height": height, "scale": 1}
+        clip = {"x": 0, "y": (js("scrollY") or 0) if y is None else y, "width": 1440, "height": height, "scale": 1}
     open(os.path.join(OUT, name + ".png"), "wb").write(base64.b64decode(cmd("Page.captureScreenshot", format="png", clip=clip, captureBeyondViewport=True)["data"]))
     print("saved", name)
 cmd("Page.enable"); cmd("Runtime.enable")
@@ -56,6 +56,9 @@ js("(()=>{const h=[...document.querySelectorAll('#s-connectors *')].find(e=>e.ch
 shot("10-settings-business", height=700)
 js("(()=>{const h=[...document.querySelectorAll('#s-connectors *')].find(e=>e.children.length===0&&e.textContent.trim().toLowerCase()==='cloud');if(h){h.scrollIntoView({block:'start'});scrollBy(0,-20)}})()"); time.sleep(0.8)
 shot("10-settings-cloud", height=420)
+for cat, name in (("infrastructure & storage", "10-settings-infra"), ("scanners", "10-settings-scanners")):
+    top = js("(()=>{const h=[...document.querySelectorAll('#s-connectors *')].find(e=>e.children.length===0&&e.textContent.trim().toLowerCase()==='%s');if(!h) return 0;h.scrollIntoView({block:'start'});return h.getBoundingClientRect().top+scrollY-20})()" % cat); time.sleep(0.8)
+    shot(name, height=700 if name.endswith("infra") else 470, y=top)
 for t, name in [("General", "10-site-general"), ("Ticketing", "10-site-ticketing"), ("Access", "10-site-access"), ("Disclosure", "10-site-disclosure"), ("Decoys", "10-site-decoys"), ("Schedule", "10-site-schedule")]:
     nav("/settings#sites", 2)
     js("(()=>{const z=[...document.querySelectorAll('#si-rows tr')].find(r=>r.textContent.includes('Zürich'));z.querySelector('button').click()})()"); time.sleep(1)
@@ -67,4 +70,7 @@ nav("/code", 3); js("(()=>{const r=[...document.querySelectorAll('#wc-history tr
 shot("12-web-check", "section[aria-labelledby=wc-title]", height=1800, pad=6)
 nav("/fix"); shot("11-fix", height=1400); shot("11-fix-accounts", "section[aria-labelledby=fa-title]", height=1800, pad=6)
 nav("/code"); shot("12-code-scan")
+nav("/", 3); js("showTab('comp')"); time.sleep(2.5)
+js("(()=>{const b=[...document.querySelectorAll('#workspace button')].find(x=>/PCI DSS/i.test(x.textContent));b&&b.click()})()"); time.sleep(1)
+shot("06b-compliance-pci", "#workspace", height=900, pad=6)
 ws.close(); chrome.terminate()

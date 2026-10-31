@@ -7,6 +7,7 @@ import csv
 import io
 import ipaddress
 import re
+import urllib.request
 import xml.etree.ElementTree as ET
 
 MAX_BYTES = 50 * 1024 * 1024
@@ -182,3 +183,196 @@ def parse(name, data):
     if len(rows) > MAX_FINDINGS:
         raise ImportError_(f"More than {MAX_FINDINGS} findings: export a smaller scope")
     return fmt, rows
+
+
+# -- pulling from a scanner's API through a connector (Tenable, Qualys, Rapid7 InsightVM) ------------------------------
+PULL_TYPES = {"tenable": "Tenable Vulnerability Management", "qualys": "Qualys VMDR", "rapid7": "Rapid7 InsightVM"}
+FORMATS.update({"tenable": "Tenable (API)", "qualys_api": "Qualys (API)", "rapid7_api": "Rapid7 InsightVM (API)"})
+TENABLE = "https://cloud.tenable.com"
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **kw):
+        return None
+
+
+def _api(method, url, headers=None, body=None, ctx=None, timeout=60, limit=60 * 2**20):
+    import json
+    import ssl
+    import urllib.error
+    h = {"User-Agent": "ai-guardian", **(headers or {})}
+    data = None
+    if body is not None:
+        data, h["Content-Type"] = json.dumps(body).encode(), "application/json"
+    opener = urllib.request.build_opener(_NoRedirect, urllib.request.HTTPSHandler(context=ctx or ssl.create_default_context()))
+    try:
+        with opener.open(urllib.request.Request(url, data=data, headers=h, method=method), timeout=timeout) as r:
+            raw = r.read(limit + 1)
+            if len(raw) > limit:
+                raise ImportError_("The scanner's answer is too large: limit the user to fewer assets")
+            return r.status, raw
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            raise ImportError_("The scanner refused the credentials (check the user, its role and API access)")
+        raise ImportError_(f"The scanner answered {e.code}")
+    except (urllib.error.URLError, OSError) as e:
+        raise ImportError_(f"Can't reach the scanner: {getattr(e, 'reason', e)}")
+
+
+def _json(raw):
+    import json
+    try:
+        return json.loads(raw.decode() or "null")
+    except ValueError:
+        raise ImportError_("The scanner returned something that isn't JSON")
+
+
+def _xml_api(raw):
+    """Qualys answers carry an external DOCTYPE line (no internal subset): drop it; anything with entities is still refused."""
+    text = raw.decode("utf-8", "replace")
+    if "<!entity" in text.lower() or re.search(r"<!DOCTYPE[^>]*\[", text, re.I):
+        raise ImportError_("XML with a DTD subset or entities is refused")
+    return _xml(re.sub(r"<!DOCTYPE[^>\[]*>", "", text, count=1).encode())
+
+
+def pull_tenable(f, wait=300, sleep=5):
+    import time
+    h = {"X-ApiKeys": f"accessKey={f['access_key']};secretKey={f['secret_key']}", "Accept": "application/json"}
+    _, raw = _api("POST", f"{TENABLE}/vulns/export", h, {"num_assets": 500, "filters": {
+        "severity": ["medium", "high", "critical"], "state": ["OPEN", "REOPENED"]}})
+    uuid = (_json(raw) or {}).get("export_uuid", "")
+    if not re.fullmatch(r"[0-9a-fA-F-]{20,64}", uuid):
+        raise ImportError_("Tenable didn't start the export")
+    end = time.time() + wait
+    while True:
+        st = _json(_api("GET", f"{TENABLE}/vulns/export/{uuid}/status", h)[1]) or {}
+        if st.get("status") == "FINISHED":
+            break
+        if st.get("status") in ("ERROR", "CANCELLED") or time.time() > end:
+            raise ImportError_(f"Tenable's export didn't finish ({st.get('status') or 'timed out'})")
+        time.sleep(sleep)
+    out = []
+    for chunk in (st.get("chunks_available") or [])[:200]:
+        for v in _json(_api("GET", f"{TENABLE}/vulns/export/{uuid}/chunks/{int(chunk)}", h)[1]) or []:
+            a, p, pl = v.get("asset") or {}, v.get("port") or {}, v.get("plugin") or {}
+            port = f"{p['port']}/{p.get('protocol', 'tcp').lower()}" if p.get("port") else None
+            sev = {"critical": "critical", "high": "high", "medium": "medium", "low": "low"}.get(str(v.get("severity")).lower(), "medium")
+            out.append(_finding(_ip(a.get("ipv4") or (a.get("ipv4s") or [None])[0]), port, pl.get("name"), sev, pl.get("cve") or [],
+                                " ".join(x for x in (pl.get("synopsis") or "", (v.get("output") or "")[:1500]) if x),
+                                pl.get("solution"), f"Tenable {pl.get('id')}", "Tenable"))
+            if len(out) >= MAX_FINDINGS:
+                return out
+    return out
+
+
+def pull_qualys(f):
+    import base64
+    import urllib.parse
+    server = (f.get("api_server") or "").strip().removeprefix("https://").rstrip("/")
+    if not re.fullmatch(r"qualysapi\.[a-z0-9.-]+\.(?:com|eu|ae|in|ca|au|uk|net)|[a-z0-9.-]+\.qualys\.(?:com|eu)", server):
+        raise ImportError_("The API server must be your Qualys API address, e.g. qualysapi.qg2.apps.qualys.eu")
+    h = {"X-Requested-With": "ai-guardian", "Authorization": "Basic " + base64.b64encode(f"{f['username']}:{f['password']}".encode()).decode()}
+    url = (f"https://{server}/api/2.0/fo/asset/host/vm/detection/?action=list&show_results=1&severities=3-5"
+           "&status=New,Active,Re-Opened&truncation_limit=1000")
+    dets = []
+    for _ in range(10):
+        root = _xml_api(_api("GET", url, h)[1])
+        for host in root.iter("HOST"):
+            ip = _ip(_t(host, "IP"))
+            for d in host.iter("DETECTION"):
+                if (_t(d, "TYPE") or "Confirmed") != "Confirmed":
+                    continue
+                dets.append((ip, _t(d, "QID"), _t(d, "SEVERITY"), _t(d, "PORT"), _t(d, "PROTOCOL"), _t(d, "RESULTS")))
+        nxt = root.find(".//WARNING/URL")
+        if nxt is None or not nxt.text or len(dets) >= MAX_FINDINGS:
+            break
+        url = nxt.text.strip()
+        if urllib.parse.urlsplit(url).hostname != server:
+            break
+    kb = {}
+    qids = sorted({q for _, q, *_ in dets if q and q.isdigit()})
+    for i in range(0, len(qids), 300):
+        root = _xml_api(_api("GET", f"https://{server}/api/2.0/fo/knowledge_base/vuln/?action=list&ids={','.join(qids[i:i + 300])}", h)[1])
+        for v in root.iter("VULN"):
+            kb[_t(v, "QID")] = (_t(v, "TITLE"), [c.text for c in v.iter("ID") if c.text and CVE.match(c.text)], _t(v, "SOLUTION"))
+    out = []
+    for ip, qid, sev, port, proto, res in dets[:MAX_FINDINGS]:
+        title, cves, fix = kb.get(qid, (f"Qualys QID {qid}", [], ""))
+        out.append(_finding(ip, f"{port}/{(proto or 'tcp').lower()}" if port else None, title,
+                            {"5": "critical", "4": "high", "3": "medium"}.get(sev, "medium"), cves, (res or "")[:1500],
+                            re.sub(r"<[^>]+>", " ", fix or "")[:1500], f"Qualys QID {qid}", "Qualys"))
+    return out
+
+
+def pull_rapid7(f, ctx):
+    import base64
+    base = f"https://{f['host']}:{int(f.get('port') or 3780)}/api/3"
+    h = {"Accept": "application/json", "Authorization": "Basic " + base64.b64encode(f"{f['username']}:{f['password']}".encode()).decode()}
+    assets, page = [], 0
+    while page < 10:
+        d = _json(_api("GET", f"{base}/assets?page={page}&size=500", h, ctx=ctx)[1]) or {}
+        assets += d.get("resources") or []
+        page += 1
+        if page >= ((d.get("page") or {}).get("totalPages") or 0):
+            break
+    details, out = {}, []
+    for a in assets[:1000]:
+        ip = _ip(a.get("ip"))
+        vd = _json(_api("GET", f"{base}/assets/{int(a['id'])}/vulnerabilities?size=500", h, ctx=ctx)[1]) or {}
+        for v in vd.get("resources") or []:
+            vid = str(v.get("id") or "")
+            if not re.fullmatch(r"[\w.-]{1,200}", vid):
+                continue
+            if vid not in details and len(details) < 3000:
+                x = _json(_api("GET", f"{base}/vulnerabilities/{vid}", h, ctx=ctx)[1]) or {}
+                score = ((x.get("cvss") or {}).get("v3") or {}).get("score") or ((x.get("cvss") or {}).get("v2") or {}).get("score")
+                details[vid] = (x.get("title") or vid, _sev_cvss(score) or {"Critical": "critical", "Severe": "high", "Moderate": "medium"}.get(x.get("severity"), "medium"),
+                                x.get("cves") or [], ((x.get("description") or {}).get("text") or "")[:800])
+            title, sev, cves, desc = details.get(vid, (vid, "medium", [], ""))
+            if sev in ("low", "info"):
+                continue
+            res = (v.get("results") or [{}])[0]
+            port = f"{res['port']}/{res.get('protocol', 'tcp')}" if res.get("port") else None
+            proof = re.sub(r"<[^>]+>", " ", res.get("proof") or "")[:1200]
+            out.append(_finding(ip, port, title, sev, cves, " ".join(x for x in (desc, proof) if x),
+                                f"See the solution for {vid} in InsightVM.", f"Rapid7 {vid}", "Rapid7 InsightVM"))
+            if len(out) >= MAX_FINDINGS:
+                return out
+    return out
+
+
+def pull(ctype, fields, ctx=None):
+    """Returns (format, findings) read from a scanner connector."""
+    if ctype == "tenable":
+        return "tenable", pull_tenable(fields)
+    if ctype == "qualys":
+        return "qualys_api", pull_qualys(fields)
+    if ctype == "rapid7":
+        return "rapid7_api", pull_rapid7(fields, ctx)
+    raise ImportError_("Not a scanner connector")
+
+
+def test_scanner(ctype, fields, ctx=None):
+    """A light read that proves the credentials work. Returns (level, message, details)."""
+    import base64
+    if ctype == "tenable":
+        h = {"X-ApiKeys": f"accessKey={fields['access_key']};secretKey={fields['secret_key']}", "Accept": "application/json"}
+        me = _json(_api("GET", f"{TENABLE}/session", h)[1]) or {}
+        perm = int(me.get("permissions") or 0)
+        det = [f"Signed in as {me.get('username', '?')}"]
+        if perm > 24:
+            det.append("This user can change things in Tenable (role above Scan Operator): use a Basic user.")
+            return "warn", "Connected, with a warning", det
+        return "ok", "Connected", det + ["Read-only role"]
+    if ctype == "qualys":
+        server = (fields.get("api_server") or "").strip().removeprefix("https://").rstrip("/")
+        h = {"X-Requested-With": "ai-guardian", "Authorization": "Basic " + base64.b64encode(f"{fields['username']}:{fields['password']}".encode()).decode()}
+        if not re.fullmatch(r"qualysapi\.[a-z0-9.-]+\.(?:com|eu|ae|in|ca|au|uk|net)|[a-z0-9.-]+\.qualys\.(?:com|eu)", server):
+            raise ImportError_("The API server must be your Qualys API address, e.g. qualysapi.qg2.apps.qualys.eu")
+        root = _xml_api(_api("GET", f"https://{server}/api/2.0/fo/asset/host/?action=list&truncation_limit=1", h)[1])
+        return "ok", "Connected", [f"Host list readable ({len(list(root.iter('HOST')))} shown of the first page)",
+                                   "Give the user the Reader role so it can't change scans or settings"]
+    h = {"Accept": "application/json", "Authorization": "Basic " + base64.b64encode(f"{fields['username']}:{fields['password']}".encode()).decode()}
+    d = _json(_api("GET", f"https://{fields['host']}:{int(fields.get('port') or 3780)}/api/3/assets?size=1", h, ctx=ctx)[1]) or {}
+    return "ok", "Connected", [f"{(d.get('page') or {}).get('totalResources', '?')} assets readable",
+                               "Use a role that can only view site and asset data"]

@@ -18,7 +18,9 @@ const Integrations = (() => {
 
   async function load() {
     try { d = await api("/api/siem"); m = await api("/api/mcp/tokens"); } catch (e) { return; }
-    api("/api/github-token").then(g => { $("in-gh-state").textContent = g.set ? "saved" : "not set"; $("in-gh-state").className = "tag " + (g.set ? "ok" : ""); }).catch(() => {});
+    const state = (id, g) => { $(id).textContent = g.set ? "saved" : "not set"; $(id).className = "tag " + (g.set ? "ok" : ""); };
+    api("/api/github-token").then(g => state("in-gh-state", g)).catch(() => {});
+    for (const p of ["gitlab", "azure_devops"]) api(`/api/repo-token/${p}`).then(g => state(`in-${p}-state`, g)).catch(() => {});
     $("in-siem").replaceChildren(...Object.keys(LABEL).map(k => {
       const c = d[k];
       const on = el("input", {type: "checkbox", id: `in-${k}-on`, checked: c.on});
@@ -68,5 +70,10 @@ const Integrations = (() => {
   const gh = async token => { try { await api("/api/github-token", {token}); $("in-gh").value = ""; load(); } catch (e) { alert(e.message); } };
   $("in-gh-save").addEventListener("click", () => { if ($("in-gh").value.trim()) gh($("in-gh").value.trim()); });
   $("in-gh-del").addEventListener("click", () => { if (confirm("Remove the GitHub token? Private repositories can't be scanned without it.")) gh(""); });
+  for (const [p, name] of [["gitlab", "GitLab"], ["azure_devops", "Azure DevOps"]]) {
+    const save = async token => { try { await api(`/api/repo-token/${p}`, {token}); $(`in-${p}`).value = ""; load(); } catch (e) { alert(e.message); } };
+    $(`in-${p}-save`).addEventListener("click", () => { if ($(`in-${p}`).value.trim()) save($(`in-${p}`).value.trim()); });
+    $(`in-${p}-del`).addEventListener("click", () => { if (confirm(`Remove the ${name} token? Private ${name} repositories can't be scanned without it.`)) save(""); });
+  }
   return {load};
 })();

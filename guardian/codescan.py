@@ -1,4 +1,4 @@
-"""Checks a public GitHub repository for malicious or risky code. Nothing from the repository is ever run.
+"""Checks a GitHub, GitLab or Azure DevOps repository for malicious or risky code. Nothing from the repository is ever run.
 
 The repository is downloaded as one archive of a fixed commit and read in memory: nothing is unpacked to disk,
 links are dropped, and size and file-count limits apply. Static rules flag suspicious lines, dependencies are
@@ -21,6 +21,7 @@ import re
 import sys
 import tarfile
 import time
+import zipfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -28,9 +29,17 @@ from pathlib import Path
 
 URL_RE = re.compile(r"^(?:https?://)?(?:www\.)?github\.com/([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/([A-Za-z0-9._-]{1,100}?)"
                     r"(?:\.git)?(?:/tree/([A-Za-z0-9._/-]{1,200}))?/?(?:[?#].*)?$")
+GITLAB_RE = re.compile(r"^(?:https?://)?gitlab\.com/((?:[A-Za-z0-9][A-Za-z0-9._-]{0,99}/){1,6}[A-Za-z0-9][A-Za-z0-9._-]{0,99}?)"
+                       r"(?:\.git)?(?:/-/tree/([A-Za-z0-9._/-]{1,200}))?/?(?:[?#].*)?$")
+ADO_RE = re.compile(r"^(?:https?://)?dev\.azure\.com/([A-Za-z0-9][A-Za-z0-9-]{0,49})/([A-Za-z0-9 ._%-]{1,128})/_git/"
+                    r"([A-Za-z0-9 ._%-]{1,128}?)/?(?:\?(?:.*&)?version=GB([A-Za-z0-9._/-]{1,200}))?(?:[&#].*)?$")
 REF_RE = re.compile(r"^[A-Za-z0-9._/-]{1,200}$")
 UA = "AI-IT-Guardian-codescan"
-TOKEN = os.environ.pop("GITHUB_TOKEN", "")          # handed over by the console in memory; removed from the environment
+# read-only tokens handed over by the console in memory; removed from the environment
+TOKEN = os.environ.pop("GITHUB_TOKEN", "")
+GITLAB_TOKEN = os.environ.pop("GITLAB_TOKEN", "")
+ADO_TOKEN = os.environ.pop("ADO_TOKEN", "")
+PROVIDERS = {"github": "GitHub", "gitlab": "GitLab", "azure_devops": "Azure DevOps"}
 
 MAX_REPO_KB = 400_000          # GitHub's own size estimate, checked before downloading
 MAX_ARCHIVE = 200 * 2**20      # compressed download
@@ -225,6 +234,7 @@ SECRETS = [
     ("aws-key", "high", "AWS access key", r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
     ("private-key", "high", "Private key", r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP |ENCRYPTED )?PRIVATE KEY-----"),
     ("github-token", "high", "GitHub token", r"\b(?:gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{60,})\b"),
+    ("gitlab-token", "high", "GitLab token", r"\bglpat-[A-Za-z0-9_-]{20,}\b"),
     ("slack-token", "high", "Slack token", r"\bxox[abprs]-[A-Za-z0-9-]{10,}"),
     ("stripe-live", "high", "Stripe live key", r"\b[sr]k_live_[0-9A-Za-z]{20,}"),
     ("anthropic-key", "high", "Anthropic API key", r"\bsk-ant-[A-Za-z0-9_-]{20,}"),
@@ -263,13 +273,42 @@ def parse_url(url, ref=None):
     return owner, repo, ref or None
 
 
+def parse(url, ref=None):
+    """Any supported repository link: {"provider", "owner", "repo", "ref", "url", "name"} or raises ValueError."""
+    u = (url or "").strip()
+    m = GITLAB_RE.match(u)
+    if m:
+        path, tree = m.group(1), m.group(2)
+        owner, repo = path.rsplit("/", 1)
+        out = {"provider": "gitlab", "owner": owner, "repo": repo, "url": f"https://gitlab.com/{path}", "name": path}
+    else:
+        m = ADO_RE.match(u)
+        if m:
+            org, project, repo, tree = m.group(1), urllib.parse.unquote(m.group(2)), urllib.parse.unquote(m.group(3)), m.group(4)
+            out = {"provider": "azure_devops", "owner": f"{org}/{project}", "repo": repo, "name": f"{org}/{project}/{repo}",
+                   "url": f"https://dev.azure.com/{org}/{urllib.parse.quote(project)}/_git/{urllib.parse.quote(repo)}"}
+        elif "gitlab" in u or "dev.azure.com" in u or "visualstudio.com" in u:
+            raise ValueError("Paste a link like https://gitlab.com/group/project or https://dev.azure.com/org/project/_git/repo")
+        else:
+            owner, repo, tree = parse_url(u)
+            out = {"provider": "github", "owner": owner, "repo": repo, "url": f"https://github.com/{owner}/{repo}", "name": f"{owner}/{repo}"}
+    ref = (ref or "").strip() or tree
+    if ref and (not REF_RE.match(ref) or ".." in ref):
+        raise ValueError("That branch, tag or commit name isn't valid")
+    return {**out, "ref": ref or None}
+
+
 def http(url, data=None, limit=8 * 2**20, accept="application/vnd.github+json", timeout=30):
     host = urllib.parse.urlsplit(url).hostname
-    if host not in ("api.github.com", "codeload.github.com", "api.osv.dev"):
+    if host not in ("api.github.com", "codeload.github.com", "api.osv.dev", "gitlab.com", "dev.azure.com"):
         raise ValueError(f"Not an allowed address: {host}")
     headers = {"User-Agent": UA, "Accept": accept}
     if TOKEN and host == "api.github.com":
         headers["Authorization"] = f"Bearer {TOKEN}"         # read-only token for private repositories, from the vault
+    if GITLAB_TOKEN and host == "gitlab.com":
+        headers["PRIVATE-TOKEN"] = GITLAB_TOKEN
+    if ADO_TOKEN and host == "dev.azure.com":
+        headers["Authorization"] = "Basic " + base64.b64encode(f":{ADO_TOKEN}".encode()).decode()
     if data is not None:
         data, headers["Content-Type"] = json.dumps(data).encode(), "application/json"
     req = urllib.request.Request(url, data=data, headers=headers)
@@ -315,12 +354,13 @@ def near(a, b):
 class Scan:
     def __init__(self, out, url, ref=None, ai=True, deps=True, by=""):
         self.out = Path(out)
-        self.owner, self.repo, self.ref = parse_url(url, ref)
+        r = parse(url, ref)
+        self.provider, self.owner, self.repo, self.ref = r["provider"], r["owner"], r["repo"], r["ref"]
         self.files = {}            # path -> text (only text files we read)
         self.sizes = {}            # path -> size, every regular file
         self.findings = []
-        self.d = {"id": self.out.name, "url": f"https://github.com/{self.owner}/{self.repo}",
-                  "repo": f"{self.owner}/{self.repo}", "ref": self.ref, "sha": None, "by": by, "ai_requested": ai,
+        self.d = {"id": self.out.name, "url": r["url"], "provider": self.provider,
+                  "repo": r["name"], "ref": self.ref, "sha": None, "by": by, "ai_requested": ai,
                   "deps_requested": deps, "started": time.time(), "finished": None, "status": "running",
                   "stage": "fetch", "stages": {s: {"state": "waiting", "text": ""} for s in STAGES},
                   "meta": {}, "facts": {}, "findings": self.findings, "checks": {}, "verdict": None, "error": None,
@@ -360,6 +400,11 @@ class Scan:
 
     # -- stages -------------------------------------------------------------------------------------------
     def fetch(self):
+        self.archive_kind = "tar"
+        if self.provider == "gitlab":
+            return self.fetch_gitlab()
+        if self.provider == "azure_devops":
+            return self.fetch_ado()
         self.stage("fetch", text="Looking up the repository")
         try:
             meta = gh(f"/repos/{self.owner}/{self.repo}")
@@ -407,42 +452,111 @@ class Scan:
         self.archive = data
         self.stage("fetch", "done", f"Commit {sha[:7]}, {len(data) / 2**20:.1f} MB archive")
 
+    def _not_found(self, e, name, token, setting):
+        if e.code in (401, 403, 404):
+            raise RuntimeError("Repository not found or not readable." + ("" if token else f" Private {name} repositories need a "
+                               f"read-only token ({setting})."))
+        raise RuntimeError(f"{name} answered {e.code}.")
+
+    def fetch_gitlab(self):
+        self.stage("fetch", text="Looking up the repository on GitLab")
+        pid = urllib.parse.quote(f"{self.owner}/{self.repo}", safe="")
+        api = f"https://gitlab.com/api/v4/projects/{pid}"
+        try:
+            meta = json.loads(http(api, accept="application/json"))
+            ref = self.ref or meta.get("default_branch") or "main"
+            c = json.loads(http(f"{api}/repository/commits/{urllib.parse.quote(ref, safe='')}", accept="application/json"))
+        except urllib.error.HTTPError as e:
+            self._not_found(e, "GitLab", GITLAB_TOKEN, "Settings › Integrations › GitLab")
+        sha = c.get("id") or ""
+        if not re.fullmatch(r"[0-9a-f]{40}", sha):
+            raise RuntimeError("GitLab returned an unexpected commit id.")
+        self.d.update(sha=sha, ref=ref, private=meta.get("visibility") != "public", repo=meta.get("path_with_namespace") or self.d["repo"])
+        self.d["meta"] = {"description": (meta.get("description") or "")[:300], "stars": meta.get("star_count"),
+                          "forks": meta.get("forks_count"), "created": meta.get("created_at"), "pushed": meta.get("last_activity_at"),
+                          "archived": meta.get("archived"), "fork_of": (meta.get("forked_from_project") or {}).get("path_with_namespace"),
+                          "owner_type": (meta.get("namespace") or {}).get("kind"), "default_branch": meta.get("default_branch"),
+                          "commit_date": c.get("committed_date"), "commit_message": (c.get("message") or "")[:200]}
+        self.stage("fetch", text=f"Downloading commit {sha[:7]}")
+        self.archive = http(f"{api}/repository/archive.tar.gz?sha={sha}", limit=MAX_ARCHIVE, accept="*/*", timeout=180)
+        self.stage("fetch", "done", f"Commit {sha[:7]}, {len(self.archive) / 2**20:.1f} MB archive")
+
+    def fetch_ado(self):
+        self.stage("fetch", text="Looking up the repository on Azure DevOps")
+        org, project = self.owner.split("/", 1)
+        api = (f"https://dev.azure.com/{org}/{urllib.parse.quote(project)}/_apis/git/repositories/{urllib.parse.quote(self.repo)}")
+        try:
+            meta = json.loads(http(f"{api}?api-version=7.1", accept="application/json"))
+            if (meta.get("size") or 0) > MAX_REPO_KB * 1024:
+                raise RuntimeError(f"Repository is too large to scan ({meta['size'] // 2**20} MB).")
+            ref = self.ref or (meta.get("defaultBranch") or "refs/heads/main").removeprefix("refs/heads/")
+            if re.fullmatch(r"[0-9a-f]{40}", ref):
+                sha = ref
+            else:
+                q = urllib.parse.urlencode({"searchCriteria.itemVersion.version": ref, "searchCriteria.$top": 1, "api-version": "7.1"})
+                sha = ((json.loads(http(f"{api}/commits?{q}", accept="application/json")).get("value") or [{}])[0]).get("commitId") or ""
+        except urllib.error.HTTPError as e:
+            self._not_found(e, "Azure DevOps", ADO_TOKEN, "Settings › Integrations › Azure DevOps")
+        if not re.fullmatch(r"[0-9a-f]{40}", sha):
+            raise RuntimeError(f"No branch, tag or commit called \"{ref}\".")
+        self.d.update(sha=sha, ref=ref, private=(meta.get("project") or {}).get("visibility") != "public")
+        self.d["meta"] = {"default_branch": (meta.get("defaultBranch") or "").removeprefix("refs/heads/"),
+                          "archived": meta.get("isDisabled")}
+        self.stage("fetch", text=f"Downloading commit {sha[:7]}")
+        q = urllib.parse.urlencode({"scopePath": "/", "recursionLevel": "Full", "versionDescriptor.version": sha,
+                                    "versionDescriptor.versionType": "commit", "$format": "zip", "download": "true", "api-version": "7.1"})
+        self.archive = http(f"{api}/items?{q}", limit=MAX_ARCHIVE, accept="application/zip", timeout=180)
+        self.archive_kind = "zip"
+        self.stage("fetch", "done", f"Commit {sha[:7]}, {len(self.archive) / 2**20:.1f} MB archive")
+
+    def entries(self):
+        """(path, size, kind, opener) for every member; kind is "file", "link" or "other". GitHub and GitLab archives
+        put everything under one top folder, which is dropped; Azure DevOps zips don't have one."""
+        if self.archive_kind == "zip":
+            with zipfile.ZipFile(io.BytesIO(self.archive)) as z:
+                for i in z.infolist():
+                    mode = (i.external_attr >> 16) & 0o170000
+                    kind = "link" if mode == 0o120000 else "other" if i.is_dir() else "file"
+                    yield i.filename.lstrip("/"), i.file_size, kind, (lambda i=i: z.open(i))
+            return
+        with tarfile.open(fileobj=io.BytesIO(self.archive), mode="r:gz") as tar:
+            for m in tar:
+                parts = m.name.split("/", 1)
+                path = parts[1] if len(parts) == 2 else ""
+                kind = "link" if m.issym() or m.islnk() else "file" if m.isreg() else "other"
+                yield path, m.size, kind, (lambda m=m: tar.extractfile(m))
+
     def unpack(self):
         """Reads the archive in memory. Nothing is written to disk; links and special files are dropped."""
         self.stage("unpack", text="Reading files")
         links = skipped = total = kept = 0
         binaries = []
-        with tarfile.open(fileobj=io.BytesIO(self.archive), mode="r:gz") as tar:
-            for m in tar:
-                if m.issym() or m.islnk():
-                    links += 1
-                    continue
-                if not m.isreg():
-                    continue
-                parts = m.name.split("/", 1)
-                if len(parts) < 2 or not parts[1]:
-                    continue
-                path = parts[1]
-                if path.startswith("/") or ".." in path.split("/"):
-                    skipped += 1
-                    continue
-                if len(self.sizes) >= MAX_FILES:
-                    raise RuntimeError(f"More than {MAX_FILES} files: too large to scan.")
-                total += m.size
-                if total > MAX_TOTAL:
-                    raise RuntimeError("Repository unpacks to more than 1.5 GB: too large to scan.")
-                self.sizes[path] = m.size
-                f = tar.extractfile(m)
-                head = f.read(min(m.size, MAX_TEXT))
-                kind = binary_kind(path, head[:8192])
-                if kind:
-                    binaries.append((path, kind, m.size))
-                    continue
-                if m.size > MAX_TEXT or kept + m.size > MAX_KEEP:
-                    skipped += 1
-                    continue
-                self.files[path] = head.decode("utf-8", "replace")
-                kept += m.size
+        for path, size, what, opener in self.entries():
+            if what == "link":
+                links += 1
+                continue
+            if what != "file" or not path:
+                continue
+            if path.startswith("/") or ".." in path.split("/"):
+                skipped += 1
+                continue
+            if len(self.sizes) >= MAX_FILES:
+                raise RuntimeError(f"More than {MAX_FILES} files: too large to scan.")
+            total += size
+            if total > MAX_TOTAL:
+                raise RuntimeError("Repository unpacks to more than 1.5 GB: too large to scan.")
+            self.sizes[path] = size
+            with opener() as f:
+                head = f.read(min(size, MAX_TEXT))
+            kind = binary_kind(path, head[:8192])
+            if kind:
+                binaries.append((path, kind, size))
+                continue
+            if size > MAX_TEXT or kept + size > MAX_KEEP:
+                skipped += 1
+                continue
+            self.files[path] = head.decode("utf-8", "replace")
+            kept += size
         self.archive = None
         self.binaries = binaries
         self.d["facts"].update(files=len(self.sizes), read=len(self.files), links_dropped=links, not_read=skipped,
@@ -925,7 +1039,7 @@ class Scan:
         return self.d
 
 
-CODE_AGENT = """You are Guardian's Code agent. You decide whether a public GitHub repository is malicious or risky to install,
+CODE_AGENT = """You are Guardian's Code agent. You decide whether a repository (GitHub, GitLab or Azure DevOps) is malicious or risky to install,
 for a small business that is about to use it. You review it statically: nothing from the repository is ever run, and you
 cannot run it either. Your tools only read files from a downloaded archive and record findings.
 

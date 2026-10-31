@@ -1709,6 +1709,64 @@ async def import_results(run_id: str, request: Request, commit: int = 0):
     return {**summary, "added": added, "merged": merged}
 
 
+
+_PULLED = {}            # (run, connector) -> (time, format, rows): a preview's rows, reused by the import that follows
+
+
+@app.get("/api/runs/{run_id}/pull-sources")
+def pull_sources(run_id: str, request: Request):
+    """Scanner connectors (Tenable, Qualys, Rapid7) of this run's site that findings can be pulled from."""
+    require(request, "operator")
+    site = run_site(run_dir(run_id))
+    return {"sources": [{"id": c["id"], "type": c["type"], "name": c.get("name") or importers.PULL_TYPES[c["type"]],
+                         "label": importers.PULL_TYPES[c["type"]]}
+                        for c in store.connectors() if c.get("type") in importers.PULL_TYPES and (c.get("site") or LOCAL) == site]}
+
+
+@app.post("/api/runs/{run_id}/pull/{cid}")
+async def pull_results(run_id: str, cid: str, request: Request, commit: int = 0):
+    """Preview (commit=0) or import (commit=1) the open findings of a scanner connector into this run."""
+    sid, s, user = require(request, "operator", unlocked=True)
+    d = run_dir(run_id)
+    if job.running and job.run_id == run_id:
+        raise HTTPException(409, "This run is still in progress")
+    c = store.get(cid)
+    if not c or c.get("type") not in importers.PULL_TYPES or (c.get("site") or LOCAL) != run_site(d):
+        raise HTTPException(404, "No such scanner connector for this site")
+    cached = _PULLED.get((run_id, cid))
+    if commit and cached and time.time() - cached[0] < 900:
+        fmt, rows = cached[1], cached[2]
+    else:
+        fields = store.fields_with_secrets(c)
+        ctx = None
+        if c["type"] == "rapid7":
+            ctx = conn._tls_context(fields["host"], int(fields.get("port") or 3780), fields.get("verify_tls"), c.get("pin"))[0]
+        vault.audit(user["email"], "secret-used", f"{importers.PULL_TYPES[c['type']]} connector to pull findings")
+        try:
+            fmt, rows = await asyncio.to_thread(importers.pull, c["type"], fields, ctx)
+        except (importers.ImportError_, conn.Result) as e:
+            raise HTTPException(400, getattr(e, "message", None) or str(e))
+        _PULLED[(run_id, cid)] = (time.time(), fmt, rows)
+    g = Graph(str(d))
+    known = set((g.data.get("assets") or {}))
+    summary = {"format": FORMAT_LABEL[fmt], "findings": len(rows), "devices": len({r["ip"] for r in rows if r["ip"]}),
+               "new_devices": len({r["ip"] for r in rows if r["ip"] and r["ip"] not in known}),
+               "by_severity": {sv: sum(1 for r in rows if r["severity"] == sv) for sv in importers.SEVERITIES if sv != "info"},
+               "sample": [{k: r[k] for k in ("ip", "port", "title", "severity", "cves")} for r in rows[:8]]}
+    if not commit:
+        return summary
+    _PULLED.pop((run_id, cid), None)
+    added, merged = await asyncio.to_thread(_merge_import, g, rows, fmt)
+    g.data.setdefault("imports", []).append({"t": time.time(), "by": user["name"], "file": c.get("name") or c["type"],
+                                             "format": FORMAT_LABEL[fmt], "added": added, "merged": merged})
+    g.save()
+    try:
+        report_mod.render(g, str(d / "report.html"))
+    except Exception as e:                                             # noqa: BLE001 - the import itself succeeded
+        print(f"report re-render failed: {e}", file=sys.stderr, flush=True)
+    vault.audit(user["email"], "results-imported", f"{run_id}: {FORMAT_LABEL[fmt]} via connector: {added} added, {merged} merged")
+    return {**summary, "added": added, "merged": merged}
+
 # -- ticketing (ServiceNow, ConnectWise PSA, Autotask, HaloPSA, Jira Service Management) ------------------------------
 TICKET_DEFAULT = {"system": "servicenow", "on": False, "auto": False, "threshold": "p2", "resolve_on_verify": False, "settings": {}}
 
@@ -2289,6 +2347,41 @@ class GithubTokenBody(BaseModel):
     token: str = ""                     # "" removes it
 
 
+REPO_TOKENS = {"gitlab": (r"glpat-[A-Za-z0-9_-]{20,80}", "a GitLab token (glpat-…)"),
+               "azure_devops": (r"[A-Za-z0-9]{52}|[A-Za-z0-9]{84}", "an Azure DevOps personal access token")}
+
+
+@app.get("/api/repo-token/{provider}")
+def repo_token_get(provider: str, request: Request):
+    require(request, "admin")
+    if provider not in REPO_TOKENS:
+        raise HTTPException(404, "Unknown provider")
+    return {"set": bool(vault.get("api_keys_set", {}).get(provider))}
+
+
+@app.post("/api/repo-token/{provider}")
+def repo_token_set(provider: str, body: GithubTokenBody, request: Request):
+    """Read-only tokens for private GitLab and Azure DevOps repositories (the GitHub one has its own route)."""
+    sid, s, user = require(request, "admin", unlocked=True)
+    if provider not in REPO_TOKENS:
+        raise HTTPException(404, "Unknown provider")
+    rx, what = REPO_TOKENS[provider]
+    t = body.token.strip()
+    if t and not re.fullmatch(rx, t):
+        raise HTTPException(400, f"That doesn't look like {what}")
+    rec = api_keys() or {"kind": "api-keys"}
+    if t:
+        rec[provider] = t
+    else:
+        rec.pop(provider, None)
+    vault.save_record("api-keys", "settings", rec)
+    flags = vault.get("api_keys_set", {})
+    flags[provider] = bool(t)
+    vault.put("api_keys_set", flags)
+    vault.audit(user["email"], "secret-changed", f"{provider.replace('_', ' ')} token " + ("saved" if t else "removed"))
+    return {"set": bool(t)}
+
+
 @app.get("/api/github-token")
 def github_token_get(request: Request):
     require(request, "admin")
@@ -2853,7 +2946,7 @@ def site_vdp_action(site_id: str, rid: str, body: VdpAction, request: Request):
 
 # -- remote sites through the on-site collector (phase B) -------------------------------------------------------------
 REMOTE_FILE = "remote.json"
-CLOUD_TYPES = ("m365", "azure", "aws", "ninjaone", "salesforce", "sap_btp")      # reachable from here; the rest need the collector
+CLOUD_TYPES = ("m365", "azure", "aws", "ninjaone", "salesforce", "sap_btp", "google_workspace", "gcp", "tenable", "qualys")      # reachable from here; the rest need the collector
 
 
 def _remote(d):
@@ -3357,7 +3450,7 @@ def launch(mode, run_id, sid, user, inbox=None):
 
 
 HANDOFF_TYPES = ("active_directory", "linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "m365", "windows", "azure", "ninjaone",
-                 "sap_abap", "sap_btp", "salesforce", "aws")
+                 "sap_abap", "sap_btp", "salesforce", "aws", "firewall", "vmware", "docker", "kubernetes", "google_workspace", "gcp")
 
 
 def connector_handoff(site_id=LOCAL, run=None):
@@ -4067,17 +4160,18 @@ async def code_scan(body: CodeScanBody, request: Request):
     sid, s, user = require(request, "operator")
     from guardian import codescan
     try:
-        owner, repo, ref = codescan.parse_url(body.url, body.ref)
+        r = codescan.parse(body.url, body.ref)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    ref = r["ref"]
     if codejob.scan_id:
         raise HTTPException(409, "A code scan is already running")
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LANG": "C.UTF-8", "PYTHONUNBUFFERED": "1",
            "HOME": str(BASE), **{k: v for k, v in os.environ.items() if k.startswith("GUARDIAN_")}}
-    gh_token = api_keys().get("github") if sid in vault.holders else None
-    if gh_token:
-        env["GITHUB_TOKEN"] = gh_token                           # read-only, for private repositories; in memory only
-        vault.audit(user["email"], "secret-used", "GitHub token for a code scan")
+    repo_token = api_keys().get(r["provider"]) if sid in vault.holders else None
+    if repo_token:                                               # read-only, for private repositories; in memory only
+        env[{"github": "GITHUB_TOKEN", "gitlab": "GITLAB_TOKEN", "azure_devops": "ADO_TOKEN"}[r["provider"]]] = repo_token
+        vault.audit(user["email"], "secret-used", f"{codescan.PROVIDERS[r['provider']]} token for a code scan")
     ai = body.ai
     if ai:
         key = api_keys().get("anthropic") if sid in vault.holders else None
@@ -4088,9 +4182,9 @@ async def code_scan(body: CodeScanBody, request: Request):
     d = CODE_DIR / scan_id
     d.mkdir(parents=True)
     (d / "scan.json").write_text(json.dumps({                        # placeholder until the scan writes its own
-        "id": scan_id, "url": f"https://github.com/{owner}/{repo}", "repo": f"{owner}/{repo}", "ref": ref, "by": user["name"],
+        "id": scan_id, "url": r["url"], "provider": r["provider"], "repo": r["name"], "ref": ref, "by": user["name"],
         "started": time.time(), "status": "running", "stage": "fetch", "stages": {}, "findings": [], "deps_requested": body.deps}))
-    cmd = [PYTHON, "-m", "guardian.codescan", str(d), f"https://github.com/{owner}/{repo}", "--by", user["name"]]
+    cmd = [PYTHON, "-m", "guardian.codescan", str(d), r["url"], "--by", user["name"]]
     if ref:
         cmd += ["--ref", ref]
     if not ai:
@@ -4098,7 +4192,7 @@ async def code_scan(body: CodeScanBody, request: Request):
     if not body.deps:
         cmd.append("--no-deps")
     codejob.scan_id = scan_id
-    vault.audit(user["email"], "code-scan", f"{owner}/{repo}" + (f" @ {ref}" if ref else ""))
+    vault.audit(user["email"], "code-scan", r["name"] + (f" @ {ref}" if ref else ""))
     asyncio.create_task(run_scan(cmd, env, d))
     return {"id": scan_id}
 

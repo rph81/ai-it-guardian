@@ -90,7 +90,7 @@ connects **out** to the server. The AI agents, the vault, reports, the fix plan 
 | `probe` | One host, up to 32 ports, up to 8 scripts from a fixed list of safe nmap scripts | Network, OS, Web, Firmware agents |
 | `http` | One GET or HEAD to `http(s)://IP[:port]/path` | Web agent |
 | `tls` | TLS handshake and certificate of one IP and port | Web, Firmware agents |
-| `connector` | `ad_query`, `linux_check`, `windows_check`, `synology_info`, `proxmox_get` with a sealed credential record | Connector agents |
+| `connector` | `ad_query`, `linux_check`, `windows_check`, `synology_info`, `proxmox_get`, `firewall_get`, `vmware_get`, `docker_query`, `k8s_query` with a sealed credential record | Connector agents |
 
 ## Phase A: what's built (30 Oct 2026)
 
@@ -160,7 +160,8 @@ pause, resume, disconnect (silent afterwards) and revocation.
 ### Phase C: connector checks at the customer
 
 - Connectors of a customer site for systems inside its network (Active Directory, Linux SSH, Windows, Synology,
-  Proxmox VE and Backup Server) always run through that site's collector. Cloud and SaaS connectors (Microsoft 365,
+  Proxmox VE and Backup Server, firewalls, VMware vCenter, Docker, Kubernetes) always run through that site's collector
+  (collector 1.2.0 or later for the last four; collectors update themselves). Cloud and SaaS connectors (Microsoft 365,
   Azure, AWS, Salesforce, SAP BTP…) are used from the server as before.
 - When an agent uses an on-site connector, the console seals the connector record (host, account, secret) to the
   collector's own X25519 key (ephemeral X25519 + HKDF-SHA256 + AES-256-GCM, bound to the connector id). Only that

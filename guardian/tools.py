@@ -13,7 +13,7 @@ import time
 import urllib.parse
 import urllib.request
 
-from . import access, awsposture, bizsys, netutil
+from . import access, awsposture, bizsys, google, netutil
 from . import attack as mitre
 from .collector import parse_nmap_xml
 from .controls import FRAMEWORKS, STATUSES
@@ -272,6 +272,47 @@ class Toolbox:
                     "connector": {"type": "string"}, "host": {"type": "string"},
                     "check": {"type": "string", "enum": list(access.WINDOWS_CHECKS)}},
                     "required": ["connector", "host", "check"], "additionalProperties": False}},
+            "firewall_get": {
+                "description": "Read one firewall API path through a firewall connector (GET only, fixed list per vendor; passwords and keys "
+                               "are hidden). OPNsense: " + ", ".join(access.FIREWALL_PATHS["opnsense"]) + ". pfSense (REST API package): "
+                               + ", ".join(access.FIREWALL_PATHS["pfsense"]) + ". FortiGate: " + ", ".join(access.FIREWALL_PATHS["fortigate"])
+                               + ". UniFi: /proxy/network/integration/v1/info, /sites, /sites/<site id>/devices.",
+                "input_schema": {"type": "object", "properties": {"connector": {"type": "string"}, "path": {"type": "string"}},
+                                 "required": ["connector", "path"], "additionalProperties": False}},
+            "vmware_get": {
+                "description": "Read one vCenter REST path through a VMware connector (GET only): " + ", ".join(
+                    p.replace(r"vm-\d{1,9}", "vm-<id>") for p in access.VMWARE_PATHS) + ".",
+                "input_schema": {"type": "object", "properties": {"connector": {"type": "string"}, "path": {"type": "string"}},
+                                 "required": ["connector", "path"], "additionalProperties": False}},
+            "docker_query": {
+                "description": "Read a Docker host through its read-only socket proxy: version, info (security options, rootless), "
+                               "containers (privileged, host network, user, Docker socket mounted, host mounts, published ports), images (tags, age).",
+                "input_schema": {"type": "object", "properties": {
+                    "connector": {"type": "string"}, "query": {"type": "string", "enum": list(access.DOCKER_QUERIES)}},
+                    "required": ["connector", "query"], "additionalProperties": False}},
+            "k8s_query": {
+                "description": "Run one fixed read on a Kubernetes cluster (summarised; secrets and configmaps are never read): "
+                               + ", ".join(access.K8S_QUERIES) + ".",
+                "input_schema": {"type": "object", "properties": {
+                    "connector": {"type": "string"}, "query": {"type": "string", "enum": list(access.K8S_QUERIES)}},
+                    "required": ["connector", "query"], "additionalProperties": False}},
+            "google_query": {
+                "description": "Run one fixed read-only Google Workspace read: users (2-step verification, admin, suspended, last "
+                               "login), admins (admins and their roles), domains, login_events and admin_events (last 30 days: counts "
+                               "and notable events such as suspicious logins or admin grants), alerts (Alert Center, 90 days).",
+                "input_schema": {"type": "object", "properties": {
+                    "connector": {"type": "string"}, "query": {"type": "string", "enum": list(google.WS_QUERIES)}},
+                    "required": ["connector", "query"], "additionalProperties": False}},
+            "gcp_query": {
+                "description": "Run one fixed read-only Google Cloud read over the projects the connector may read (or one project): "
+                               "projects, iam_policy (owners, editors, admin roles, public or personal members, audit configs), "
+                               "service_account_keys (user-managed keys and their age), firewalls_open (ingress from 0.0.0.0/0), "
+                               "instances (public IPs, default service account with full API access, OS Login, serial port), "
+                               "buckets (public members, public access prevention, uniform access), sql_instances (public IP, "
+                               "authorized networks, SSL, backups), log_sinks.",
+                "input_schema": {"type": "object", "properties": {
+                    "connector": {"type": "string"}, "query": {"type": "string", "enum": list(google.GCP_QUERIES)},
+                    "project": {"type": "string"}}, "required": ["connector", "query"], "additionalProperties": False}},
             # -- analyst tools: they read the run's findings and enrich them; nothing touches the network except the
             # EPSS and KEV feeds -------------------------------------------------------------------------------------
             "list_findings": {
@@ -545,6 +586,30 @@ class Toolbox:
                 nj["devices_with_pending"] = [{**d, "name": names.get(k)} for k, d in by.items() if d["id"] is not None]
         return r
 
+    def t_firewall_get(self, connector, path):
+        self.g.log(self.agent, f"firewall_get {path}")
+        return access.firewall_get(connector, path)
+
+    def t_vmware_get(self, connector, path):
+        self.g.log(self.agent, f"vmware_get {path}")
+        return access.vmware_get(connector, path)
+
+    def t_docker_query(self, connector, query):
+        self.g.log(self.agent, f"docker_query {query}")
+        return access.docker_query(connector, query)
+
+    def t_k8s_query(self, connector, query):
+        self.g.log(self.agent, f"k8s_query {query}")
+        return access.k8s_query(connector, query)
+
+    def t_google_query(self, connector, query):
+        self.g.log(self.agent, f"google_query {query}")
+        return access.google_query(connector, query)
+
+    def t_gcp_query(self, connector, query, project=None):
+        self.g.log(self.agent, f"gcp_query {query}" + (f" {project}" if project else ""))
+        return access.gcp_query(connector, query, project)
+
     def t_windows_check(self, connector, host, check):
         self.g.log(self.agent, f"windows_check {host} {check}")
         return access.windows_check(connector, host, check)
@@ -748,6 +813,18 @@ def describe(name, args):
         return f'Azure: {a.get("query", "").replace("_", " ")}' + (f' in {a["resource_group"]}' if a.get("resource_group") else "")
     if name == "azure_get":
         return f'Azure: {a.get("path", "").rsplit("/providers/", 1)[-1]}'
+    if name == "firewall_get":
+        return f'Firewall: {a.get("path")}'
+    if name == "vmware_get":
+        return f'vCenter: {a.get("path")}'
+    if name == "docker_query":
+        return f'Docker: {a.get("query")}'
+    if name == "k8s_query":
+        return f'Kubernetes: {a.get("query", "").replace("_", " ")}'
+    if name == "google_query":
+        return f'Google Workspace: {a.get("query", "").replace("_", " ")}'
+    if name == "gcp_query":
+        return f'Google Cloud: {a.get("query", "").replace("_", " ")}' + (f' ({a["project"]})' if a.get("project") else "")
     if name == "synology_info":
         return "Synology: DSM version and updates"
     if name == "proxmox_get":
@@ -784,4 +861,5 @@ def describe(name, args):
 # checks that touch the network or the internet (drawn as a pulse on the map); the rest only read the run's data
 ACTIVE = {"probe", "http_get", "tls_inspect", "cve_lookup", "eol_lookup", "web_search", "epss_lookup", "kev_details",
           "ad_query", "linux_check", "linux_vulnerable_packages", "synology_info", "proxmox_get",
-          "graph_get", "windows_check", "azure_query", "azure_get", "ninja_query", "sap_query", "btp_query", "salesforce_query", "aws_query"}
+          "graph_get", "windows_check", "azure_query", "azure_get", "ninja_query", "sap_query", "btp_query", "salesforce_query", "aws_query",
+          "firewall_get", "vmware_get", "docker_query", "k8s_query", "google_query", "gcp_query"}

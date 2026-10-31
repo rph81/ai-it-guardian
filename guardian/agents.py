@@ -371,6 +371,65 @@ are critical or high; audit log off, weak password parameters, stored RFC passwo
 hygiene low. If a read is refused for authorization reasons, record one info finding naming the missing
 authorization (S_TABU_NAM for the table, or the API role).""",
     },
+    "infra": {
+        "title": "Infrastructure",
+        "tools": ["list_connectors", "firewall_get", "vmware_get", "docker_query", "k8s_query", "inventory", "eol_lookup",
+                  "cve_lookup", "record_finding"],
+        "web": True,
+        "brief": """Your layer: the firewalls, hypervisors and container platforms, read from inside through their APIs the way
+Tenable / Qualys configuration audits, firewall analyzers and Kubernetes posture tools (Wiz KSPM, Sysdig, kube-bench) do.
+Everything is read-only: fixed paths and queries, read-only accounts, secrets hidden. Start with list_connectors, then:
+- Firewalls (firewall_get; paths depend on the vendor in list_connectors): firmware / version and pending updates
+  (then cve_lookup and eol_lookup: firewall CVEs are often actively exploited, check KEV); rules allowing any source to
+  any destination or any service, inbound rules or port forwards / VIPs open to the internet (management, RDP, SMB,
+  databases are high); admin access (HTTPS, SSH) allowed on the WAN interface; admin accounts, password policy and
+  two-factor; VPN: SSL VPN or IPsec with weak settings (old TLS, weak proposals, no MFA); logging off.
+- VMware (vmware_get): vCenter version and health (then eol_lookup and cve_lookup: vCenter and ESXi have KEV CVEs),
+  SSH or shell enabled on the appliance, NTP, local password policy, appliance firewall, ESXi host versions (/api/vcenter/host),
+  VMs (/api/vcenter/vm): guest OS end of life (/guest/identity), VMware Tools not running or outdated.
+- Docker (docker_query): Docker version, containers that are privileged, use the host network or PID namespace, mount
+  the Docker socket (full control of the host: high), mount sensitive host paths (/, /etc, /var/run), run as root,
+  publish ports on 0.0.0.0 for databases or admin tools; images older than a year.
+- Kubernetes (k8s_query): version (end of life with eol_lookup "kubernetes"), nodes (kubelet versions), pods_security
+  (privileged, host network / PID, root, privilege escalation, added capabilities, hostPath), services_exposed and
+  ingresses (without TLS), network_policies (namespaces without any), namespaces without Pod Security labels,
+  cluster_admin_bindings (anonymous or authenticated groups bound: critical; many users with cluster-admin: high),
+  rbac_wildcards.
+Record one finding per issue (asset: the system's IP, or "k8s/<cluster>/<namespace>" for cluster objects). Name the
+rule, VM, container or pod in the evidence (at most 20 plus the total). Severity: firewall or vCenter versions with
+actively exploited CVEs, management interfaces open to the internet, any-to-any inbound rules, Docker socket mounts and
+anonymous cluster-admin are critical or high; privileged containers, root and missing network policies medium;
+hygiene low. If a path or query is refused, record one info finding naming what the account is missing.""",
+    },
+    "google": {
+        "title": "Google Workspace & Cloud",
+        "tools": ["list_connectors", "google_query", "gcp_query", "record_finding"],
+        "web": True,
+        "brief": """Your layer: Google Workspace (identity, e-mail, files) and Google Cloud projects, reviewed the way Google's
+security health page, the CIS Google Workspace and CIS Google Cloud Foundations benchmarks, Wiz and Security Command
+Center do. You read through connectors with read-only scopes and roles. Start with list_connectors and only look at
+what is there.
+Google Workspace (google_query):
+- "users": users without 2-step verification (isEnrolledIn2Sv false); admins without it are critical; 2-step not
+  enforced; suspended users still holding admin; users not logged in for 90+ days.
+- "admins": more than 3 super admins, admins who never log in, broad custom roles.
+- "domains": unverified domains.
+- "login_events" and "admin_events": suspicious logins, leaked-password or hijack suspensions, admin privilege grants
+  and 2-step enforcement changes in the last 30 days.
+- "alerts": open Alert Center alerts (phishing, malware, suspicious login, government-backed attacks).
+Google Cloud (gcp_query, all projects unless you name one):
+- "iam_policy": allUsers / allAuthenticatedUsers anywhere (critical), personal @gmail.com members, many owners or
+  editors (primitive roles), service accounts with Owner or Editor, no audit-log configuration.
+- "service_account_keys": user-managed keys older than 90 days (keys should be avoided altogether).
+- "firewalls_open": SSH, RDP, databases or all ports open to 0.0.0.0/0; "instances": public IPs, default compute
+  service account with full API access (cloud-platform scope), serial port enabled, OS Login off, no Secure Boot.
+- "buckets": public members (high when it holds data), public access prevention not enforced, no uniform access.
+- "sql_instances": public IP with 0.0.0.0/0 authorized, SSL not required, backups off.
+- "log_sinks": no sink exporting audit logs.
+Record one finding per issue. asset is "google/<domain>" for Workspace and "gcp/<project>/<resource>" for Cloud. Name
+users and resources in the evidence (at most 20 plus the total). Never guess: if a read is refused, record one info
+finding naming the missing scope or role.""",
+    },
 }
 CONNECTOR_AGENTS = list(CONNECTOR_BRIEFS)
 LAYERS.update(CONNECTOR_BRIEFS)
@@ -428,7 +487,8 @@ Finish with a short summary: the paths, and which fixes break most of them.""",
         "tools": ["list_findings", "finding_details", "inventory", "control_catalog", "set_controls"],
         "web": False,
         "brief": """Your job: turn this assessment into audit evidence for four frameworks: cis_ig1, iso27001, nis2 and nlpd
-(Swiss data protection), plus cis_azure when the Azure agent ran (list_findings layer "azure") and cis_aws when the AWS agent ran (layer "aws"). For each framework, read control_catalog and give EVERY control a status with set_controls
+(Swiss data protection), plus cis_azure when the Azure agent ran (list_findings layer "azure") and cis_aws when the AWS agent ran (layer "aws"),
+and pci_dss and soc2 (both always: most of their controls are process controls, so not_assessed is common). For each framework, read control_catalog and give EVERY control a status with set_controls
 (batches of up to 100):
 - gap: a finding shows the control is not in place (cite the finding IDs).
 - partial: in place for some devices or accounts but not others, or only partly (cite findings or what was observed).

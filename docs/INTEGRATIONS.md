@@ -1,4 +1,4 @@
-# Integrations: SIEM output, GitHub, MCP server
+# Integrations: SIEM output, private repositories, MCP server
 
 Settings › Integrations (admins).
 
@@ -18,11 +18,17 @@ Event fields: type, run, site, site_name, id, title, severity, priority, asset, 
 attack (ATT&CK IDs), recommendation, first_seen, source. Secrets are stored like the alert channels' (server file
 permissions, needed for scheduled runs) and never returned to the browser.
 
-## GitHub (private repositories)
+## Private repositories (GitHub, GitLab, Azure DevOps)
 
-A fine-grained personal access token with **Contents: Read-only** and **Metadata: Read-only** on the repositories
-Guardian should read. Stored in the vault; handed to each code scan in memory (removed from the scan's environment as
-soon as it starts) and used only for api.github.com.
+| Service | Token |
+|---|---|
+| GitHub | A fine-grained personal access token with **Contents: Read-only** and **Metadata: Read-only** on the repositories Guardian should read |
+| GitLab (gitlab.com) | A project, group or personal access token with the **Reporter** role and only **read_api** and **read_repository** |
+| Azure DevOps (dev.azure.com) | A personal access token with only **Code: Read** |
+
+Stored in the vault; the matching one is handed to each code scan in memory (removed from the scan's environment as
+soon as it starts) and sent only to that service's API host. GitLab and Azure DevOps archives are read in memory like
+GitHub's: nothing is unpacked to disk and links are dropped.
 
 ## MCP server
 

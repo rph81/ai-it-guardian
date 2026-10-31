@@ -72,6 +72,15 @@ st.heartbeat(c_["id"], "connected", None, "zrh-collector-01", "1.1.0", ["10.20.0
 ss = v.get("site_settings")
 ss[sid]["schedule"] = {"quick": {"every": "daily", "time": "02:00", "day": 0, "mday": 1}, "full": {"every": "monthly", "time": "03:00", "day": 6, "mday": 1}, "last": {}}
 v.put("site_settings", ss)
+from guardian import connectors as _conn
+console.store = _conn.Store(v, console.STATE)
+# demo connectors: a firewall and a cluster at this network, a Tenable account to pull findings from (fictional values)
+for cid_, typ, name, fields, secrets in [
+        ("cdemo00001", "firewall", "OPNsense edge", {"vendor": "opnsense", "host": "192.0.2.1", "port": 443, "key_id": "demo", "verify_tls": False}, {"token": "demo"}),
+        ("cdemo00002", "kubernetes", "Kubernetes (apps)", {"host": "192.0.2.40", "port": 6443, "verify_tls": False}, {"token": "demo"}),
+        ("cdemo00003", "tenable", "Tenable (Muster AG)", {}, {"access_key": "demo", "secret_key": "demo"})]:
+    console.store.save_connector({"id": cid_, "type": typ, "name": name, "created": time.time(), "site": "local", "status": "ok",
+                                  "message": "Connected", "details": ["Demo connector"], "last_check": time.time(), "fields": fields, "secrets": secrets})
 tech = v.create_user("tech@demo.example", "Demo Technician", "operator"); v.update_user(tech, status="active")
 v.put("user_sites", {tech: [sid, bsid]})
 from guardian import importers

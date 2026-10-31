@@ -25,7 +25,7 @@
       <div>
         <div class="crumb"><b>//</b>Guardian / Code &amp; web apps</div>
         <h1 class="ptitle">Code / Scan.</h1>
-        <p class="sub">Paste a link to a GitHub repository (private ones with a token from Settings › Integrations). Guardian downloads the code, never runs it, and checks it for malicious or risky code and infrastructure-as-code mistakes. Below: safe checks of web apps and container images.</p>
+        <p class="sub">Paste a link to a GitHub, GitLab or Azure DevOps repository (private ones with a read-only token from Settings › Integrations). Guardian downloads the code, never runs it, and checks it for malicious or risky code and infrastructure-as-code mistakes. Below: safe checks of web apps and container images.</p>
       </div>
       <div class="who"><span class="chip"><i></i>Code is never executed</span></div>
     </div>
@@ -35,7 +35,7 @@
       <div class="kicker">Guardian / new scan</div>
       <h2 class="stitle" id="new-title">Repository.</h2>
       <form class="cs-form" id="form">
-        <div><label for="url">GitHub link</label><input id="url" class="mono" placeholder="https://github.com/owner/repository" autocomplete="off" spellcheck="false" required></div>
+        <div><label for="url">Repository link (GitHub, GitLab or Azure DevOps)</label><input id="url" class="mono" placeholder="https://github.com/owner/repository" autocomplete="off" spellcheck="false" required></div>
         <div><label for="ref">Branch, tag or commit</label><input id="ref" class="mono" placeholder="default branch" autocomplete="off" spellcheck="false"></div>
         <div class="row"><button class="btn solid" id="scan" type="submit">Scan repository</button><button class="btn danger hidden" id="stop" type="button">Stop</button></div>
       </form>
@@ -85,7 +85,7 @@
           <li><b>The Code agent has no shell, network or web search.</b> It can only read files from the archive and record findings.</li>
           <li><b>Runs in its own process</b> with memory, CPU and time limits, separate from the console.</li>
           <li>Only the report and the evidence lines are kept. Secrets found in the code are masked in the report.</li>
-          <li>Public repositories; private ones with a read-only GitHub token (Settings › Integrations).</li>
+          <li>Public repositories on GitHub, GitLab and Azure DevOps; private ones with a read-only token (Settings › Integrations).</li>
         </ul>
       </section>
     </div>
