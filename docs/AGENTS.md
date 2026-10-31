@@ -18,7 +18,7 @@ All agents follow the same rules (the `COMMON` prompt):
 Scanner ─▶ Discovery ─▶ Orchestrator ─▶ Specialists (in parallel, scaled for big sites)
                                             Network · OS & endpoints · Web & APIs · Firmware · Internet perimeter
                                             + through connectors: Active Directory · Microsoft 365 & Entra ID · Device fleet ·
-                                              Azure · Patch & configuration
+                                              Azure · Business systems · Patch & configuration
                                    ─▶ Analysts (one after another)
                                             Risk analyst ─▶ Attack paths ─▶ Compliance
                                    ─▶ Report writer
@@ -49,6 +49,7 @@ several copies for large sites; analysts always run as one copy.
 | **Microsoft 365 & Entra ID** | The cloud tenant, through the Microsoft 365 connector (see below) | Microsoft Graph, fixed read-only paths |
 | **Device fleet** | Intune-managed laptops and phones and Defender alerts, through the Microsoft 365 connector | Microsoft Graph, end-of-life database |
 | **Azure** | Azure subscriptions, through the Azure connector (separate app, Reader + Security Reader); see [AZURE.md](AZURE.md) | 29 fixed Resource Graph queries, 22 read-only management paths |
+| **Business systems** | SAP S/4HANA / ECC, SAP BTP and Salesforce through their connectors; see [BUSINESS-SYSTEMS.md](BUSINESS-SYSTEMS.md) | 10 fixed SAP table reads, 6 BTP reads, 9 Salesforce queries |
 
 ## Specialists that sign in through a connector (Agents v2, wave 2)
 

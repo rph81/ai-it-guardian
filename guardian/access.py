@@ -21,9 +21,11 @@ from . import connectors as conn
 _CONNECTORS = []        # [{"id", "type", "name", "fields": {...incl. secrets}, "pin"}]
 _SSH = {"private": None, "path": None}
 _STATE_DIR = None
-TYPES = {"active_directory", "linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "m365", "windows", "azure", "ninjaone"}
+TYPES = {"active_directory", "linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "m365", "windows", "azure", "ninjaone",
+         "sap_abap", "sap_btp", "salesforce"}
 CONNECTOR_AGENTS = {"ad": ["active_directory"], "patch": ["linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "windows", "ninjaone"],
-                    "m365": ["m365"], "devices": ["m365"], "azure": ["azure"]}
+                    "m365": ["m365"], "devices": ["m365"], "azure": ["azure"],
+                    "business": ["sap_abap", "sap_btp", "salesforce"]}
 
 
 def load(data, state_dir):
@@ -700,3 +702,38 @@ def windows_check(cid, host, check):
     if r.status_code != 0 and not out.strip():
         return {"error": re.sub(r"<[^>]+>", " ", err)[:400] or f"exit {r.status_code}"}
     return {"host": host, "check": check, "output": out[:24000], **({"truncated": True} if len(out) > 24000 else {})}
+
+
+# -- business systems (SAP S/4HANA / ECC, SAP BTP, Salesforce) -------------------------------------------------------
+def sap_query(cid, query):
+    from . import bizsys
+    c = _get(cid, {"sap_abap"})
+    if query not in bizsys.SAP_QUERIES:
+        return {"error": "unknown query", "allowed": sorted(bizsys.SAP_QUERIES)}
+    try:
+        rows, _ = bizsys.sap_read(c["fields"], c.get("pin"), query)
+    except bizsys.BizError as e:
+        return {"error": str(e)}
+    return bizsys.cap(rows)
+
+
+def btp_query(cid, query, name=None):
+    from . import bizsys
+    c = _get(cid, {"sap_btp"})
+    if query not in bizsys.BTP_QUERIES:
+        return {"error": "unknown query", "allowed": list(bizsys.BTP_QUERIES)}
+    try:
+        return bizsys.cap(bizsys.btp_read(c["fields"], query, name))
+    except bizsys.BizError as e:
+        return {"error": str(e)}
+
+
+def salesforce_query(cid, query):
+    from . import bizsys
+    c = _get(cid, {"salesforce"})
+    if query not in bizsys.SF_QUERIES:
+        return {"error": "unknown query", "allowed": sorted(bizsys.SF_QUERIES)}
+    try:
+        return bizsys.cap(bizsys.sf_read(c["fields"], query))
+    except bizsys.BizError as e:
+        return {"error": str(e)}

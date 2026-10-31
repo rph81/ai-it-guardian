@@ -49,6 +49,9 @@ for t, name in [("report", "03-report"), ("plan", "04-fix-plan"), ("paths", "05-
     shot(name, "#workspace", height=1500, pad=6)
 for s in ["connectors", "users", "security", "account", "ai", "scope", "evidence", "sites", "schedules", "ticketing", "appearance"]:
     nav(f"/settings#{s}"); shot(f"10-settings-{s}", height=1100)
+nav("/settings#connectors", 3)
+js("(()=>{const h=[...document.querySelectorAll('#s-connectors *')].find(e=>e.children.length===0&&e.textContent.trim().toLowerCase()==='business systems');if(h){h.scrollIntoView({block:'start'});scrollBy(0,-20)}})()"); time.sleep(0.8)
+shot("10-settings-business", height=700)
 for t, name in [("General", "10-site-general"), ("Ticketing", "10-site-ticketing"), ("Access", "10-site-access")]:
     nav("/settings#sites", 2)
     js("(()=>{const z=[...document.querySelectorAll('#si-rows tr')].find(r=>r.textContent.includes('Zürich'));z.querySelector('button').click()})()"); time.sleep(1)

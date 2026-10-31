@@ -153,6 +153,54 @@ CATALOG = {
                    F("client_secret", "Client secret", "password", secret=True),
                    F("subscriptions", "Only these subscription IDs (optional, space-separated)", mono=True)],
     },
+    "sap_abap": {
+        "label": "SAP S/4HANA / ECC", "icon": "SAP", "color": "#0a6ed1", "category": "Business systems",
+        "status": "available", "multi": True, "always": True,
+        "summary": "SAP ABAP systems (on-premise or private cloud)",
+        "checks": "Used by the Business systems agent: default users, users with SAP_ALL / SAP_NEW and admin roles, unused "
+                  "dialog users, old password hashes, RFC destinations that store passwords, trusted systems, security "
+                  "parameters (login, audit log, gateway, SNC), client settings, component versions and implemented notes.",
+        "steps": ["In SICF, activate /sap/bc/soap/rfc for the client Guardian reads (HTTPS only).",
+                  "SU01: create a System user GUARDIAN_RO (type System, not Dialog).",
+                  "PFCG: a role with S_RFC (RFC_TYPE FUNC, RFC_NAME RFC_READ_TABLE, ACTVT 16) and S_TABU_NAM (ACTVT 03) for "
+                  "only these tables: T000, USR02, UST04, AGR_USERS, RFCDES, RFCSYSACL, PAHI, CVERS, CWBNTCUST. Nothing else.",
+                  "Paste the HTTPS address (e.g. https://sap.example.com:44300), the client and the user below. The test warns "
+                  "you if the user has SAP_ALL or another powerful profile."],
+        "fields": [F("url", "HTTPS address", placeholder="https://sap.example.com:44300", mono=True),
+                   F("client", "Client", placeholder="100", mono=True), F("username", "User", default="GUARDIAN_RO", mono=True),
+                   F("password", "Password", "password", secret=True), VERIFY],
+    },
+    "sap_btp": {
+        "label": "SAP BTP", "icon": "BTP", "color": "#0a6ed1", "category": "Business systems",
+        "status": "available", "multi": True, "always": True,
+        "summary": "SAP Business Technology Platform global account",
+        "checks": "Used by the Business systems agent: subaccounts (production, beta features), role collections and who "
+                  "holds the administrator ones, trusted identity providers (default SAP ID service still active), and "
+                  "destinations without HTTPS, with basic authentication or trusting every certificate.",
+        "steps": ["BTP cockpit › your global account's admin subaccount › Instances: create Cloud Management Service, plan "
+                  "central, then a service key. That key reads accounts and subaccounts only; give it no other roles.",
+                  "Optional, for role collections and trust: create an Authorization and Trust Management instance, plan "
+                  "apiaccess, and a service key. Optional, for destinations: a Destination service key.",
+                  "Paste each service key (the whole JSON) below. Guardian only calls GET endpoints; destination passwords "
+                  "are dropped before anything reaches the agents."],
+        "fields": [F("cis_key", "Cloud Management service key (JSON)", "password", secret=True, json=True),
+                   F("authz_key", "Authorization API service key (optional, JSON)", "password", secret=True, required=False, json=True),
+                   F("destination_key", "Destination service key (optional, JSON)", "password", secret=True, required=False, json=True)],
+    },
+    "salesforce": {
+        "label": "Salesforce", "icon": "SF", "color": "#00a1e0", "category": "Business systems",
+        "status": "available", "multi": True, "always": True,
+        "summary": "Salesforce org",
+        "checks": "Used by the Business systems agent: Health Check score and risky settings, users with Modify All Data or "
+                  "Manage Users, inactive users, MFA methods, active guest users, connected apps, failed logins.",
+        "steps": ["Setup › Users: create an API-only user guardian-ro with a read-only profile plus the View Setup and "
+                  "Configuration permission (needed for Health Check).",
+                  "Setup › App Manager › New Connected App: enable OAuth, scope 'Manage user data via APIs (api)', enable "
+                  "Client Credentials Flow and set Run As to guardian-ro.",
+                  "Paste the My Domain address (https://yourcompany.my.salesforce.com), the consumer key and secret below."],
+        "fields": [F("instance_url", "My Domain address", placeholder="https://yourcompany.my.salesforce.com", mono=True),
+                   F("client_id", "Consumer key", mono=True), F("client_secret", "Consumer secret", "password", secret=True)],
+    },
     "ninjaone": {
         "label": "NinjaOne (RMM)", "icon": "N1", "color": "#2b6cb0", "category": "Endpoints & network",
         "status": "available", "multi": False, "always": True,
@@ -807,6 +855,11 @@ def _test_windows(f):
     return _done(worst, {"ok": "Connected", "warn": "Connected, with a warning", "error": "Some machines didn't answer"}[worst], details)
 
 
+def _bizsys():
+    from . import bizsys                       # imported late: bizsys imports this module
+    return bizsys
+
+
 def test(ctype, fields, pin=None, state_dir=None, vault=None):
     """Run a connection test. Returns (level, message, details, pin)."""
     tests = {
@@ -821,6 +874,9 @@ def test(ctype, fields, pin=None, state_dir=None, vault=None):
         "m365": lambda: _test_m365(fields),
         "azure": lambda: _test_azure(fields),
         "ninjaone": lambda: _test_ninjaone(fields),
+        "sap_abap": lambda: _bizsys().test_sap(fields, pin),
+        "sap_btp": lambda: _bizsys().test_btp(fields),
+        "salesforce": lambda: _bizsys().test_sf(fields),
         "windows": lambda: _test_windows(fields),
     }
     if ctype not in tests:
@@ -858,9 +914,13 @@ def validate(ctype, fields):
             v = v if v in fd["options"] else fd.get("default")
         else:
             v = (v or "").strip() if isinstance(v, str) else v
+            if v and fd.get("json"):                      # pasted service keys: line breaks are only JSON whitespace
+                v = re.sub(r"[\r\n]+", " ", v)
+                if len(v) > 16000:
+                    raise ValueError(f"{fd['label']} is too long")
             if v and fd["kind"] != "textarea" and re.search(r"[\r\n]", v):
                 raise ValueError(f"{fd['label']} can't contain line breaks")
-            if v and len(v) > 4000:
+            if v and len(v) > 4000 and not fd.get("json"):
                 raise ValueError(f"{fd['label']} is too long")
         out[fd["name"]] = v
     for name in ("host",):
@@ -873,7 +933,7 @@ def validate(ctype, fields):
         out["hosts"] = "\n".join(hs)
     if out.get("url") and not re.match(r"^https?://[A-Za-z0-9.\-:\[\]]+(:\d+)?/?$", out["url"]):
         raise ValueError("The address must look like http://192.168.1.89 or https://ha.example.com:8123")
-    for g in ("tenant_id", "client_id"):
+    for g in ("tenant_id", "client_id") if ctype in ("m365", "azure") else ():
         if out.get(g) and not re.fullmatch(r"[0-9a-fA-F-]{36}", out[g]):
             raise ValueError(f"{g.replace('_', ' ').capitalize()} must be a GUID")
     if out.get("domain") and not re.match(r"^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$", out["domain"]):

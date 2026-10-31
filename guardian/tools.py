@@ -13,7 +13,7 @@ import time
 import urllib.parse
 import urllib.request
 
-from . import access, netutil
+from . import access, bizsys, netutil
 from . import attack as mitre
 from .collector import parse_nmap_xml
 from .controls import FRAMEWORKS, STATUSES
@@ -214,6 +214,28 @@ class Toolbox:
                                "of a resource. Example: /subscriptions/<id>/resourceGroups/<rg>/providers/Microsoft.Sql/servers/<name>/firewallRules",
                 "input_schema": {"type": "object", "properties": {"connector": {"type": "string"}, "path": {"type": "string"}},
                                  "required": ["connector", "path"], "additionalProperties": False}},
+            "sap_query": {
+                "description": "Read one fixed SAP table view through an SAP S/4HANA / ECC connector (RFC_READ_TABLE, read-only; password "
+                               "columns are never read, RFC destinations come back as flags). Queries: clients (T000 change settings), "
+                               "default_users, users (USR02: type, lock flag, last logon TRDAT, valid-to, password hash version CODVN), "
+                               "critical_profiles (SAP_ALL, SAP_NEW, S_A.*), critical_roles, rfc_destinations (stored_password, trusted), "
+                               "trusted_systems, security_parameters (PAHI history of login/, rsau/, auth/, snc/, gw/ parameters: use the "
+                               "latest PARDATE per PARNAME), components (CVERS releases and support packages), applied_notes.",
+                "input_schema": {"type": "object", "properties": {
+                    "connector": {"type": "string"}, "query": {"type": "string", "enum": list(bizsys.SAP_QUERIES)}},
+                    "required": ["connector", "query"], "additionalProperties": False}},
+            "btp_query": {
+                "description": "Read SAP BTP through a BTP connector (GET only): global_account, subaccounts, role_collections, "
+                               "role_collection_users (give name, e.g. 'Global Account Administrator' or 'Subaccount Administrator'), "
+                               "identity_providers, destinations (name, type, host, https, authentication, proxy, trust_all; no credentials).",
+                "input_schema": {"type": "object", "properties": {
+                    "connector": {"type": "string"}, "query": {"type": "string", "enum": list(bizsys.BTP_QUERIES)}, "name": {"type": "string"}},
+                    "required": ["connector", "query"], "additionalProperties": False}},
+            "salesforce_query": {
+                "description": "Run one fixed read-only SOQL query through a Salesforce connector: " + ", ".join(bizsys.SF_QUERIES) + ".",
+                "input_schema": {"type": "object", "properties": {
+                    "connector": {"type": "string"}, "query": {"type": "string", "enum": list(bizsys.SF_QUERIES)}},
+                    "required": ["connector", "query"], "additionalProperties": False}},
             "ninja_query": {
                 "description": "Run one fixed read on the NinjaOne RMM connector: " + ", ".join(access.NINJA_QUERIES) + ".",
                 "input_schema": {"type": "object", "properties": {
@@ -451,6 +473,18 @@ class Toolbox:
         self.g.log(self.agent, f"azure_get {path}")
         return access.azure_get(connector, path)
 
+    def t_sap_query(self, connector, query):
+        self.g.log(self.agent, f"sap_query {query}")
+        return access.sap_query(connector, query)
+
+    def t_btp_query(self, connector, query, name=None):
+        self.g.log(self.agent, f"btp_query {query}" + (f" {name}" if name else ""))
+        return access.btp_query(connector, query, name)
+
+    def t_salesforce_query(self, connector, query):
+        self.g.log(self.agent, f"salesforce_query {query}")
+        return access.salesforce_query(connector, query)
+
     def t_ninja_query(self, connector, query):
         self.g.log(self.agent, f"ninja_query {query}")
         r = access.ninja_query(connector, query)
@@ -658,6 +692,12 @@ def describe(name, args):
         return f'Microsoft 365: {a.get("path")}'
     if name == "windows_check":
         return f'{a.get("host")}: {a.get("check", "").replace("_", " ")}'
+    if name == "sap_query":
+        return f'SAP: {a.get("query", "").replace("_", " ")}'
+    if name == "btp_query":
+        return f'SAP BTP: {a.get("query", "").replace("_", " ")}'
+    if name == "salesforce_query":
+        return f'Salesforce: {a.get("query", "").replace("_", " ")}'
     if name == "ninja_query":
         return f'NinjaOne: {a.get("query", "").replace("_", " ")}'
     if name == "azure_query":
@@ -700,4 +740,4 @@ def describe(name, args):
 # checks that touch the network or the internet (drawn as a pulse on the map); the rest only read the run's data
 ACTIVE = {"probe", "http_get", "tls_inspect", "cve_lookup", "eol_lookup", "web_search", "epss_lookup", "kev_details",
           "ad_query", "linux_check", "linux_vulnerable_packages", "synology_info", "proxmox_get",
-          "graph_get", "windows_check", "azure_query", "azure_get", "ninja_query"}
+          "graph_get", "windows_check", "azure_query", "azure_get", "ninja_query", "sap_query", "btp_query", "salesforce_query"}

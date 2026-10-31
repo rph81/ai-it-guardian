@@ -309,6 +309,13 @@ The left menu lists the sections. Some are for admins only.
 With more than one site, the **Site** box at the top chooses whose connectors you see and add; a connector belongs to
 one site. Today the connector agents use This network's connectors.
 
+![Business systems connectors](manual/10-settings-business.png)
+
+**Business systems** connectors (SAP S/4HANA / ECC, SAP BTP, Salesforce) feed the Business systems agent: default and
+powerful SAP users, RFC destinations with stored passwords, security parameters, support-package level; BTP
+administrators, identity providers and destinations; Salesforce Health Check, admins without MFA, guest users. Each
+needs a read-only technical user or service key; the steps are on the card. Details: [BUSINESS-SYSTEMS.md](BUSINESS-SYSTEMS.md).
+
 Connectors let Guardian look **inside** systems with a read-only account you create. **Suggested from your last scan**
 proposes connectors for devices it found (e.g. a Synology NAS); **All connectors** lists every type with what it checks
 and step-by-step instructions. Each connector has a **Test** that checks the account and warns if it has more rights

@@ -1,0 +1,168 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guardian Final Queue</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Saira+Semi+Condensed:wght@400;500;600&display=swap">
+<style>
+:root{--bg:#121311;--bg2:#161815;--panel:#1a1c18;--panel2:#20231e;--line:#2d3029;--line2:#3a3e35;--text:#ecede6;--muted:#8e9286;--dim:#62665c;
+  --accent:#f07c3e;--ok:#a9c47c;--warn:#e6b450;--high:#f07c3e;--crit:#ef5a4c;--low:#7fb7c9;--info:#a993e6;--new:#7fd1b9;--on:#16120d;
+  --head:"Chakra Petch",sans-serif;--body:"Saira Semi Condensed",sans-serif;--mono:ui-monospace,Menlo,monospace}
+@media (prefers-color-scheme:light){:root{--bg:#f2f1ea;--bg2:#ebe9e0;--panel:#f9f8f3;--panel2:#fff;--line:#dcd9cd;--line2:#c8c4b5;--text:#1c1d18;--muted:#686a5f;--dim:#9a9b8f;
+  --accent:#d35f1f;--ok:#5a8429;--warn:#b7801a;--high:#d35f1f;--crit:#cf3a2c;--low:#3f7f96;--info:#7458cc;--new:#1f8a6d;--on:#fff}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 var(--body)}
+.banner{background:var(--accent);color:var(--on);font:600 12px var(--head);letter-spacing:.06em;text-align:center;padding:7px;text-transform:uppercase}
+main{max-width:1240px;margin:0 auto;padding:24px 16px 60px}
+.crumb{font:600 11px var(--head);letter-spacing:.18em;color:var(--muted);text-transform:uppercase}.crumb b{color:var(--accent)}
+h1{font:700 clamp(28px,4.4vw,48px)/1.05 var(--head);text-transform:uppercase;margin:12px 0 6px}
+.sub{color:var(--muted);margin:0;max-width:820px}
+h2{font:600 clamp(18px,2vw,24px) var(--head);text-transform:uppercase;letter-spacing:.03em;margin:4px 0}
+h3{font:600 15.5px var(--head);margin:6px 0 4px}
+.kicker{font:600 10.5px var(--head);letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.note{font-size:13px;color:var(--muted);margin:6px 0 0}
+.section{position:relative;border:1px solid var(--line);background:linear-gradient(180deg,var(--panel),var(--bg2));padding:20px 22px;margin-top:20px}
+.section::before{content:"";position:absolute;left:-1px;top:-1px;width:16px;height:16px;border-left:2px solid var(--accent);border-top:2px solid var(--accent)}
+.tag{display:inline-block;font:600 10px var(--head);letter-spacing:.12em;text-transform:uppercase;padding:3px 7px;border:1px solid var(--line2);color:var(--muted);white-space:nowrap}
+.tag.new{color:var(--new);border-color:var(--new)}.tag.crit{color:var(--crit);border-color:var(--crit)}.tag.high{color:var(--high);border-color:var(--high)}
+.tag.med{color:var(--warn);border-color:var(--warn)}.tag.ok{color:var(--ok);border-color:var(--ok)}.tag.info{color:var(--info);border-color:var(--info)}.tag.low{color:var(--low);border-color:var(--low)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-top:14px}
+.card{border:1px solid var(--line2);background:var(--panel2);padding:14px;position:relative}
+.card.new{border-color:color-mix(in srgb,var(--new) 60%,var(--line2))}
+.card .what{font-size:13.5px;margin:6px 0}
+.card dl{display:grid;grid-template-columns:86px minmax(0,1fr);gap:4px 10px;font-size:12.5px;margin:8px 0 0}
+.card dt{font:600 10px var(--head);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding-top:2px}.card dd{margin:0}
+.card ul{margin:6px 0 0;padding-left:18px;font-size:12.5px}.card li{margin:2px 0}
+.pipe{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:0;margin-top:14px}
+@media (max-width:900px){.pipe{grid-template-columns:1fr 1fr}}
+.st{border-top:3px solid var(--line2);padding:9px 10px 0 0;font:600 11px var(--head);letter-spacing:.08em;text-transform:uppercase}
+.st small{display:block;font:500 12px var(--body);letter-spacing:0;text-transform:none;color:var(--muted);margin-top:3px}
+.st.n{border-color:var(--new)}.st.n b{color:var(--new)}
+.two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}
+@media (max-width:900px){.two{grid-template-columns:1fr}}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+.tw{overflow-x:auto}table.wide{min-width:760px}
+th{font:600 10px var(--head);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);text-align:left;padding:8px;border-bottom:1px solid var(--line2)}
+td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+.f{border:1px solid var(--line2);border-left:3px solid var(--crit);background:var(--panel2);padding:14px 16px;margin-top:12px}
+.f.h{border-left-color:var(--high)}
+.prio{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);margin-top:10px}
+.prio div{background:var(--panel);padding:9px}.prio b{display:block;font:700 18px var(--head)}.prio span{font:600 9.5px var(--head);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.path{display:flex;flex-wrap:wrap;gap:0;margin-top:12px;align-items:stretch}
+.step{flex:1;min-width:150px;border:1px solid var(--line2);background:var(--bg2);padding:10px;font-size:12.5px;position:relative}
+.step+.step{margin-left:18px}
+.step+.step::before{content:"\25B6";position:absolute;left:-15px;top:50%;transform:translateY(-50%);color:var(--accent);font-size:11px}
+.step b{font:600 11px var(--head);letter-spacing:.06em;text-transform:uppercase;display:block;margin-bottom:3px}
+.step.choke{border-color:var(--accent);box-shadow:inset 0 -2px 0 var(--accent)}
+.ctl{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;margin-top:12px}
+.ctl div{border:1px solid var(--line2);padding:8px;font-size:12px;background:var(--panel2)}
+.ctl div b{display:block;font:600 11px var(--head)}
+.ctl .m{border-left:3px solid var(--ok)}.ctl .p{border-left:3px solid var(--warn)}.ctl .g{border-left:3px solid var(--crit)}.ctl .na{border-left:3px solid var(--dim);color:var(--muted)}
+.bar{height:8px;background:var(--line);margin-top:6px;display:flex}.bar i{display:block;height:100%}
+.btn{font:600 12px var(--head);letter-spacing:.04em;color:var(--text);background:var(--panel);border:1px solid var(--line2);padding:7px 12px;cursor:pointer}
+.btn.go{background:var(--accent);border-color:var(--accent);color:var(--on)}
+select,input{border:1px solid var(--line2);background:var(--bg2);color:var(--text);padding:7px 9px;font:13px var(--body)}
+.wave{border-left:3px solid var(--accent);padding:4px 0 4px 14px;margin-top:14px}
+.wave h3{margin:0}
+.q{border:1px dashed var(--accent);padding:12px 14px;margin-top:20px;font-size:13.5px}
+.q b{font-family:var(--head);color:var(--accent)}
+code{font:12px var(--mono);background:var(--bg2);border:1px solid var(--line);padding:1px 5px}
+
+.flow{display:grid;grid-template-columns:minmax(0,1fr) 140px minmax(0,1fr);gap:0;align-items:stretch;margin-top:14px}
+@media (max-width:820px){.flow{grid-template-columns:1fr}.arrow{min-height:70px}}
+.box{border:1px solid var(--line2);background:var(--panel2);padding:14px}
+.box ul{margin:8px 0 0;padding-left:18px;font-size:13px}
+.arrow{display:flex;flex-direction:column;justify-content:center;align-items:center;font:600 10.5px var(--head);letter-spacing:.1em;text-transform:uppercase;color:var(--accent);text-align:center;gap:4px}
+.arrow i{font-style:normal;font-size:20px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok);margin-right:6px}
+.dot.warn{background:var(--warn)}.dot.off{background:var(--dim)}
+.btn{font:600 11px var(--head);letter-spacing:.1em;text-transform:uppercase;border:1px solid var(--line2);background:var(--panel);color:var(--text);padding:8px 12px;cursor:default}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on)}.btn.danger{color:var(--crit);border-color:var(--crit)}
+.code{font:12.5px var(--mono);background:var(--bg);border:1px solid var(--line2);padding:12px;overflow-x:auto;white-space:pre;margin-top:8px}
+.field{display:grid;gap:4px;margin-top:10px}.field label{font:600 10px var(--head);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.input{border:1px solid var(--line2);background:var(--bg);padding:8px 10px;font-size:14px}
+.steps{counter-reset:s;list-style:none;padding:0;margin:10px 0 0}.steps li{counter-increment:s;padding:6px 0 6px 34px;position:relative;font-size:13.5px}
+.steps li::before{content:counter(s);position:absolute;left:0;top:5px;width:22px;height:22px;border:1px solid var(--accent);color:var(--accent);font:600 12px var(--head);display:grid;place-items:center}
+.picker{display:flex;align-items:center;gap:10px;border:1px solid var(--line2);background:var(--panel2);padding:8px 12px;width:max-content;max-width:100%}
+.mini{font-size:12.5px;color:var(--muted)}
+
+.chk{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px;margin-top:12px}
+.chk div{border:1px solid var(--line2);background:var(--panel2);padding:12px;font-size:13px}.chk b{display:block;font:600 12px var(--head);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
+.mono{font-family:var(--mono);font-size:12.5px}
+.topbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;border:1px solid var(--line2);background:var(--panel);padding:10px 14px;margin-top:14px}
+.logo{font:700 15px var(--head);letter-spacing:.08em}
+.switch{border:1px solid var(--accent);padding:6px 10px;font:600 12px var(--head);display:flex;gap:8px;align-items:center}
+.menu{border:1px solid var(--line2);background:var(--panel2);width:320px;margin-top:6px;font-size:13px}
+.menu div{padding:7px 10px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:8px}
+.menu div.on{background:color-mix(in srgb,var(--accent) 14%,var(--panel2))}
+.menu small{color:var(--muted)}
+.score{font:700 18px var(--head)}
+.dot{display:inline-block;width:8px;height:8px;margin-right:6px}
+.mode{border:1px solid var(--line2);background:var(--panel2);padding:12px;cursor:pointer}
+.mode.on{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
+.fields{display:grid;grid-template-columns:150px minmax(0,1fr);gap:8px 12px;align-items:center;margin-top:12px;font-size:13px}
+.fields label{font:600 10px var(--head);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.inh{font-size:11.5px;color:var(--muted)}
+.tabs{display:flex;gap:0;margin-top:12px;border-bottom:1px solid var(--line2);flex-wrap:wrap}
+.tabs span{font:600 11px var(--head);letter-spacing:.1em;text-transform:uppercase;padding:8px 12px;color:var(--muted)}
+.tabs span.on{color:var(--text);box-shadow:inset 0 -2px 0 var(--accent)}
+</style></head><body>
+<div class="banner">Preview · fictional data · nothing is built yet</div>
+<main>
+<div class="crumb">Guardian / <b>Remaining queue</b></div>
+<h1>Everything left, in one plan.</h1>
+<p class="sub">Four build blocks in your order, then the final testing phase. Everything stays read-only except what already needs your passkey. Two items stay out on purpose (bottom of the page).</p>
+
+<section class="section">
+<div class="kicker">1 · Business systems</div><h2>SAP and other platforms: three new connectors and one agent</h2>
+<div class="grid">
+<div class="card new"><h3>SAP S/4HANA / ECC (on-premise)</h3><div class="what">Read-only technical user over HTTPS (SOAP RFC, table reads only). No SAP GUI, no RFC SDK to install.</div>
+<ul><li>Default users (SAP*, DDIC, EARLYWATCH, TMSADM) active or with known passwords' hash type</li><li>Users with SAP_ALL / SAP_NEW, dialog users not used for 90 days, old password hashes</li><li>RFC destinations that store passwords; trusted systems</li><li>Security audit log and key login/* profile parameters</li><li>Component versions vs SAP's latest support packages (missing security patches)</li></ul></div>
+<div class="card new"><h3>SAP BTP</h3><div class="what">Read-only service key for the BTP APIs (subaccount viewer, audit log reader).</div>
+<ul><li>Global and subaccount admins, users without MFA at the identity provider</li><li>Trust configuration (default identity provider still active)</li><li>Destinations with basic auth or no TLS</li><li>Audit log retention, Cloud Connector exposure</li></ul></div>
+<div class="card new"><h3>Salesforce</h3><div class="what">Connected app with read-only API access.</div>
+<ul><li>Salesforce Health Check score and risky settings</li><li>Admins, users without MFA, guest-user access on sites</li><li>Connected apps and their permissions</li></ul></div>
+</div>
+<p class="note">A new <b>Business systems</b> agent works through these, like the Azure and Microsoft 365 agents. Findings go into the same Fix plan, ATT&amp;CK mapping, compliance map (ISO 27001, NIS2) and tickets. Other platforms (Workday, Oracle, ServiceNow security) can follow the same pattern later.</p>
+</section>
+
+<section class="section">
+<div class="kicker">2 · Gap features (medium / low from the spreadsheet)</div><h2>Five additions</h2>
+<div class="tw"><table class="wide"><tr><th>Feature</th><th>What it does</th><th>Modelled on</th></tr>
+<tr><td><b>Private repos, IaC, images</b></td><td>The Code tab gets GitHub App sign-in for private repositories, Terraform / Bicep / Kubernetes / Dockerfile checks, and container image contents (package CVEs from OSV). Still never runs the code.</td><td>Wiz Code, Defender DevOps</td></tr>
+<tr><td><b>Safe web app testing</b></td><td>Logged-in crawl of a web app you name, with a test account you create: checks headers, cookies, access to other users' pages, exposed files, error leaks. GET and HEAD only, rate-limited, your passkey to start.</td><td>Tenable WAS, Qualys WAS</td></tr>
+<tr><td><b>SIEM output + MCP server</b></td><td>New findings and changes sent to Microsoft Sentinel, Splunk or syslog. An MCP server lets other AI tools ask Guardian questions (read-only, one token per tool).</td><td>Horizon3, Wiz</td></tr>
+<tr><td><b>Decoys</b></td><td>Guardian creates fake credentials and documents (a fake AWS key, a fake admin password in a file, a tracking link) for you to place; anyone using one triggers an alert. Nothing is planted automatically.</td><td>Horizon3 Tripwires, Thinkst Canary</td></tr>
+<tr><td><b>Vulnerability-disclosure page</b></td><td>A ready-made security.txt and public page per customer (NIS2 expects one), with a form whose reports land in the Fix plan.</td><td>HackerOne, Bugcrowd VDP</td></tr>
+</table></div>
+</section>
+
+<section class="section">
+<div class="kicker">3 · Cloud</div><h2>AWS posture agent</h2>
+<div class="two"><div><ul class="note">
+<li>Read-only cross-account IAM role (SecurityAudit + ViewOnlyAccess), external ID; no access keys stored if you use the role</li>
+<li>Root account MFA and keys, IAM users without MFA, old keys, wildcard policies</li>
+<li>Public S3 buckets, security groups open to the internet, public snapshots and AMIs</li>
+<li>CloudTrail, GuardDuty, Config and Security Hub turned on; KMS and encryption at rest</li>
+<li>CIS AWS Foundations benchmark in the compliance map</li></ul></div>
+<div><p class="note">Same pattern as the Azure agent: fixed list of read-only API calls, no free-form access. Findings get priority, ATT&amp;CK techniques and tickets like everything else.</p></div></div>
+</section>
+
+<section class="section">
+<div class="kicker">4 · On-site collector</div><h2>Phases B, C and D</h2>
+<div class="tw"><table class="wide"><tr><th>Phase</th><th>Delivers</th><th>What it unlocks</th></tr>
+<tr><td><b>B</b></td><td>Signed scan jobs to the collector, results back through the gateway; customer status page on their LAN with maintenance windows</td><td>Real scans and AI assessments for customer sites; schedules per site; the Scan buttons for remote sites</td></tr>
+<tr><td><b>C</b></td><td>Connector checks run on site; the customer's passwords sealed so only that collector can read them</td><td>AD, Windows, Linux, SAP checks inside customer networks</td></tr>
+<tr><td><b>D</b></td><td>VM appliance, Linux package, Docker image; signed auto-update; results kept when the server is unreachable</td><td>Installing at customers without your help</td></tr>
+</table></div>
+<p class="note">Fix through the collector stays "later": it needs your passkey <b>and</b> the customer's local approval.</p>
+</section>
+
+<section class="section">
+<div class="kicker">5 · Final testing phase</div><h2>Needs you and real systems</h2>
+<p class="note">I can't do this part alone: it needs real accounts and keys that you paste yourself, and sometimes a customer. Order: a real AI assessment; AD, Microsoft 365, Windows; Azure and AWS test accounts; a ServiceNow developer instance and each PSA; alerts; SAP (a trial or a customer's test system); the collector at a test site through the published gateway; each package; an outside penetration test of the gateway.</p>
+</section>
+
+<section class="section">
+<div class="kicker">Out on purpose</div><h2>Not in this plan</h2>
+<ul class="note"><li><b>Exploitation and attack simulation</b> (Pentera, Cymulate style): would end read-only mode. A separate opt-in "validation mode" is a product decision for later.</li>
+<li><b>External attack-surface discovery and the VPN client</b>: on hold pending the earlier safety review.</li></ul>
+</section>
+</main></body></html>

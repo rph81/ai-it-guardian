@@ -1,7 +1,7 @@
 "use strict";
 // Agents tab, live agent map and the Orchestrator chat. Uses $, el, api and me from console.js.
 const Agents = (() => {
-  const ORDER = ["collector", "discovery", "orchestrator", "network", "os", "web", "firmware", "wan", "ad", "m365", "devices", "azure", "patch", "risk", "paths", "compliance", "report"];
+  const ORDER = ["collector", "discovery", "orchestrator", "network", "os", "web", "firmware", "wan", "ad", "m365", "devices", "azure", "business", "patch", "risk", "paths", "compliance", "report"];
   const NODES = {
     orchestrator: {x: 400, y: 320, sub: "assigns · relays", center: true},
     collector: {x: 400, y: 70, sub: "program, not AI"},
@@ -22,7 +22,7 @@ const Agents = (() => {
   };
   const SHORT = {collector: "Scanner", discovery: "Discovery", orchestrator: "Orchestrator", network: "Network", os: "OS & endpoints",
                  web: "Web & APIs", firmware: "Firmware", wan: "Internet perimeter", report: "Report writer",
-                 ad: "Active Directory", m365: "Microsoft 365", devices: "Device fleet", patch: "Patch & config", risk: "Risk analyst", paths: "Attack paths", compliance: "Compliance"};
+                 ad: "Active Directory", m365: "Microsoft 365", devices: "Device fleet", azure: "Azure", business: "Business systems", patch: "Patch & config", risk: "Risk analyst", paths: "Attack paths", compliance: "Compliance"};
   const KIND = {order: "order", tool: "check", read: "read", find: "finding", note: "note", note_outcome: "then", done: "done", start: "start", error: "error"};
   const CHECKS = {probe: "probes", http_get: "web pages", tls_inspect: "TLS checks", cve_lookup: "CVE lookups", eol_lookup: "EOL lookups",
                   web_search: "searches", wan_info: "public-IP lookups", annotate_asset: "identifications",
@@ -30,7 +30,7 @@ const Agents = (() => {
                   record_path: "attack paths", set_controls: "control updates", link_previous: "links to last run",
                   ad_query: "directory queries", linux_check: "server checks", linux_vulnerable_packages: "package scans",
                   synology_info: "NAS reads", proxmox_get: "Proxmox reads",
-                  graph_get: "Microsoft 365 reads", azure_query: "Azure queries", ninja_query: "NinjaOne reads", azure_get: "Azure reads", windows_check: "Windows checks"};
+                  graph_get: "Microsoft 365 reads", azure_query: "Azure queries", ninja_query: "NinjaOne reads", azure_get: "Azure reads", windows_check: "Windows checks", sap_query: "SAP reads", btp_query: "SAP BTP reads", salesforce_query: "Salesforce reads"};
   const NS = "http://www.w3.org/2000/svg";
   const S = {run: null, since: 0, events: [], agents: {}, notes: [], running: false, timer: null, t0: null,
              replay: null, speed: 3, links: {}, selected: null, nfind: 0, nnote: 0, cost: 0, view: null, drill: null};

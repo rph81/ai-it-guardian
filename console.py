@@ -2309,7 +2309,8 @@ def launch(mode, run_id, sid, user, inbox=None):
     return status
 
 
-HANDOFF_TYPES = ("active_directory", "linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "m365", "windows", "azure", "ninjaone")
+HANDOFF_TYPES = ("active_directory", "linux_ssh", "synology", "proxmox_ve", "proxmox_bs", "m365", "windows", "azure", "ninjaone",
+                 "sap_abap", "sap_btp", "salesforce")
 
 
 def connector_handoff():
@@ -3150,7 +3151,7 @@ def connector_save(body: ConnectorBody, request: Request):
         raise HTTPException(400, "Give the connector a short name (up to 60 characters)")
     fields, existing = merged_fields(body)
     spec = conn.CATALOG[body.type]
-    missing = [fd["label"] for fd in spec["fields"] if fd.get("secret") and not fields.get(fd["name"])]
+    missing = [fd["label"] for fd in spec["fields"] if fd.get("secret") and fd.get("required", True) and not fields.get(fd["name"])]
     if missing:
         raise HTTPException(400, f"{missing[0]} is required")
     level, message, details, pin = conn.test(body.type, fields, (existing or {}).get("pin"), STATE, vault)

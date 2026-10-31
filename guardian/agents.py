@@ -293,6 +293,57 @@ unknown service principals and active high Defender alerts are critical or high;
 purge protection, no backup of production VMs and missing logging medium; tagging and orphaned resources low or info.
 If a query or path is refused for permission or licence reasons, say what is missing in one info finding.""",
     },
+    "business": {
+        "title": "Business systems",
+        "tools": ["list_connectors", "sap_query", "btp_query", "salesforce_query", "record_finding"],
+        "web": True,
+        "brief": """Your layer: the business systems the company runs on, reviewed the way SAP security tools (SecurityBridge,
+Onapsis, SAP's own EarlyWatch security checks) and Salesforce Security Health Check do. You read through connectors with
+read-only technical users: sap_query (SAP S/4HANA / ECC tables), btp_query (SAP BTP) and salesforce_query (Salesforce).
+Start with list_connectors and only look at the systems that are there.
+SAP S/4HANA / ECC (one connector per system and client):
+- "clients": production clients (CCCATEGORY P) open for changes (CCCORACTIV 1) or cross-client changes allowed
+  (CCNOCLIIND blank or 1) are high.
+- "default_users": SAP*, DDIC, EARLYWATCH, TMSADM, SAPCPIC unlocked (UFLAG 0) in any client; old hash versions
+  (CODVN below F/G/H) suggest default passwords may still work. SAP* missing from USR02 in a client means the
+  built-in SAP* with its default password is active unless login/no_automatic_user_sapstar = 1: check that parameter.
+- "critical_profiles" and "critical_roles": dialog users (USTYP A in "users") with SAP_ALL, SAP_NEW or admin roles;
+  name them (at most 20, plus the total). Firefighter/emergency users are fine when locked.
+- "users": dialog users not logged on for 90+ days (TRDAT), expired but unlocked users, password hash versions
+  below H (CODVN), users of type S or B with admin profiles.
+- "rfc_destinations": stored_password true on destinations to other systems, especially with trusted false and to
+  production; "trusted_systems": trust relationships (RFCSYSACL) from development or test systems into this one.
+- "security_parameters" (latest PARDATE per PARNAME): login/min_password_lng below 8, login/fails_to_user_lock above 5
+  or 0, login/password_downwards_compatibility above 0, login/no_automatic_user_sapstar not 1, rsau/enable not 1
+  (security audit log off), auth/rfc_authority_check below 1, gw/reg_no_conn_info and gw/acl_mode not set (RFC
+  gateway open: a well-known way in), snc/enable 0 when SAP GUI traffic crosses networks, icm/HTTPS settings.
+- "components": SAP_BASIS / S4CORE release and support package; compare with SAP's current support packages
+  (web search for the release's maintenance end and latest SP) and flag systems far behind or out of maintenance.
+  "applied_notes" lists implemented notes: do not guess which security notes are missing beyond what the support
+  package level shows.
+SAP BTP:
+- "subaccounts" (production, beta features enabled in production), "role_collections" then "role_collection_users"
+  for "Global Account Administrator", "Subaccount Administrator", "Cloud Connector Administrator" and "Destination
+  Administrator": many administrators, or users from the default SAP ID service origin (sap.default) instead of the
+  company's identity provider.
+- "identity_providers": the default SAP ID service still active alongside a corporate IdP (users can bypass the
+  company's MFA).
+- "destinations": http instead of https, BasicAuthentication to the internet, trust_all true, NoAuthentication to
+  internal (OnPremise) systems.
+Salesforce:
+- "health_check" score below 80 is a finding; "health_check_risks": HIGH_RISK settings first (name the setting, the
+  org's value and the recommended value).
+- "admins": more than 3 users with Modify All Data or Manage Users, admins who never log in.
+- "mfa_methods": users without any method (cross-check with "admins": an admin without MFA is high).
+- "inactive_users", "guest_users" (active guest users on Experience Cloud sites expose data), "connected_apps" (apps
+  not limited to admin-approved users), "failed_logins" (many failures from one IP).
+Record one finding per issue. asset is "sap/<SID or connector name>/<client>", "btp/<subaccount>" or
+"salesforce/<org>". Never put passwords or hashes in evidence (you never receive them). Severity: default users
+unlocked, SAP_ALL on dialog users, an open RFC gateway, a production client open for changes and admins without MFA
+are critical or high; audit log off, weak password parameters, stored RFC passwords and old support packages medium;
+hygiene low. If a read is refused for authorization reasons, record one info finding naming the missing
+authorization (S_TABU_NAM for the table, or the API role).""",
+    },
 }
 CONNECTOR_AGENTS = list(CONNECTOR_BRIEFS)
 LAYERS.update(CONNECTOR_BRIEFS)
