@@ -104,8 +104,9 @@ exposure) and `previous` (the same issue in the previous assessment).
    **Ticketing (now)**: ServiceNow, ConnectWise PSA, Autotask PSA, HaloPSA, Jira Service Management.
    **MITRE ATT&CK (now)**: every finding mapped to techniques; ATT&CK tab, report section, PDF appendix.
    **Scanner import (now)**: Nessus, OpenVAS / Greenbone, Qualys, Rapid7 InsightVM, CSV into a run's Fix plan.
-   **Next, in this order**: several customers (sites)
-   in one console (with ticketing per customer); integrations with business systems
+   **Multi-site (now)**: several customers in one console: site switcher, all-sites portfolio, connectors, ticketing
+   (our PSA with per-customer mapping, the customer's own system, or off) and user access per site.
+   **Next, in this order**: integrations with business systems
    (SAP S/4HANA, SAP BTP and other leading platforms); medium / low priority gap features; AWS posture agent;
    on-site collector phases B–D. Then a **final testing phase** against real systems (real AI run, AD, Microsoft 365, fix recipes, NinjaOne,
    Azure, Windows, ServiceNow, alert channels, collector packages, outside penetration test of the gateway).

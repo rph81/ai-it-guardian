@@ -24,7 +24,7 @@ const Sites = (() => {
     $("si-gw").textContent = `Gateway ${gw.url}` + (gw.pin ? "" : " · not running yet");
     $("si-rows").replaceChildren(...d.sites.map(s => {
       const local = s.id === "local", c = s.collector;
-      const acts = el("div", {class: "row"});
+      const acts = el("div", {class: "row"}, el("button", {class: "btn sm", type: "button", onclick: () => SiteCfg.open(s.id)}, "Settings"));
       if (!local) {
         acts.append(el("button", {class: "btn sm", type: "button", onclick: () => enroll(s)}, c ? "New collector" : "Install"));
         if (c) acts.append(el("button", {class: "btn sm danger", type: "button", onclick: () => revoke(s)}, "Revoke"));

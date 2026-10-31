@@ -11,6 +11,7 @@
 <script src="/schedule.js" defer></script>
 <script src="/ticketing.js" defer></script>
 <script src="/sites.js" defer></script>
+<script src="/sitecfg.js" defer></script>
 <script src="/evidence.js" defer></script>
 </head>
 <body>
@@ -56,6 +57,7 @@
         <div>
           <h1>Connectors</h1>
           <p class="lede">A scan sees devices from the outside. A connector lets Guardian look inside with a <b>read-only</b> account you create, for checks like patch levels, backup status, user accounts and shares. Nothing is ever changed.</p>
+          <div class="sitepick hidden" id="c-sitepick"><label for="c-site">Site</label><select id="c-site"></select></div>
         </div>
         <div class="card vault-locked hidden" id="locked-card">
           <div class="toggle-row"><div><b>The vault is locked</b><p class="note">Connectors and their passwords are encrypted. Unlock with your passkey to see and use them.</p></div>
@@ -282,11 +284,16 @@
           <p class="note">A site is a customer network. "This network" is assessed by this server; other sites through a small collector installed at the customer, which only connects out to Guardian's collector gateway. Remote scans and assessments come in the next phase; this one sets up sites, enrollment and the connection.</p>
           <div class="tablewrap field"><table><thead><tr><th>Site</th><th>Collector</th><th>Last seen</th><th>Scope (set on site)</th><th></th></tr></thead><tbody id="si-rows"></tbody></table></div>
         </div>
+        <div class="card hidden" id="sc-card">
+          <div class="sechead"><h2 id="sc-title"></h2><span class="tag" id="sc-label"></span><button class="btn sm" type="button" id="sc-close">Close</button></div>
+          <div class="seg field" id="sc-tabs"></div>
+          <div id="sc-body"></div>
+        </div>
         <form class="card" id="si-add">
           <h2>Add a site</h2>
           <div class="f3 field"><div><label for="si-name">Site name</label><input id="si-name" maxlength="80" placeholder="Zürich office" required></div>
             <div><label for="si-cust">Customer</label><input id="si-cust" maxlength="120" placeholder="Muster AG"></div>
-            <div class="row" style="align-items:flex-end"><button class="btn primary" type="submit">Add site</button></div></div>
+            <div class="row end"><button class="btn primary" type="submit">Add site</button></div></div>
         </form>
         <div class="card hidden" id="si-install">
           <div class="sechead"><h2 id="si-ititle">Install the collector</h2><button class="btn sm" type="button" id="si-iclose">Close</button></div>

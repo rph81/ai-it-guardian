@@ -49,9 +49,17 @@ const SECTIONS = ["connectors", "users", "security", "account", "ai", "scope", "
 window.addEventListener("hashchange", showSection);
 
 // -- connectors -----------------------------------------------------------------------
+let CSITE = "local";
+try { CSITE = localStorage.getItem("guardian-site") || "local"; } catch (e) { /* storage blocked */ }
 async function loadConnectors() {
   if (me.role === "viewer") return;
-  data = await api("/api/connectors");
+  const ov = await api("/api/overview");
+  const sites = ov.sites || [];
+  if (CSITE === "all" || !sites.some(s => s.id === CSITE)) CSITE = sites.length ? sites[0].id : "local";
+  $("c-site").replaceChildren(...sites.map(s => el("option", {value: s.id}, s.id === "local" ? "This network (Guardian's own)" : [s.customer, s.name].filter(Boolean).join(" · "))));
+  $("c-site").value = CSITE;
+  $("c-sitepick").classList.toggle("hidden", sites.length < 2);
+  data = await api(`/api/connectors?site=${encodeURIComponent(CSITE)}`);
   $("locked-card").classList.toggle("hidden", !data.locked);
   document.querySelectorAll(".unlocked-only").forEach(e => e.classList.toggle("hidden", data.locked));
   renderSuggestions(); renderConfigured(); renderCatalog();
@@ -200,7 +208,7 @@ function formBody() {
     const input = $("f-" + fd.name);
     fields[fd.name] = fd.kind === "checkbox" ? input.checked : input.value;
   }
-  return {id: editing.id, type: editing.type, name: $("d-name").value, fields};
+  return {id: editing.id, type: editing.type, name: $("d-name").value, fields, site: CSITE};
 }
 
 function result(r) {
@@ -370,7 +378,7 @@ async function loadUsers() {
     return el("tr", {class: u.status === "active" ? "" : "muted"},
       el("td", {}, el("b", {}, u.name + (isMe ? " (you)" : "")), el("br"), el("span", {class: "meta"}, u.email)),
       el("td", {}, u.provider ? {google: "Google", microsoft: "Microsoft"}[u.provider] : "Passkey only"),
-      el("td", {}, role),
+      el("td", {}, role, el("div", {class: "micro"}, u.sites == null ? "All sites" : `${u.sites.length} site${u.sites.length === 1 ? "" : "s"} (Settings › Sites)`)),
       el("td", {}, String(u.passkeys), u.passkey_names ? el("span", {class: "meta"}, ` (${u.passkey_names})`) : null),
       el("td", {}, access),
       el("td", {class: "meta"}, u.status === "active" ? when(u.last_login) : "disabled"),
@@ -512,3 +520,9 @@ function paintAppearance() {
   if (me.role === "admin") renderConfig((await api("/api/overview")).config);
   await loadConnectors();
 })();
+
+$("c-site").addEventListener("change", e => {
+  CSITE = e.target.value;
+  try { localStorage.setItem("guardian-site", CSITE); } catch (err) { /* storage blocked */ }
+  loadConnectors();
+});

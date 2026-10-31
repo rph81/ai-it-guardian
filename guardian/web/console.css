@@ -539,3 +539,18 @@ details.co-row>summary::-webkit-details-marker{display:none}
 a.tag.att{text-decoration:none;font-family:var(--mono,monospace)}
 .ap-step .tag.att{align-self:flex-start}
 .at-cell .micro{color:var(--text);opacity:.75}
+
+/* multi-site */
+.sitepick{display:flex;gap:8px;align-items:center;margin-top:10px}
+.sitepick label{font:600 10.5px var(--head);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.sitepick select{min-width:260px;max-width:100%}
+.all-sites .site-only{display:none!important}
+table.pf tr.clickable{cursor:pointer}
+table.pf tr.clickable:hover td,table.pf tr.clickable:focus-visible td{background:var(--panel2)}
+.score.ok{color:var(--ok)}.score.warn{color:var(--warn)}.score.error{color:var(--crit)}
+.modes{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.mode{all:unset;cursor:pointer;border:1px solid var(--line2);background:var(--panel2);padding:12px;display:flex;flex-direction:column;gap:4px;font-size:13px}
+.mode b{font:600 13px var(--head)}.mode span{color:var(--muted)}
+.mode.on{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
+.mode:focus-visible{outline:2px solid var(--accent)}
+.row.end{align-items:flex-end}

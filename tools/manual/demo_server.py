@@ -22,5 +22,28 @@ v.put("anthropic_key_expires", "2027-10-31")
 v.put("ticketing", {"system": "jira", "on": True, "auto": True, "threshold": "p2", "resolve_on_verify": True,
                     "settings": {"jira": {"site": "https://demo-office.atlassian.net", "email": "it@demo.example", "project_key": "IT", "issuetype": "Task"}}})
 v.put("ticketing_secrets", {"jira": "demo"})
+# a second customer, with an assessment built from an imported scanner report, its own ticketing and a limited user
+bsid = st.add_site("Head office", "Beispiel GmbH")
+v.put("site_settings", {sid: {"scope": "10.20.0.0/22, 10.20.8.0/24", "ticketing": {"mode": "msp", "map": {"project_key": "MUST"}, "threshold": "p1", "resolve": ""}},
+                        bsid: {"scope": "10.30.0.0/24", "ticketing": {"mode": "own", "map": {}, "threshold": "", "resolve": "yes",
+                               "own": {"system": "servicenow", "on": True, "settings": {"servicenow": {"instance": "https://beispiel-demo.service-now.com", "username": "guardian-api"}}}}}})
+v.put("site_ticket_secrets", {bsid: {"system": "servicenow", "secret": "demo"}})
+tech = v.create_user("tech@demo.example", "Demo Technician", "operator"); v.update_user(tech, status="active")
+v.put("user_sites", {tech: [sid, bsid]})
+from guardian import importers
+from guardian.graph import Graph
+rd = console.RUNS / "20261029-140000"
+if not rd.exists():
+    rd.mkdir(); (rd / "site").write_text(bsid)
+    g = Graph(str(rd)); g.data["started"] = "2026-10-29T14:00:00"; g.data["site"] = {"name": "Beispiel GmbH · Head office", "id": bsid, "network": "10.30.0.0/24"}
+    csv = (b"ip,title,severity,cve,description,solution\n"
+           b"10.30.0.5,Remote Desktop exposed to the internet without NLA,critical,,RDP on 3389 reachable from the internet,Require NLA and put RDP behind the VPN\n"
+           b"10.30.0.9,SMBv1 enabled on the file server,high,CVE-2017-0144,SMBv1 negotiated,Disable SMBv1\n"
+           b"10.30.0.12,Telnet enabled on the core switch,high,,Telnet on port 23,Use SSH and disable Telnet\n"
+           b"10.30.0.20,TLS certificate expired on the intranet,medium,,Expired 2026-09-01,Renew the certificate\n")
+    fmt, rows = importers.parse("demo.csv", csv)
+    console._merge_import(g, rows, fmt)
+    g.data["imports"] = [{"t": time.time(), "by": "Demo Admin", "file": "beispiel-nessus-export.csv", "format": "CSV", "added": len(rows), "merged": 0}]
+    g.save()
 import uvicorn
 uvicorn.run(console.app, host="127.0.0.1", port=8765, log_level="warning")

@@ -78,3 +78,9 @@ Failures never block the run or the alerts; they're written to the audit log (`t
 | POST | `/api/runs/{run}/tickets/sync` | operator |
 
 All changes are in the audit log (`ticketing-changed`, `ticket-created`, `tickets-synced`).
+
+## Per site
+
+Each site chooses where its tickets go: your system with the customer's company, board, queue or project; the
+customer's own system with its own secret; or off. Priority threshold and close-on-verify can be overridden per site.
+Settings › Sites & collectors › Settings › Ticketing; details in [MULTISITE.md](MULTISITE.md).

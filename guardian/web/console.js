@@ -61,6 +61,63 @@ $("unlock").addEventListener("click", unlock);
 $("lock").addEventListener("click", async () => { await api("/api/vault/lock", {}); await refreshMe(); });
 $("signout").addEventListener("click", async () => { await api("/api/auth/signout", {}); location.replace("/signin"); });
 
+// -- sites ----------------------------------------------------------------------
+let SITE = "local", SITES = [];
+try { SITE = localStorage.getItem("guardian-site") || "local"; } catch (e) { /* storage blocked */ }
+const siteLabel = s => s.id === "local" ? "This network (Guardian's own)" : [s.customer, s.name].filter(Boolean).join(" · ");
+const siteRuns = o => o.runs.filter(r => SITE === "all" || r.site === SITE);
+
+function setSites(sites) {
+  SITES = sites;
+  if (SITE !== "all" && !sites.some(s => s.id === SITE)) SITE = sites.length ? sites[0].id : "local";
+  if (SITE === "all" && sites.length < 2) SITE = sites.length ? sites[0].id : "local";
+  const pick = $("site-pick");
+  pick.replaceChildren(...(sites.length > 1 ? [el("option", {value: "all"}, "All sites")] : []),
+    ...sites.map(s => el("option", {value: s.id}, siteLabel(s))));
+  pick.value = SITE;
+  pick.closest(".sitepick").classList.toggle("hidden", sites.length < 2);
+  const cur = sites.find(s => s.id === SITE);
+  $("site-name").textContent = SITE === "all" ? "All sites" : cur ? siteLabel(cur) : "";
+  $("ptitle").textContent = SITE === "all" ? "Sites / Portfolio." : "Site / Overview.";
+  $("psub").textContent = SITE === "all" ? "Which customer needs attention first." : "Network, devices, AI agents and findings.";
+  document.body.classList.toggle("all-sites", SITE === "all");
+  $("portfolio").classList.toggle("hidden", SITE !== "all");
+  const remote = SITE !== "all" && SITE !== "local";
+  for (const id of ["go-collect", "go-full", "go-replay"]) $(id).classList.toggle("hidden", remote);
+  $("go-newrun").classList.toggle("hidden", !remote);
+  $("remote-note").classList.toggle("hidden", !remote);
+  if (SITE === "all") renderPortfolio();
+}
+$("site-pick").addEventListener("change", e => {
+  try { localStorage.setItem("guardian-site", e.target.value); } catch (err) { /* storage blocked */ }
+  location.reload();
+});
+
+async function renderPortfolio() {
+  let d;
+  try { d = await api("/api/portfolio"); } catch (e) { return; }
+  const pick = id => { try { localStorage.setItem("guardian-site", id); } catch (e) { /* storage blocked */ } location.reload(); };
+  const col = s => s == null ? "" : s >= 75 ? "ok" : s >= 60 ? "warn" : "error";
+  const coll = c => c === "local" ? "Guardian itself" : !c ? "none" : c === "running" ? "online" : c.replace("_", " ");
+  $("pf-rows").replaceChildren(...d.sites.map(s => el("tr", {class: "clickable", tabindex: "0", onclick: () => pick(s.id),
+      onkeydown: e => { if (e.key === "Enter") pick(s.id); }},
+    el("td", {}, el("b", {}, s.id === "local" ? "This network" : s.name)), el("td", {}, s.customer || "—"),
+    el("td", {}, s.score != null ? el("span", {class: `score ${col(s.score)}`}, String(s.score)) : el("span", {class: "meta"}, s.run ? "not analysed" : "no assessment")),
+    el("td", {class: "mono"}, s.run ? fmtRun(s.run) : "—"),
+    el("td", {}, s.p1 ? el("span", {class: "tag error"}, String(s.p1)) : "0"),
+    el("td", {}, s.overdue ? el("span", {class: "tag warn"}, String(s.overdue)) : "0"),
+    el("td", {}, String(s.open)), el("td", {}, coll(s.collector)), el("td", {}, s.tickets))));
+}
+
+$("go-newrun").addEventListener("click", async () => {
+  try {
+    const r = await api(`/api/sites/${SITE}/runs`, {});
+    const o = await api("/api/overview");
+    renderRuns(siteRuns(o), o.job);
+    openRun(r.run, false); go("plan");
+  } catch (e) { alert(e.message); }
+});
+
 // -- runs ---------------------------------------------------------------------
 function renderTrend(runs) {
   const pts = runs.filter(r => r.analysed).slice(0, 12).reverse().map(r => ({id: r.id, n: SEVS_ALL.reduce((a, s) => a + (r.counts[s] || 0), 0)}));
@@ -81,7 +138,7 @@ function renderRuns(runs, job) {
   renderTrend(runs);
   const box = $("runs");
   box.replaceChildren();
-  if (job.running && job.mode !== "report" && job.mode !== "resume")
+  if (job.running && job.mode !== "report" && job.mode !== "resume" && SITE === "local")
     box.append(el("div", {class: "run on"}, el("div", {class: "top"}, el("span", {class: "mono"}, "New run"), el("span", {class: "meta"}, "running")),
       el("div", {class: "sevs"}, job.label)));
   if (!runs.length && !job.running) box.append(el("p", {class: "note"}, "No runs yet. Start a scan with the buttons at the top."));
@@ -94,10 +151,10 @@ function renderRuns(runs, job) {
     const sevs = el("div", {class: "sevs"});
     if (r.devices != null) sevs.append(el("span", {}, `${r.devices} device${r.devices === 1 ? "" : "s"}`));
     if (r.analysed) for (const s of SEVS) if (r.counts[s]) sevs.append(el("span", {}, el("b", {class: `c-${s}`}, String(r.counts[s])), ` ${s === "medium" ? "med" : s}`));
-    if (r.has_graph && !r.analysed) sevs.append(el("span", {}, "no AI analysis yet"));
+    if (r.has_graph && !r.analysed) sevs.append(el("span", {}, r.site === "local" ? "no AI analysis yet" : "imported results"));
     if (r.cost != null) sevs.append(el("span", {}, `AI $${r.cost.toFixed(2)}`));
     const acts = el("div", {class: "row"});
-    const canRun = me && me.role !== "viewer";
+    const canRun = me && me.role !== "viewer" && r.site === "local";
     if (r.has_report) acts.append(el("button", {class: "btn sm", onclick: ev => { ev.stopPropagation(); openRun(r.id, true); }}, "Report"));
     if (r.has_agents) acts.append(el("button", {class: "btn sm", onclick: ev => { ev.stopPropagation(); openRun(r.id, r.has_report); showTab("map"); }}, "Agent map"));
     if (r.has_graph) {
@@ -278,7 +335,7 @@ async function poll() {
     renderJob(s);
     if (s.running) { polling = setTimeout(poll, 2000); return; }
     const o = await api("/api/overview");
-    renderRuns(o.runs, o.job);
+    renderRuns(siteRuns(o), o.job);
     keyWarning(o.config);
     if (s.run_id && s.exit_code === 0) {
       const r = o.runs.find(x => x.id === s.run_id);
@@ -307,7 +364,7 @@ function go(where) {
 }
 document.querySelectorAll(".rail .ri[data-go]").forEach(b => b.addEventListener("click", () => go(b.dataset.go)));
 $("go-report").addEventListener("click", async () => {
-  const o = await api("/api/overview"); const r = o.runs.find(x => x.has_report);
+  const o = await api("/api/overview"); const r = siteRuns(o).find(x => x.has_report);
   if (!r) { alert("No report yet. Run an AI assessment first."); return; }
   openRun(r.id, true); go("report");
 });
@@ -318,10 +375,13 @@ async function start() {
   await refreshMe();
   const n = sessionStorage.getItem("guardian-note"); if (n) { note(n); sessionStorage.removeItem("guardian-note"); }
   const o = await api("/api/overview");
-  renderRuns(o.runs, o.job);
-  const latest = o.runs.find(r => r.has_report);
-  if (latest) openRun(latest.id, true);
-  else if (o.runs.length) openRun(o.runs[0].id, false);
+  setSites(o.sites || []);
+  const runs = siteRuns(o);
+  renderRuns(runs, o.job);
+  const latest = runs.find(r => r.has_report);
+  if (SITE === "all") { /* the portfolio is the page */ }
+  else if (latest) openRun(latest.id, true);
+  else if (runs.length) openRun(runs[0].id, false);
   const s = await api("/api/job?since=0");
   if (s.lines.length) { appendLog(s.lines); seq = s.seq; }
   renderJob(s);

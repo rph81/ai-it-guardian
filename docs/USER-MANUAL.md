@@ -87,6 +87,15 @@ only when an admin or operator confirms with their passkey, and closes on sign-o
 
 ![Dashboard](manual/01-dashboard.png)
 
+**Site** (under the title, when there is more than one site): choose the customer site you work on, or **All sites**.
+Everything below shows that site only. Remote sites have **New assessment** instead of the scan buttons: it creates an
+assessment you fill by importing another scanner's report in its Fix plan (remote scans come with the collector).
+
+![All sites](manual/01b-all-sites.png)
+
+**All sites** lists every site you may see with its score, last assessment, open priority 1 findings, overdue items,
+open findings, collector and where its tickets go. Click a row to open the site. Details: [MULTISITE.md](MULTISITE.md).
+
 **Left rail** (always visible): Overview, Agents, Map, Plan, Paths, Comply, Report, Log, Fix, Code and Settings
 (the number on Settings counts connector suggestions waiting for you).
 
@@ -297,6 +306,9 @@ The left menu lists the sections. Some are for admins only.
 
 ![Connectors](manual/10-settings-connectors.png)
 
+With more than one site, the **Site** box at the top chooses whose connectors you see and add; a connector belongs to
+one site. Today the connector agents use This network's connectors.
+
 Connectors let Guardian look **inside** systems with a read-only account you create. **Suggested from your last scan**
 proposes connectors for devices it found (e.g. a Synology NAS); **All connectors** lists every type with what it checks
 and step-by-step instructions. Each connector has a **Test** that checks the account and warns if it has more rights
@@ -360,6 +372,24 @@ Customer sites assessed through an on-site collector (phase A: sites, enrollment
 (passkey: a one-time code and the commands for the Linux app, Docker or VM appliance), **Revoke**. Status shows Online,
 Paused by customer, Disconnected by customer or Not reachable. Details: [ONSITE-COLLECTOR.md](ONSITE-COLLECTOR.md).
 
+**Settings** on a site's row opens its own settings:
+
+![Site settings](manual/10-site-general.png)
+
+- **General**: name, customer and networks.
+- **Ticketing**: where this customer's tickets go. **Our PSA** uses your system from Settings › Ticketing, filed under
+  the customer (company, board, queue or project, depending on the system); **Customer's own system** uses their
+  ServiceNow, Jira… with its own address and secret; **Off**. The auto-ticket priority and close-on-verify can follow
+  the default or be set for this site. **Save and test** checks the connection with this site's settings.
+
+![Site ticketing](manual/10-site-ticketing.png)
+
+- **Access**: which operators and viewers may see the site (admins see all). A user nobody has limited sees every site.
+
+![Site access](manual/10-site-access.png)
+
+- **Connectors** and **Schedule**: where to find them for this site. Details: [MULTISITE.md](MULTISITE.md).
+
 ### Schedules & alerts
 
 ![Schedules and alerts](manual/10-settings-schedules.png)
@@ -378,7 +408,8 @@ Paused by customer, Disconnected by customer or Not reachable. Details: [ONSITE-
 Pick the **system**: ServiceNow, ConnectWise PSA, Autotask PSA, HaloPSA or Jira Service Management. The fields
 change with the system (address, API user, secret, and where tickets go: board, queue, customer or project). Then:
 automatic tickets after each assessment for a chosen priority, closing the ticket when Guardian verifies the fix, and
-**Test the connection**. Details: [TICKETING.md](TICKETING.md).
+**Test the connection**. These are the defaults; each site can send its tickets elsewhere (Sites & collectors ›
+Settings › Ticketing). Details: [TICKETING.md](TICKETING.md).
 
 ### Appearance
 

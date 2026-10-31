@@ -784,9 +784,12 @@ def load_previous(graph):
     """The previous AI assessment of this site, so the Risk analyst can carry owners and due dates over."""
     here = os.path.basename(os.path.normpath(graph.run_dir))
     parent = os.path.dirname(os.path.normpath(graph.run_dir))
+    site_of = lambda name: (open(os.path.join(parent, name, "site")).read().strip()
+                            if os.path.exists(os.path.join(parent, name, "site")) else "local")
+    mine = site_of(here)
     for name in sorted(os.listdir(parent), reverse=True):
         path = os.path.join(parent, name, "graph.json")
-        if name >= here or not os.path.exists(path):
+        if name >= here or not os.path.exists(path) or site_of(name) != mine:
             continue
         try:
             with open(path) as f:

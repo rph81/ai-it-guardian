@@ -296,7 +296,40 @@ def require(request, role="viewer", unlocked=False):
         raise HTTPException(403, "Your role doesn't allow this")
     if unlocked and not (vault.unlocked and sid in vault.holders):
         raise HTTPException(423, "Unlock the vault with your passkey first")
+    p = request.path_params
+    if p.get("run_id") and RUN_ID.match(p["run_id"]) and not can_see(user, run_site(RUNS / p["run_id"])):
+        raise HTTPException(404, "Unknown run")
+    if p.get("site_id") and not can_see(user, p["site_id"]):
+        raise HTTPException(404, "Unknown site")
+    if request.url.path.startswith(("/api/fix", "/api/job/start", "/api/job/stop", "/api/chat")) and not can_see(user, LOCAL):
+        raise HTTPException(403, "This works on Guardian's own network, which you don't have access to")
     return sid, s, user
+
+
+# -- multi-site: which site a run belongs to, and who may see which site ----------------------------------------------
+LOCAL = "local"                      # sitestore.LOCAL_SITE: the network of Guardian's own server
+SITE_FILE = "site"                   # runs/<id>/site holds the site ID; runs without it belong to the local site
+
+
+def run_site(d):
+    try:
+        v = (Path(d) / SITE_FILE).read_text().strip()
+        return v if re.fullmatch(r"[a-z0-9_]{1,40}", v) else LOCAL
+    except OSError:
+        return LOCAL
+
+
+def user_sites(user):
+    """None = every site (admins, and users nobody has limited); otherwise the set of site IDs this user may see."""
+    if user["role"] == "admin":
+        return None
+    allowed = vault.get("user_sites", {}).get(user["id"])
+    return None if allowed is None else set(allowed)
+
+
+def can_see(user, site_id):
+    allowed = user_sites(user)
+    return allowed is None or site_id in allowed
 
 
 def set_cookie(resp, sid):
@@ -401,7 +434,7 @@ async def run_job(cmd, extra_env, stdin=None):
 # -- run listing --------------------------------------------------------------------------------
 def run_summary(d):
     info = {"id": d.name, "has_graph": (d / "graph.json").exists(), "has_report": (d / "report.html").exists(),
-            "devices": None, "score": None, "grade": None, "counts": {}, "analysed": False}
+            "devices": None, "score": None, "grade": None, "counts": {}, "analysed": False, "site": run_site(d)}
     if info["has_graph"]:
         try:
             g = json.loads((d / "graph.json").read_text())
@@ -433,7 +466,7 @@ def run_dir(run_id):
 def latest_scan():
     if not RUNS.exists():
         return None, None
-    done = sorted(d for d in RUNS.iterdir() if RUN_ID.match(d.name) and (d / "graph.json").exists())
+    done = sorted(d for d in RUNS.iterdir() if RUN_ID.match(d.name) and (d / "graph.json").exists() and run_site(d) == LOCAL)
     if not done:
         return None, None
     try:
@@ -454,7 +487,7 @@ STATIC = {"/console.css": ("console.css", "text/css"), "/theme.js": ("theme.js",
           "/passkey.js": ("passkey.js", "text/javascript"), "/agents.js": ("agents.js", "text/javascript"),
           "/remediate.js": ("remediate.js", "text/javascript"), "/code.js": ("code.js", "text/javascript"),
           "/plan.js": ("plan.js", "text/javascript"), "/schedule.js": ("schedule.js", "text/javascript"),
-          "/ticketing.js": ("ticketing.js", "text/javascript"), "/sites.js": ("sites.js", "text/javascript"),
+          "/ticketing.js": ("ticketing.js", "text/javascript"), "/sites.js": ("sites.js", "text/javascript"), "/sitecfg.js": ("sitecfg.js", "text/javascript"),
           "/evidence.js": ("evidence.js", "text/javascript")}
 PAGES = {"/": "console.html", "/settings": "settings.html", "/signin": "signin.html"}
 
@@ -1631,7 +1664,37 @@ async def import_results(run_id: str, request: Request, commit: int = 0):
 TICKET_DEFAULT = {"system": "servicenow", "on": False, "auto": False, "threshold": "p2", "resolve_on_verify": False, "settings": {}}
 
 
-def ticket_cfg():
+def ticket_cfg(site_id=None):
+    """The MSP's ticketing settings, or with a site ID what applies to that site: the MSP's system with the site's
+    mapping (customer, board, queue...), the customer's own system, or off."""
+    cfg = _msp_ticket_cfg()
+    if site_id is None:
+        return cfg
+    t = site_settings(site_id)["ticketing"]
+    if t["threshold"]:
+        cfg["threshold"] = t["threshold"]
+    if t["resolve"]:
+        cfg["resolve_on_verify"] = t["resolve"] == "yes"
+    if t["mode"] == "off":
+        return {**cfg, "on": False, "target": "off"}
+    if t["mode"] == "own":
+        own = t.get("own") or {}
+        system = own.get("system") if own.get("system") in ticketing.SYSTEMS else "servicenow"
+        return {**cfg, "system": system, "on": bool(own.get("on")), "settings": {system: (own.get("settings") or {}).get(system) or {}},
+                "target": "site", "site": site_id}
+    sys_ = cfg["system"]
+    cfg["settings"] = {**cfg["settings"], sys_: {**(cfg["settings"].get(sys_) or {}), **{k: v for k, v in t["map"].items() if v}}}
+    return {**cfg, "target": "msp"}
+
+
+def ticket_secret(cfg):
+    if cfg.get("target") == "site":
+        x = vault.get("site_ticket_secrets", {}).get(cfg["site"]) or {}
+        return x.get("secret") if x.get("system") == cfg["system"] else None
+    return vault.get("ticketing_secrets", {}).get(cfg["system"])
+
+
+def _msp_ticket_cfg():
     raw = vault.get("ticketing", {})
     if raw and "settings" not in raw:                  # older versions stored the ServiceNow fields flat
         raw = {**{k: raw[k] for k in ("on", "auto", "threshold", "resolve_on_verify") if k in raw}, "system": "servicenow",
@@ -1645,8 +1708,8 @@ def ticket_cfg():
 def ticket_client(cfg=None):
     cfg = cfg or ticket_cfg()
     if not cfg.get("on"):
-        raise HTTPException(400, "Ticketing is off: set it up in Settings › Ticketing")
-    secret = vault.get("ticketing_secrets", {}).get(cfg["system"])
+        raise HTTPException(400, "Ticketing is off for this site: set it up in Settings › Ticketing or in the site's settings")
+    secret = ticket_secret(cfg)
     if not secret:
         raise HTTPException(400, f"The {ticketing.SYSTEMS[cfg['system']]['label']} secret isn't saved yet")
     try:
@@ -1662,11 +1725,12 @@ def _ticket_finding(run_id, row, g):
 
 def sync_tickets(run_id, auto=False):
     """Open tickets for new high-priority findings (auto), and read ticket states back into the Fix plan."""
-    cfg = ticket_cfg()
-    if not cfg.get("on") or not vault.get("ticketing_secrets", {}).get(cfg["system"]):
+    d = run_dir(run_id)
+    cfg = ticket_cfg(run_site(d))
+    if not cfg.get("on") or not ticket_secret(cfg):
         return {"created": 0, "updated": 0}
     sn = ticket_client(cfg)
-    d = run_dir(run_id)
+    target = cfg.get("target", "msp")
     g = _read_graph(d)
     data = _tracking(d)
     limit = notify.THRESHOLDS.get(cfg.get("threshold", "p2"), 2)
@@ -1677,11 +1741,11 @@ def sync_tickets(run_id, auto=False):
         if not tk and auto and cfg.get("auto") and row["priority"] <= limit and row["status"] in ("open", "in_progress"):
             fnd = _ticket_finding(run_id, row, g)
             tk = sn.find(fnd["key"]) or sn.create(fnd, run_id, site()[1])
-            tk["key"] = fnd["key"]
+            tk["key"], tk["target"] = fnd["key"], target
             data[row["id"]] = {**t, "ticket": tk}
             created += 1
             continue
-        if not tk or tk.get("system") != cfg["system"]:
+        if not tk or tk.get("system") != cfg["system"] or tk.get("target", "msp") != target:
             continue
         data[row["id"]] = t
         st = sn.state(tk.get("id") or tk.get("sys_id"))
@@ -1775,13 +1839,14 @@ def ticket_create(run_id: str, fid: str, request: Request):
     data = _tracking(d)
     if (data.get(fid) or {}).get("ticket"):
         raise HTTPException(409, "This finding already has a ticket")
-    sn = ticket_client()
+    cfg = ticket_cfg(run_site(d))
+    sn = ticket_client(cfg)
     fnd = _ticket_finding(run_id, row, g)
     try:
         tk = sn.find(fnd["key"]) or sn.create(fnd, run_id, site()[1])
     except ticketing.TicketError as e:
         raise HTTPException(502, str(e))
-    tk["key"] = fnd["key"]
+    tk["key"], tk["target"] = fnd["key"], cfg.get("target", "msp")
     data.setdefault(fid, {})["ticket"] = tk
     _save_tracking(d, data)
     vault.audit(user["email"], "ticket-created", f"{run_id} {fid} -> {tk.get('number')}")
@@ -1896,6 +1961,12 @@ def sites_delete(site_id: str, request: Request):
     if site_id == sitestore.LOCAL_SITE:
         raise HTTPException(400, "This network can't be removed")
     sites_db().delete_site(site_id)
+    for key in ("site_settings", "site_ticket_secrets"):
+        allv = vault.get(key, {})
+        if allv.pop(site_id, None) is not None:
+            vault.put(key, allv)
+    limits = vault.get("user_sites", {})
+    vault.put("user_sites", {u: [x for x in v if x != site_id] for u, v in limits.items()})
     vault.audit(user["email"], "site-deleted", f"{site_id} {st['name']} (its collector is revoked)")
     return {"ok": True}
 
@@ -1930,13 +2001,244 @@ def sites_revoke(site_id: str, request: Request):
     return {"revoked": n}
 
 
+# -- multi-site: settings, portfolio, access -------------------------------------------------------------------------
+SITE_TICKET_MODES = ("msp", "own", "off")
+# fields each system lets a site set for itself when it uses the MSP's own system (the customer, board, queue...)
+SITE_MAP_FIELDS = {"servicenow": ("assignment_group", "caller_id", "category"), "connectwise": ("company", "board"),
+                   "autotask": ("company_id", "queue_id"), "halopsa": ("customer_id", "tickettype_id"), "jira": ("project_key", "issuetype")}
+SITE_DEFAULT = {"scope": "", "ticketing": {"mode": "msp", "map": {}, "threshold": "", "resolve": ""}}
+
+
+def site_settings(site_id):
+    raw = vault.get("site_settings", {}).get(site_id) or {}
+    return {**SITE_DEFAULT, **raw, "ticketing": {**SITE_DEFAULT["ticketing"], **(raw.get("ticketing") or {})}}
+
+
+def save_site_settings(site_id, cfg):
+    allv = vault.get("site_settings", {})
+    allv[site_id] = cfg
+    vault.put("site_settings", allv)
+
+
+def visible_sites(user):
+    return [{"id": x["id"], "name": x["name"], "customer": x["customer"]} for x in sites_db().sites() if can_see(user, x["id"])]
+
+
+def site_ticket_label(site_id):
+    t, base = site_settings(site_id)["ticketing"], ticket_cfg()
+    if t["mode"] == "off":
+        return "Off"
+    if t["mode"] == "own":
+        own = t.get("own") or {}
+        return f"Customer's {ticketing.SYSTEMS.get(own.get('system'), {}).get('label', 'system')}" if own.get("on") else "Customer's (not set up)"
+    return f"Our {ticketing.SYSTEMS[base['system']]['label']}" if base.get("on") else "Off (ours not set up)"
+
+
+@app.get("/api/portfolio")
+def portfolio(request: Request):
+    """All sites the user may see, each with its latest assessment: score, open priority 1, overdue, collector, tickets."""
+    sid, s, user = require(request)
+    RUNS.mkdir(exist_ok=True)
+    latest = {}
+    for d in sorted((d for d in RUNS.iterdir() if d.is_dir() and RUN_ID.match(d.name)), reverse=True):
+        latest.setdefault(run_site(d), d)
+    out = []
+    for x in sites_db().sites():
+        if not can_see(user, x["id"]):
+            continue
+        row = {"id": x["id"], "name": x["name"], "customer": x["customer"], "run": None, "score": None, "grade": None,
+               "p1": 0, "overdue": 0, "open": 0, "collector": (x.get("collector") or {}).get("state") or ("local" if x["id"] == LOCAL else None),
+               "tickets": site_ticket_label(x["id"])}
+        d = latest.get(x["id"])
+        if d and (d / "graph.json").exists():
+            g = _read_graph(d)
+            rows = tracking_rows(d, g)
+            summ = g.get("summary") or {}
+            row.update(run=d.name, score=summ.get("score"), grade=summ.get("grade"),
+                       p1=sum(1 for r in rows if r["priority"] == 1 and r["status"] in ("open", "in_progress")),
+                       overdue=sum(1 for r in rows if r["overdue"]),
+                       open=sum(1 for r in rows if r["status"] in ("open", "in_progress")))
+        out.append(row)
+    return {"sites": out}
+
+
+@app.get("/api/sites/{site_id}/settings")
+def site_settings_get(site_id: str, request: Request):
+    require(request, "operator")
+    st = site_or_404(site_id)
+    cfg = site_settings(site_id)
+    own = cfg["ticketing"].get("own") or {}
+    secrets_ = vault.get("site_ticket_secrets", {})
+    base = ticket_cfg()
+    users = [{"id": u["id"], "email": u["email"], "role": u["role"]} for u in vault.users() if u["status"] == "active"]
+    limits = vault.get("user_sites", {})
+    return {"site": st, "local": site_id == LOCAL, "scope": cfg["scope"],
+            "ticketing": {"mode": cfg["ticketing"]["mode"], "map": cfg["ticketing"]["map"], "threshold": cfg["ticketing"]["threshold"],
+                          "resolve": cfg["ticketing"]["resolve"],
+                          "own": {**{k: v for k, v in own.items() if k != "settings"}, "settings": own.get("settings") or {},
+                                  "secret_set": bool(secrets_.get(site_id))}},
+            "msp": {"system": base["system"], "on": base["on"], "label": ticketing.SYSTEMS[base["system"]]["label"],
+                    "threshold": base["threshold"], "resolve": base["resolve_on_verify"]},
+            "map_fields": {k: [f for f in ticketing.SYSTEMS[k]["fields"] if f["name"] in v] for k, v in SITE_MAP_FIELDS.items()},
+            "systems": {k: {"label": v["label"], "fields": v["fields"]} for k, v in ticketing.SYSTEMS.items()},
+            "access": [{**u, "all": u["role"] == "admin" or limits.get(u["id"]) is None,
+                        "here": u["role"] == "admin" or limits.get(u["id"]) is None or site_id in limits.get(u["id"], [])} for u in users],
+            "label": site_ticket_label(site_id)}
+
+
+def _clean(v, label, limit=200):
+    v = str(v or "").strip()
+    if len(v) > limit or any(ord(c) < 32 for c in v):
+        raise HTTPException(400, f"{label} is too long")
+    return v
+
+
+class SiteEdit(BaseModel):
+    name: str
+    customer: str = ""
+    scope: str = ""
+
+
+@app.post("/api/sites/{site_id}")
+def site_edit(site_id: str, body: SiteEdit, request: Request):
+    sid, s, user = require(request, "admin")
+    site_or_404(site_id)
+    name, customer = body.name.strip(), body.customer.strip()
+    if not 1 <= len(name) <= 80 or len(customer) > 120 or any(ord(c) < 32 for c in name + customer):
+        raise HTTPException(400, "Give the site a name (up to 80 characters)")
+    scope = [x.strip() for x in re.split(r"[,\s]+", body.scope or "") if x.strip()]
+    if scope:
+        try:
+            scope = sitestore.scope_ok(scope)
+        except ValueError as e:
+            raise HTTPException(400, f"Scope: {e}. Use networks like 10.20.0.0/22, separated by commas")
+    sites_db().rename_site(site_id, name, customer)
+    cfg = site_settings(site_id)
+    cfg["scope"] = ", ".join(scope)
+    save_site_settings(site_id, cfg)
+    vault.audit(user["email"], "site-changed", f"{site_id} {name}")
+    return {"ok": True}
+
+
+class SiteTicketBody(BaseModel):
+    mode: str = "msp"
+    map: dict = {}
+    threshold: str = ""                 # "" = same as the default in Settings › Ticketing
+    resolve: str = ""                   # "", "yes", "no"
+    own_system: str = "servicenow"
+    own_on: bool = False
+    own_fields: dict = {}
+    own_secret: Optional[str] = None
+
+
+@app.post("/api/sites/{site_id}/ticketing")
+def site_ticketing_set(site_id: str, body: SiteTicketBody, request: Request):
+    sid, s, user = require(request, "admin")
+    st = site_or_404(site_id)
+    if body.mode not in SITE_TICKET_MODES or body.resolve not in ("", "yes", "no") or (body.threshold and body.threshold not in notify.THRESHOLDS):
+        raise HTTPException(400, "Unknown ticketing option")
+    if body.own_system not in ticketing.SYSTEMS:
+        raise HTTPException(400, "Unknown ticketing system")
+    cfg = site_settings(site_id)
+    t = cfg["ticketing"]
+    base = ticket_cfg()["system"]
+    t.update(mode=body.mode, threshold=body.threshold, resolve=body.resolve,
+             map={k: _clean(v, k) for k, v in (body.map or {}).items() if k in SITE_MAP_FIELDS[base]})
+    spec = {f["name"]: f for f in ticketing.SYSTEMS[body.own_system]["fields"] if not f["secret"]}
+    own = t.get("own") or {}
+    own_settings = own.get("settings") or {}
+    own_settings[body.own_system] = {k: _clean(v, spec[k]["label"]) for k, v in (body.own_fields or {}).items() if k in spec}
+    t["own"] = {"system": body.own_system, "on": body.own_on, "settings": own_settings}
+    secrets_ = vault.get("site_ticket_secrets", {})
+    if body.own_secret:
+        if (secrets_.get(site_id) or {}).get("system") not in (None, body.own_system):
+            secrets_.pop(site_id, None)
+        secrets_[site_id] = {"system": body.own_system, "secret": body.own_secret}
+        vault.put("site_ticket_secrets", secrets_)
+    if body.mode == "own" and body.own_on:
+        try:
+            ticketing.make(body.own_system, {"table": "incident", **own_settings[body.own_system]}, "x")
+        except ticketing.TicketError as e:
+            raise HTTPException(400, str(e))
+        if (secrets_.get(site_id) or {}).get("system") != body.own_system:
+            raise HTTPException(400, f"Enter the {next(f['label'] for f in ticketing.SYSTEMS[body.own_system]['fields'] if f['secret'])}")
+    save_site_settings(site_id, cfg)
+    vault.audit(user["email"], "site-ticketing-changed", f"{site_id} {st['name']}: {site_ticket_label(site_id)}")
+    return {"ok": True, "label": site_ticket_label(site_id)}
+
+
+@app.post("/api/sites/{site_id}/ticketing/test")
+def site_ticketing_test(site_id: str, request: Request):
+    require(request, "admin")
+    site_or_404(site_id)
+    try:
+        return {"ok": True, **ticket_client(ticket_cfg(site_id)).test()}
+    except ticketing.TicketError as e:
+        raise HTTPException(400, str(e))
+
+
+class SiteAccessBody(BaseModel):
+    users: dict = {}                    # user ID -> True (may see this site) / False
+
+
+@app.post("/api/sites/{site_id}/access")
+def site_access_set(site_id: str, body: SiteAccessBody, request: Request):
+    """Limit operators and viewers to sites. A user nobody has limited sees every site; admins always do."""
+    sid, s, user = require(request, "admin")
+    st = site_or_404(site_id)
+    limits = vault.get("user_sites", {})
+    every = [x["id"] for x in sites_db().sites()]
+    changed = []
+    for uid, here in (body.users or {}).items():
+        u = vault.user(uid)
+        if not u or u["role"] == "admin":
+            continue
+        cur = limits.get(uid)
+        sites_ = set(every if cur is None else cur)
+        sites_ = sites_ | {site_id} if here else sites_ - {site_id}
+        new = None if set(every) <= sites_ else sorted(sites_)
+        if new != cur:
+            limits[uid] = new
+            if new is None:
+                limits.pop(uid, None)
+            changed.append(f"{u['email']} {'+' if here else '-'}")
+    vault.put("user_sites", limits)
+    if changed:
+        vault.audit(user["email"], "site-access-changed", f"{site_id} {st['name']}: " + ", ".join(changed))
+    return {"ok": True}
+
+
+@app.post("/api/sites/{site_id}/runs")
+def site_new_run(site_id: str, request: Request):
+    """An empty assessment for a site, to import another scanner's results into (remote sites can't be scanned yet)."""
+    sid, s, user = require(request, "operator")
+    st = site_or_404(site_id)
+    RUNS.mkdir(exist_ok=True)
+    run_id = time.strftime("%Y%m%d-%H%M%S")
+    while (RUNS / run_id).exists():
+        time.sleep(1)
+        run_id = time.strftime("%Y%m%d-%H%M%S")
+    d = RUNS / run_id
+    d.mkdir(mode=0o750)
+    (d / SITE_FILE).write_text(site_id)
+    g = Graph(str(d))
+    g.data["site"] = {"name": f"{st['customer']} · {st['name']}".strip(" ·"), "id": site_id, "network": site_settings(site_id)["scope"]}
+    g.data["imported_only"] = True
+    g.save()
+    vault.audit(user["email"], "run-created", f"{run_id} for {site_id} {st['name']} (for imported results)")
+    return {"run": run_id}
+
+
 # -- console --------------------------------------------------------------------------------------------
 @app.get("/api/overview")
 def overview(request: Request):
-    require(request)
     RUNS.mkdir(exist_ok=True)
-    runs = [run_summary(d) for d in sorted(RUNS.iterdir(), reverse=True) if d.is_dir() and RUN_ID.match(d.name)]
-    return {"runs": runs, "config": public_config(), "job": job.status(since=job.seq)}
+    sid, s, user = require(request)
+    runs = [r for r in (run_summary(d) for d in sorted(RUNS.iterdir(), reverse=True) if d.is_dir() and RUN_ID.match(d.name))
+            if can_see(user, r["site"])]
+    st = job.status(since=job.seq)
+    return {"runs": runs, "config": public_config(), "job": st if can_see(user, LOCAL) else {**st, "run_id": None},
+            "sites": visible_sites(user)}
 
 
 @app.get("/api/runs/{run_id}/report")
@@ -1978,6 +2280,8 @@ def launch(mode, run_id, sid, user, inbox=None):
         raise HTTPException(409, "A run is already in progress")
     if mode not in MODES:
         raise HTTPException(400, "Unknown mode")
+    if run_id and run_site(run_dir(run_id)) != LOCAL:
+        raise HTTPException(400, "Only Guardian's own network can be scanned or analysed today; other sites hold imported results")
     if mode in ("resume", "report", "followup"):
         d = run_dir(run_id)
         if not (d / "graph.json").exists():
@@ -2014,7 +2318,7 @@ def connector_handoff():
         return None
     items = [{"id": c["id"], "type": c["type"], "name": c.get("name") or conn.CATALOG[c["type"]]["label"],
               "fields": store.fields_with_secrets(c), "pin": c.get("pin")}
-             for c in store.connectors() if c.get("type") in HANDOFF_TYPES]
+             for c in store.connectors() if c.get("type") in HANDOFF_TYPES and (c.get("site") or LOCAL) == LOCAL]
     if not items:
         return None
     key = next((r["private"] for r in vault.load_records("secret") if "private" in r), None) \
@@ -2059,8 +2363,9 @@ async def stop(request: Request):
 
 @app.get("/api/job")
 def job_status(request: Request, since: int = 0):
-    require(request)
-    return job.status(since=since)
+    sid, s, user = require(request)
+    st = job.status(since=since)
+    return st if can_see(user, LOCAL) else {**st, "lines": [], "run_id": None}
 
 
 class Settings(BaseModel):
@@ -2352,7 +2657,7 @@ def save_change(rec):
 def latest_analysed():
     if not RUNS.exists():
         return None, {}
-    for d in sorted((d for d in RUNS.iterdir() if RUN_ID.match(d.name)), reverse=True):
+    for d in sorted((d for d in RUNS.iterdir() if RUN_ID.match(d.name) and run_site(d) == LOCAL), reverse=True):
         g = _read_graph(d)
         if g.get("findings") or (g.get("wan") or {}).get("upnp_port_mappings"):
             return d.name, g
@@ -2780,15 +3085,18 @@ def code_dismiss(scan_id: str, n: int, body: Dismiss, request: Request):
 
 
 @app.get("/api/connectors")
-def connectors_overview(request: Request):
+def connectors_overview(request: Request, site: str = LOCAL):
     sid, s, user = require(request, "operator")
-    run_id, g = latest_scan()
+    if not can_see(user, site) or not sites_db().site(site):
+        raise HTTPException(404, "Unknown site")
+    run_id, g = latest_scan() if site == LOCAL else (None, None)
     store.update_inventory(run_id, g)
     unlocked = sid in vault.holders
     suggestions = conn.suggest(g, store) if unlocked else []
     covered = {h for x in suggestions for h in x["hosts"]} | {h for hs in store.configured_targets().values() for h in hs}
     return {"catalog": conn.CATALOG, "locked": not unlocked,
-            "connectors": [store.public(c) for c in store.connectors()] if unlocked else [],
+            "connectors": [store.public(c) | {"site": c.get("site") or LOCAL} for c in store.connectors()
+                           if (c.get("site") or LOCAL) == site] if unlocked else [], "site": site,
             "suggestions": suggestions, "dismissed": len(store.dismissed), "scan": run_id,
             "devices": len((g or {}).get("assets", {})),
             "uncovered": sum(1 for ip in (g or {}).get("assets", {}) if ip not in covered),
@@ -2806,6 +3114,7 @@ class ConnectorBody(BaseModel):
     type: str
     name: str = ""
     fields: dict = {}
+    site: str = LOCAL
 
 
 def merged_fields(body):
@@ -2846,7 +3155,9 @@ def connector_save(body: ConnectorBody, request: Request):
         raise HTTPException(400, f"{missing[0]} is required")
     level, message, details, pin = conn.test(body.type, fields, (existing or {}).get("pin"), STATE, vault)
     secret_names = {fd["name"] for fd in spec["fields"] if fd.get("secret")}
-    c = existing or {"id": conn.new_id(), "type": body.type, "created": time.time()}
+    if not sites_db().site(body.site):
+        raise HTTPException(400, "Unknown site")
+    c = existing or {"id": conn.new_id(), "type": body.type, "created": time.time(), "site": body.site}
     c.update(name=name, status=level, message=message, details=details, last_check=time.time(),
              fields={k: v for k, v in fields.items() if k not in secret_names},
              secrets={k: fields[k] for k in secret_names})
@@ -2911,6 +3222,7 @@ def users_list(request: Request):
     _, base, _ = site()
     return {"users": [{k: u[k] for k in ("id", "email", "name", "provider", "role", "status", "created", "last_login",
                                           "passkeys", "passkey_names", "vault")} | {"has_key": bool(vault.user(u["id"])["public_key"])}
+                      | {"sites": None if u["role"] == "admin" else vault.get("user_sites", {}).get(u["id"])}
                       for u in vault.users()],
             "invites": [{"id": i["token_hash"][:16], "email": i["email"], "role": i["role"], "created": i["created"],
                          "expires": i["expires"]} for i in vault.invites()],

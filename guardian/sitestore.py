@@ -156,6 +156,11 @@ class Store:
         return sid
 
     @locked
+    def rename_site(self, site_id, name, customer):
+        self.db.execute("UPDATE sites SET name=?, customer=? WHERE id=?", (name, customer, site_id))
+        self.event("site-renamed", site_id, detail=name)
+
+    @locked
     def delete_site(self, site_id):
         with self.tx():
             self.db.execute("UPDATE collectors SET status='revoked', code_hash=NULL WHERE site_id=?", (site_id,))
